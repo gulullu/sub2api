@@ -41,44 +41,44 @@ func TestOpenAIVisibleOutputClassification(t *testing.T) {
 	}
 }
 
-func TestOpenAIResponsesTTFTStartsAtVisibleOutput(t *testing.T) {
+func TestOpenAIResponsesTTFTStartsAtStructuralOutput(t *testing.T) {
 	for _, passthrough := range []bool{false, true} {
 		name := "native"
 		if passthrough {
 			name = "passthrough"
 		}
 		t.Run(name, func(t *testing.T) {
-			result := runSyntheticVisibleTTFTStream(t, passthrough, 120*time.Millisecond, 0,
+			result, elapsed := runSyntheticVisibleTTFTStream(t, passthrough, 500*time.Millisecond, 0,
 				`{"type":"response.output_text.delta","delta":"test output"}`)
 			require.NotNil(t, result.firstTokenMs)
-			require.GreaterOrEqual(t, *result.firstTokenMs, 100)
+			require.GreaterOrEqual(t, elapsed.Milliseconds()-int64(*result.firstTokenMs), int64(400))
 		})
 	}
 }
 
-func TestOpenAIResponsesTTFTStartsAtCompletedImage(t *testing.T) {
+func TestOpenAIResponsesStructuralTTFTPrecedesCompletedImage(t *testing.T) {
 	for _, passthrough := range []bool{false, true} {
 		name := "native"
 		if passthrough {
 			name = "passthrough"
 		}
 		t.Run(name, func(t *testing.T) {
-			result := runSyntheticVisibleTTFTStream(t, passthrough, 120*time.Millisecond, 0,
+			result, elapsed := runSyntheticVisibleTTFTStream(t, passthrough, 500*time.Millisecond, 0,
 				`{"type":"response.output_item.done","item":{"id":"item_test","type":"image_generation_call","result":"dGVzdA=="}}`)
 			require.NotNil(t, result.firstTokenMs)
-			require.GreaterOrEqual(t, *result.firstTokenMs, 100)
+			require.GreaterOrEqual(t, elapsed.Milliseconds()-int64(*result.firstTokenMs), int64(400))
 		})
 	}
 }
 
-func TestOpenAINativeProgressDisarmsTimeoutWithoutStartingTTFT(t *testing.T) {
-	result := runSyntheticVisibleTTFTStream(t, false, 1200*time.Millisecond, 1,
+func TestOpenAINativeProgressDisarmsTimeoutAndStartsStructuralTTFT(t *testing.T) {
+	result, elapsed := runSyntheticVisibleTTFTStream(t, false, 1200*time.Millisecond, 1,
 		`{"type":"response.output_text.delta","delta":"test output"}`)
 	require.NotNil(t, result.firstTokenMs)
-	require.GreaterOrEqual(t, *result.firstTokenMs, 1100)
+	require.GreaterOrEqual(t, elapsed.Milliseconds()-int64(*result.firstTokenMs), int64(1100))
 }
 
-func runSyntheticVisibleTTFTStream(t *testing.T, passthrough bool, visibleDelay time.Duration, timeoutSeconds int, visibleEvent string) *openaiStreamingResult {
+func runSyntheticVisibleTTFTStream(t *testing.T, passthrough bool, visibleDelay time.Duration, timeoutSeconds int, visibleEvent string) (*openaiStreamingResult, time.Duration) {
 	t.Helper()
 	gin.SetMode(gin.TestMode)
 	svc := &OpenAIGatewayService{cfg: &config.Config{Gateway: config.GatewayConfig{
@@ -124,5 +124,5 @@ func runSyntheticVisibleTTFTStream(t *testing.T, passthrough bool, visibleDelay 
 	case <-time.After(time.Second):
 		t.Fatal("synthetic upstream writer did not exit")
 	}
-	return result
+	return result, time.Since(started)
 }
