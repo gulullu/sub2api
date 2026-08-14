@@ -221,6 +221,98 @@ func requirePassthroughUpstreamWrite(t *testing.T, upstream *stagedPassthroughCo
 	}
 }
 
+func TestPassthroughLifecycle_ResponsesLiteSparkMappedModelPersistsWhenFollowupOmitsModel(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+
+	cfg := passthroughLifecycleConfig()
+	cfg.Gateway.OpenAIWS.OAuthEnabled = true
+	upstream := newStagedPassthroughConn()
+	svc := newPassthroughLifecycleService(cfg, upstream)
+	account := &Account{
+		ID:          902,
+		Name:        "passthrough-spark-lite",
+		Platform:    PlatformOpenAI,
+		Type:        AccountTypeOAuth,
+		Status:      StatusActive,
+		Schedulable: true,
+		Concurrency: 1,
+		Credentials: map[string]any{
+			"access_token": "sk-test",
+			"model_mapping": map[string]any{
+				"client-spark": "gpt-5.3-codex-spark",
+			},
+		},
+		Extra: map[string]any{
+			"openai_oauth_responses_websockets_v2_mode": OpenAIWSIngressModePassthrough,
+		},
+	}
+
+	controlCtx, cancelControl := context.WithCancel(context.Background())
+	defer cancelControl()
+	server, serverErr := startPassthroughLifecycleServer(t, controlCtx, svc, account)
+	defer server.Close()
+
+	dialCtx, cancelDial := context.WithTimeout(context.Background(), 3*time.Second)
+	clientConn, _, err := coderws.Dial(dialCtx, "ws"+strings.TrimPrefix(server.URL, "http"), nil)
+	cancelDial()
+	require.NoError(t, err)
+	defer func() { _ = clientConn.CloseNow() }()
+
+	writeMessage := func(payload string) {
+		t.Helper()
+		writeCtx, cancelWrite := context.WithTimeout(context.Background(), 3*time.Second)
+		defer cancelWrite()
+		require.NoError(t, clientConn.Write(writeCtx, coderws.MessageText, []byte(payload)))
+	}
+	readMessage := func() []byte {
+		t.Helper()
+		payload, readErr := readPassthroughLifecycleFrame(t, clientConn, 3*time.Second)
+		require.NoError(t, readErr)
+		return payload
+	}
+
+	writeMessage(`{
+		"type":"response.create",
+		"model":"client-spark",
+		"stream":false,
+		"reasoning":{"effort":"high","context":"all_turns"},
+		"client_metadata":{"ws_request_header_x_openai_internal_codex_responses_lite":"true"}
+	}`)
+	firstWrite := requirePassthroughUpstreamWrite(t, upstream, time.Second)
+	require.Equal(t, "gpt-5.3-codex-spark", gjson.GetBytes(firstWrite, "model").String())
+	require.Equal(t, "current_turn", gjson.GetBytes(firstWrite, "reasoning.context").String())
+	require.Equal(t, "high", gjson.GetBytes(firstWrite, "reasoning.effort").String())
+
+	upstream.Send(`{"type":"response.completed","response":{"id":"resp_passthrough_spark_lite_1","model":"gpt-5.3-codex-spark","usage":{"input_tokens":1,"output_tokens":1}}}`)
+	require.Equal(t, "resp_passthrough_spark_lite_1", gjson.GetBytes(readMessage(), "response.id").String())
+
+	writeMessage(`{
+		"type":"response.create",
+		"stream":false,
+		"previous_response_id":"resp_passthrough_spark_lite_1",
+		"reasoning":{"effort":"high","context":"all_turns"},
+		"client_metadata":{"ws_request_header_x_openai_internal_codex_responses_lite":"true"}
+	}`)
+	secondWrite := requirePassthroughUpstreamWrite(t, upstream, time.Second)
+	require.Equal(t, "gpt-5.3-codex-spark", gjson.GetBytes(secondWrite, "model").String())
+	require.Equal(t, "current_turn", gjson.GetBytes(secondWrite, "reasoning.context").String())
+	require.Equal(t, "high", gjson.GetBytes(secondWrite, "reasoning.effort").String())
+	require.Equal(t, "resp_passthrough_spark_lite_1", gjson.GetBytes(secondWrite, "previous_response_id").String())
+
+	upstream.Send(`{"type":"response.completed","response":{"id":"resp_passthrough_spark_lite_2","model":"gpt-5.3-codex-spark","usage":{"input_tokens":1,"output_tokens":1}}}`)
+	require.Equal(t, "resp_passthrough_spark_lite_2", gjson.GetBytes(readMessage(), "response.id").String())
+	_ = clientConn.Close(coderws.StatusNormalClosure, "done")
+
+	select {
+	case err := <-serverErr:
+		if err != nil {
+			require.Contains(t, err.Error(), "StatusNormalClosure")
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatal("waiting for Spark passthrough websocket shutdown timed out")
+	}
+}
+
 func TestOpenAIWSPassthroughTurnLifecycle_SerializesTerminalCommitAndNextTurn(t *testing.T) {
 	clientFrameConn := &openAIWSClientFrameConn{interTurnStarted: make(chan struct{}, 1)}
 	clientFrameConn.markTurnCompleted()

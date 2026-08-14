@@ -549,6 +549,15 @@ func (s *OpenAIGatewayService) Forward(ctx context.Context, c *gin.Context, acco
 			requestView = newOpenAIRequestView(body)
 		}
 	}
+	normalizedSparkBody, sparkContextChanged, sparkContextErr := normalizeCodexSparkReasoningContextForUpstream(body, upstreamModel)
+	if sparkContextErr != nil {
+		return nil, sparkContextErr
+	}
+	if sparkContextChanged {
+		body = normalizedSparkBody
+		requestView = newOpenAIRequestView(body)
+		reqBody = nil
+	}
 	imageBillingModel := ""
 	imageSizeTier := ""
 	imageInputSize := ""

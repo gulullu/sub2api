@@ -122,6 +122,13 @@ func (s *OpenAIGatewayService) forwardOpenAIPassthrough(
 	if policyModel == "" {
 		policyModel = reqModel
 	}
+	normalizedSparkBody, sparkContextChanged, sparkContextErr := normalizeCodexSparkReasoningContextForUpstream(body, policyModel)
+	if sparkContextErr != nil {
+		return nil, sparkContextErr
+	}
+	if sparkContextChanged {
+		body = normalizedSparkBody
+	}
 	updatedBody, policyErr := s.applyOpenAIFastPolicyToBody(ctx, account, policyModel, body)
 	if policyErr != nil {
 		var blocked *OpenAIFastBlockedError
