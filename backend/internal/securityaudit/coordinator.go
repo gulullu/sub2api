@@ -119,7 +119,11 @@ func prioritize(legacy *LegacyDecision, prompt *PromptDecision) Decision {
 		if message == "" {
 			message = DefaultBlockMessage
 		}
-		return Decision{Kind: DecisionBlock, HTTPStatus: status, ErrorCode: ErrorCodeBlocked,
+		code := prompt.ErrorCode
+		if code == "" {
+			code = ErrorCodeBlocked
+		}
+		return Decision{Kind: DecisionBlock, HTTPStatus: status, ErrorCode: code,
 			ClientMessage: message, Legacy: legacy, Prompt: prompt}
 	case DecisionInvalid:
 		return Decision{Kind: DecisionInvalid, HTTPStatus: http.StatusServiceUnavailable, ErrorCode: ErrorCodeInvalidResponse,

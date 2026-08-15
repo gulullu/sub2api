@@ -15,12 +15,14 @@ const (
 	ErrorCodeBlocked               = "prompt_guard_blocked"
 	ErrorCodeUnavailable           = "prompt_guard_unavailable"
 	ErrorCodeInvalidResponse       = "prompt_guard_invalid_response"
+	ErrorCodeInputTooLarge         = "prompt_guard_input_too_large"
 	ErrorCodeConfigConflict        = "prompt_audit_config_conflict"
 	ErrorCodeConfigUnavailable     = "prompt_audit_config_unavailable"
 	ErrorCodeEncryptionKeyRequired = "prompt_audit_encryption_key_required"
 	ErrorCodeRequiresEnabled       = "prompt_guard_requires_audit_enabled"
 
-	DefaultGuardModel = "sileader/qwen3guard:0.6b"
+	DefaultGuardModel      = "sileader/qwen3guard:0.6b"
+	inputTooLargeScannerID = "input_too_large"
 )
 
 type Mode string

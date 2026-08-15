@@ -65,7 +65,7 @@ describe('PromptAuditView', () => {
     mocks.getConfig.mockResolvedValue(baseConfig())
     mocks.getRuntime.mockResolvedValue(runtime())
     mocks.listGroups.mockResolvedValue([])
-    mocks.listRiskRouteAccounts.mockResolvedValue([{ id: 17, name: 'Risk Pool', platform: 'openai', type: 'oauth', status: 'active' }])
+    mocks.listRiskRouteAccounts.mockResolvedValue([{ id: 17, name: 'Risk Pool', platform: 'openai', type: 'oauth', status: 'active', groups: [{ id: 1, name: 'OpenAI' }] }])
     mocks.listEvents.mockResolvedValue({ items: [], total: 0, page: 1, page_size: 20, pages: 0 })
     mocks.updateConfig.mockImplementation(async () => ({ ...baseConfig(), config_version: 8 }))
     mocks.probeEndpoint.mockResolvedValue({ ok: true, status: 'healthy', message: 'ok', latency_ms: 2, http_status: 200, retryable: false, checked_at: '2026-07-16T00:00:00Z', token_applied: true })

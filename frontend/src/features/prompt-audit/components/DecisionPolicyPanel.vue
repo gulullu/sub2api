@@ -32,6 +32,17 @@
             <p class="mt-1 font-mono text-xs">confidence ≥ {{ draft.block_threshold }}</p>
           </div>
         </div>
+
+        <div class="mt-4 rounded-lg border border-gray-200 bg-gray-50 p-3 dark:border-dark-700 dark:bg-dark-900/50">
+          <label class="block text-sm text-gray-700 dark:text-dark-200">
+            <span class="font-medium">{{ t('admin.promptAudit.decisionPolicy.maxTotalInputChars') }}</span>
+            <input :value="draft.max_total_input_chars" class="input mt-1.5 w-full" type="number" min="128" max="400000" step="1" data-test="max-total-input-chars" :aria-label="t('admin.promptAudit.decisionPolicy.maxTotalInputChars')" @change="setMaxTotalInputChars(($event.target as HTMLInputElement).value)" />
+          </label>
+          <p class="mt-2 text-xs leading-5 text-gray-500 dark:text-dark-400">{{ t('admin.promptAudit.decisionPolicy.maxTotalInputCharsHint') }}</p>
+          <p class="mt-1 text-xs font-medium leading-5" :class="!draft.enabled || !draft.blocking_enabled ? 'text-gray-600 dark:text-dark-300' : draft.risk_route_account_ids.length ? 'text-amber-700 dark:text-amber-300' : 'text-red-700 dark:text-red-300'">
+            {{ !draft.enabled ? t('admin.promptAudit.decisionPolicy.overLimitOff') : !draft.blocking_enabled ? t('admin.promptAudit.decisionPolicy.overLimitAsync') : draft.risk_route_account_ids.length ? t('admin.promptAudit.decisionPolicy.overLimitRoute') : t('admin.promptAudit.decisionPolicy.overLimitClosed') }}
+          </p>
+        </div>
       </div>
 
       <div class="space-y-4 rounded-xl border border-gray-200 p-4 dark:border-dark-700/60 dark:bg-dark-900/20 sm:p-5">
@@ -77,5 +88,8 @@ function setHTTPStatus(raw: string) {
 }
 function setBlockMessage(value: string) {
   patch({ block_message: value.slice(0, 1000) })
+}
+function setMaxTotalInputChars(raw: string) {
+  patch({ max_total_input_chars: Math.round(numberInRange(raw, 128, 400000, props.draft.max_total_input_chars)) })
 }
 </script>

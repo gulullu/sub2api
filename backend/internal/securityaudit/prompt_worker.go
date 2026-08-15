@@ -26,6 +26,7 @@ type Runner struct {
 	scanner PromptScanner
 	metrics Metrics
 	clock   Clock
+	cache   *promptDecisionCache
 	runtime WorkerRuntime
 
 	mu     sync.Mutex
@@ -34,7 +35,10 @@ type Runner struct {
 }
 
 func NewRunner(config ConfigStore, repo JobRepository, payload PayloadStore, scanner PromptScanner, metrics Metrics) *Runner {
-	return &Runner{config: config, repo: repo, payload: payload, scanner: scanner, metrics: metrics, clock: realClock{}}
+	return &Runner{
+		config: config, repo: repo, payload: payload, scanner: scanner, metrics: metrics, clock: realClock{},
+		cache: newPromptDecisionCache(defaultPromptDecisionCacheSize, defaultPromptDecisionCacheTTL),
+	}
 }
 
 func (r *Runner) Start(ctx context.Context) error {
@@ -143,13 +147,25 @@ func (r *Runner) processJob(ctx context.Context, workerID int, cfg ActiveConfig,
 	// The job row only carries redacted metadata; the full prompt for the audit
 	// event is reconstructed here from the transient scan payload.
 	job.Snapshot.FullPrompt = FullPromptFromScanText(scanText)
+	started := r.clock.Now()
+	if job.Snapshot.PromptLength > maxTotalInputChars(cfg) {
+		aggregated := inputTooLargeResult(false, r.clock.Now().Sub(started))
+		return r.completeJobResult(ctx, workerID, cfg, job, aggregated, started, false, map[string]any{
+			"input_chars": job.Snapshot.PromptLength, "max_total_input_chars": maxTotalInputChars(cfg),
+			"error_code": ErrorCodeInputTooLarge,
+		})
+	}
 	endpoints := cfg.EnabledEndpoints()
 	if len(endpoints) == 0 {
 		return r.finishFailure(ctx, job, &GuardError{Code: "no_enabled_endpoint", Retryable: true})
 	}
+	cacheKey := promptDecisionCacheKey(cfg, scanText)
+	if cached, ok := r.cache.get(cacheKey, r.clock.Now()); ok {
+		cached.LatencyMS = int(r.clock.Now().Sub(started).Milliseconds())
+		return r.completeJobResult(ctx, workerID, cfg, job, cached, started, true, nil)
+	}
 	chunks := SplitRunes(scanText, minimumInputLimit(endpoints))
 	results := make([]*NormalizedResult, 0, len(chunks))
-	started := r.clock.Now()
 	for index, chunk := range chunks {
 		if err := r.repo.RefreshLease(ctx, job.ID, job.ClaimVersion, r.clock.Now()); err != nil {
 			return err
@@ -181,14 +197,29 @@ func (r *Runner) processJob(ctx context.Context, workerID int, cfg ActiveConfig,
 		return r.finishFailure(ctx, job, &GuardError{Code: ErrorCodeInvalidResponse, Cause: err})
 	}
 	aggregated.ChunkTotal = len(chunks)
+	r.cache.put(cacheKey, aggregated, r.clock.Now())
+	return r.completeJobResult(ctx, workerID, cfg, job, aggregated, started, false, nil)
+}
+
+func (r *Runner) completeJobResult(ctx context.Context, workerID int, cfg ActiveConfig, job *Job, aggregated *NormalizedResult, started time.Time, cacheHit bool, extraFields map[string]any) error {
+	baseFields := jobLogFields(job)
 	if r.metrics != nil {
 		r.metrics.Observe(decisionKindForResult(aggregated), r.clock.Now().Sub(started))
 	}
-	LogInfo(EventChunksAggregated, mergeLogFields(baseFields, map[string]any{
+	aggregateFields := map[string]any{
 		"worker_id": workerID, "decision": aggregated.Decision, "risk_level": aggregated.RiskLevel,
 		"action": aggregated.Action, "chunk_total": aggregated.ChunkTotal,
-		"latency_ms": aggregated.LatencyMS, "guard_endpoint_id": aggregated.GuardEndpointID, "status": "completed",
-	}))
+		"latency_ms": aggregated.LatencyMS, "guard_endpoint_id": aggregated.GuardEndpointID,
+		"status": "completed", "cache_hit": cacheHit,
+	}
+	for key, value := range extraFields {
+		aggregateFields[key] = value
+	}
+	if aggregateFields["error_code"] != nil {
+		LogWarn(EventChunksAggregated, mergeLogFields(baseFields, aggregateFields))
+	} else {
+		LogInfo(EventChunksAggregated, mergeLogFields(baseFields, aggregateFields))
+	}
 	event, err := r.repo.Complete(ctx, job, aggregated, cfg.StorePassEvents)
 	if err != nil {
 		return err
@@ -196,7 +227,11 @@ func (r *Runner) processJob(ctx context.Context, workerID int, cfg ActiveConfig,
 	if deleteErr := r.payload.Delete(ctx, job.ID); deleteErr != nil {
 		LogWarn(EventProcessFailed, mergeLogFields(baseFields, map[string]any{"worker_id": workerID, "status": "payload_delete_deferred", "error_code": "payload_delete_failed"}))
 	}
-	LogInfo(EventProcessed, mergeLogFields(baseFields, map[string]any{"worker_id": workerID, "event_id": eventID(event), "decision": aggregated.Decision, "risk_level": aggregated.RiskLevel, "action": aggregated.Action, "guard_endpoint_id": aggregated.GuardEndpointID, "latency_ms": aggregated.LatencyMS, "status": "done"}))
+	processedFields := map[string]any{"worker_id": workerID, "event_id": eventID(event), "decision": aggregated.Decision, "risk_level": aggregated.RiskLevel, "action": aggregated.Action, "guard_endpoint_id": aggregated.GuardEndpointID, "latency_ms": aggregated.LatencyMS, "status": "done", "cache_hit": cacheHit}
+	if errorCode, ok := extraFields["error_code"]; ok {
+		processedFields["error_code"] = errorCode
+	}
+	LogInfo(EventProcessed, mergeLogFields(baseFields, processedFields))
 	if event != nil && aggregated.Decision != EventPass {
 		LogWarn(EventFindingRecorded, mergeLogFields(baseFields, map[string]any{"worker_id": workerID, "event_id": event.ID, "decision": aggregated.Decision, "risk_level": aggregated.RiskLevel, "action": aggregated.Action, "guard_endpoint_id": aggregated.GuardEndpointID, "status": "recorded"}))
 	}

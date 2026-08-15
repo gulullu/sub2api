@@ -16,6 +16,10 @@ export interface PromptAuditAccount {
   platform: string
   type: string
   status: string
+  groups: Array<{
+    id: number
+    name: string
+  }>
 }
 
 export interface PromptAuditEndpoint {
@@ -59,6 +63,7 @@ export interface PromptAuditConfig {
   block_threshold?: number
   block_http_status?: number
   block_message?: string
+  max_total_input_chars?: number
   endpoints: PromptAuditEndpoint[]
   config_version: number
   updated_at: string
@@ -75,6 +80,7 @@ export interface PromptAuditDraft extends Omit<
   | 'block_threshold'
   | 'block_http_status'
   | 'block_message'
+  | 'max_total_input_chars'
   | 'risk_route_account_ids'
 > {
   endpoints: PromptAuditEndpointDraft[]
@@ -84,6 +90,7 @@ export interface PromptAuditDraft extends Omit<
   block_threshold: number
   block_http_status: number
   block_message: string
+  max_total_input_chars: number
   risk_route_account_ids: number[]
 }
 
@@ -106,6 +113,7 @@ export interface PromptAuditUpdateRequest {
   block_threshold: number
   block_http_status: number
   block_message: string
+  max_total_input_chars: number
   endpoints: Array<{
     id: string
     name: string

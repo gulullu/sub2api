@@ -232,6 +232,18 @@ func TestBuildIssueSummariesIncludesConfidenceDecision(t *testing.T) {
 	require.Equal(t, "suspicious automation", summaries[0].Evidence)
 }
 
+func TestBuildIssueSummariesIncludesLocalInputTooLargeDecision(t *testing.T) {
+	result := inputTooLargeResult(false, 0)
+	summaries := BuildIssueSummaries(*result)
+	require.Len(t, summaries, 1)
+	require.Equal(t, inputTooLargeScannerID, summaries[0].ScannerID)
+	require.Equal(t, "prompt_audit_input_too_large", summaries[0].Code)
+	require.Equal(t, 1.0, summaries[0].Score)
+	require.NotEmpty(t, summaries[0].EvidenceHash)
+	_, selectableRemoteScanner := ScannerCatalog[inputTooLargeScannerID]
+	require.False(t, selectableRemoteScanner)
+}
+
 func TestBuildIssueSummariesDoesNotMislabelSafeConfidenceWhenAnotherAdapterBlocks(t *testing.T) {
 	result := NormalizedResult{
 		Decision: EventCritical, RiskLevel: RiskCritical, Action: ActionBlock,

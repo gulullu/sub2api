@@ -42,6 +42,7 @@ func TestDefaultConfigIsOff(t *testing.T) {
 	require.Equal(t, DefaultBlockThreshold, thresholdValue(storage.BlockThreshold, -1))
 	require.Equal(t, DefaultBlockHTTPStatus, storage.BlockHTTPStatus)
 	require.Equal(t, DefaultBlockMessage, storage.BlockMessage)
+	require.Equal(t, DefaultMaxTotalInputChars, storage.MaxTotalInputChars)
 	require.Equal(t, []PromptTemplate{DefaultPromptTemplate()}, storage.PromptTemplates)
 	publicJSON, err := json.Marshal(PublicFromStorage(storage, true, nil))
 	require.NoError(t, err)
@@ -83,6 +84,22 @@ func TestOldUpdatePreservesNewPromptPolicyFields(t *testing.T) {
 	require.Equal(t, 422, next.BlockHTTPStatus)
 	require.Equal(t, "custom block", next.BlockMessage)
 	require.Equal(t, []int64{9}, next.RiskRouteAccountIDs)
+	require.Equal(t, DefaultMaxTotalInputChars, next.MaxTotalInputChars)
+}
+
+func TestPromptAuditMaxTotalInputCharsConfigRoundTrip(t *testing.T) {
+	manager := &ConfigManager{encryptor: prefixEncryptor{}, encryptionKeyConfigured: true}
+	limit := 12345
+	req := promptAuditUpdateRequest(1, 1, "")
+	req.MaxTotalInputChars = &limit
+
+	next, err := manager.buildNextStorage(DefaultStorageConfig(), req, 5)
+	require.NoError(t, err)
+	require.Equal(t, limit, next.MaxTotalInputChars)
+	active, err := ActiveFromStorage(next, true, prefixEncryptor{})
+	require.NoError(t, err)
+	require.Equal(t, limit, active.MaxTotalInputChars)
+	require.Equal(t, limit, PublicFromStorage(next, true, nil).MaxTotalInputChars)
 }
 
 func TestPromptAuditRiskRouteConfigRoundTrip(t *testing.T) {
@@ -496,6 +513,8 @@ func TestUpdateConfigStrictBoundsAndKnownValues(t *testing.T) {
 		{name: "group required", mutate: func(req *UpdateConfigRequest) { req.AllGroups = false; req.GroupIDs = nil }, reason: "prompt_audit_groups_required"},
 		{name: "group positive", mutate: func(req *UpdateConfigRequest) { req.AllGroups = false; req.GroupIDs = []int64{0} }, reason: "prompt_audit_invalid_group"},
 		{name: "route account positive", mutate: func(req *UpdateConfigRequest) { values := []int64{0}; req.RiskRouteAccountIDs = &values }, reason: "prompt_audit_invalid_risk_route_account"},
+		{name: "total input low", mutate: func(req *UpdateConfigRequest) { value := MinMaxTotalInputChars - 1; req.MaxTotalInputChars = &value }, reason: "prompt_audit_invalid_max_total_input_chars"},
+		{name: "total input high", mutate: func(req *UpdateConfigRequest) { value := MaxMaxTotalInputChars + 1; req.MaxTotalInputChars = &value }, reason: "prompt_audit_invalid_max_total_input_chars"},
 		{name: "timeout low", mutate: func(req *UpdateConfigRequest) { req.Endpoints[0].TimeoutMS = MinTimeoutMS - 1 }, reason: "prompt_audit_invalid_timeout"},
 		{name: "timeout high", mutate: func(req *UpdateConfigRequest) { req.Endpoints[0].TimeoutMS = MaxTimeoutMS + 1 }, reason: "prompt_audit_invalid_timeout"},
 		{name: "input low", mutate: func(req *UpdateConfigRequest) { req.Endpoints[0].InputLimit = MinInputLimit - 1 }, reason: "prompt_audit_invalid_input_limit"},

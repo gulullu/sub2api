@@ -12,6 +12,21 @@ func BuildIssueSummaries(result NormalizedResult) []IssueSummary {
 	}
 	summaries := make([]IssueSummary, 0, len(resultCategories)+len(result.UnknownCategories))
 	for _, category := range resultCategories {
+		if category == inputTooLargeScannerID {
+			evidence := RedactPreview(result.ScannerEvidence[category], 160)
+			if evidence == "" {
+				evidence = "prompt exceeds total audit limit"
+			}
+			digest := sha256.Sum256([]byte(evidence))
+			summaries = append(summaries, IssueSummary{
+				Category: category, ScannerID: category, Title: "审计输入超过总量上限",
+				Description: "请求未交给远程审核模型；同步模式会按配置分流或拒绝，异步模式仅记录", Severity: string(result.RiskLevel),
+				SeverityLabel: riskLabelZH(result.RiskLevel), Action: string(result.Action),
+				ActionLabel: actionLabelZH(result.Action), Code: "prompt_audit_input_too_large",
+				Score: result.ScannerScores[category], Evidence: evidence, EvidenceHash: hex.EncodeToString(digest[:]),
+			})
+			continue
+		}
 		definition, ok := ScannerCatalog[category]
 		if !ok {
 			continue

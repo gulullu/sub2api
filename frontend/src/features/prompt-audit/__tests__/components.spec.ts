@@ -75,6 +75,7 @@ describe('Prompt Audit components', () => {
       risk_route_account_ids: [],
       prompt_templates: [{ id: 'builtin', name: 'Built-in', system_prompt: 'Review input', builtin: true }], active_prompt_template_id: 'builtin',
       flag_threshold: 0.4, block_threshold: 0.7, block_http_status: 403, block_message: DEFAULT_BLOCK_MESSAGE,
+      max_total_input_chars: 40000,
       endpoints: [endpoint()], config_version: 1, updated_at: '', updated_by: 0, change_summary: '',
     }
     const wrapper = mount(PolicyPanel, {
@@ -154,6 +155,26 @@ describe('Prompt Audit components', () => {
     expect((wrapper.emitted('update:draft')?.at(-1)?.[0] as PromptAuditDraft).block_http_status).toBe(499)
   })
 
+  it('bounds the total request audit cap and explains fail-closed versus hard routing', async () => {
+    const draft = configToDraft({
+      enabled: true, blocking_enabled: true, blocking_latest_turn_only: false, store_pass_events: false, effective_mode: 'blocking', strategy: 'priority',
+      worker_count: 4, queue_capacity: 100, scanners: ['jailbreak'], all_groups: true, group_ids: [], endpoints: [],
+      config_version: 1, updated_at: '', updated_by: 0, change_summary: '',
+    })
+    const wrapper = mount(DecisionPolicyPanel, { props: { draft } })
+    expect(wrapper.text()).toContain('admin.promptAudit.decisionPolicy.overLimitClosed')
+    await wrapper.get('[data-test="max-total-input-chars"]').setValue('500000')
+    await wrapper.get('[data-test="max-total-input-chars"]').trigger('change')
+    expect((wrapper.emitted('update:draft')?.at(-1)?.[0] as PromptAuditDraft).max_total_input_chars).toBe(400000)
+
+    await wrapper.setProps({ draft: { ...draft, risk_route_account_ids: [17] } })
+    expect(wrapper.text()).toContain('admin.promptAudit.decisionPolicy.overLimitRoute')
+    await wrapper.setProps({ draft: { ...draft, blocking_enabled: false, risk_route_account_ids: [17] } })
+    expect(wrapper.text()).toContain('admin.promptAudit.decisionPolicy.overLimitAsync')
+    await wrapper.setProps({ draft: { ...draft, enabled: false, blocking_enabled: false, risk_route_account_ids: [17] } })
+    expect(wrapper.text()).toContain('admin.promptAudit.decisionPolicy.overLimitOff')
+  })
+
   it('configures a blocking-only hard account pool while retaining removable stale IDs', async () => {
     const draft = configToDraft({
       enabled: true, blocking_enabled: true, blocking_latest_turn_only: false, store_pass_events: false, effective_mode: 'blocking', strategy: 'priority',
@@ -161,13 +182,15 @@ describe('Prompt Audit components', () => {
       config_version: 1, updated_at: '', updated_by: 0, change_summary: '',
     })
     const accounts = [
-      { id: 1, name: 'OpenAI One', platform: 'openai', type: 'oauth', status: 'active' },
-      { id: 2, name: 'Claude Two', platform: 'anthropic', type: 'setup-token', status: 'active' },
+      { id: 1, name: 'OpenAI One', platform: 'openai', type: 'oauth', status: 'active', groups: [] },
+      { id: 2, name: 'Claude Two', platform: 'anthropic', type: 'setup-token', status: 'active', groups: [{ id: 7, name: 'Codex Plus' }, { id: 9, name: '' }] },
     ]
     const wrapper = mount(RiskRouteAccountSelector, {
       props: { draft, accounts, loaded: true, loading: false, error: '' },
     })
     expect(wrapper.get('[data-test="risk-route-selected-2"]').text()).toContain('Claude Two')
+    expect(wrapper.get('[data-test="risk-route-selected-2"]').text()).toContain('Codex Plus')
+    expect(wrapper.get('[data-test="risk-route-selected-2"]').text()).toContain('admin.promptAudit.riskRoute.unknownGroup')
     expect(wrapper.get('[data-test="risk-route-selected-99"]').text()).toContain('admin.promptAudit.riskRoute.invalidAccount')
     expect(wrapper.get('[data-test="risk-route-hard-warning"]').exists()).toBe(true)
 
@@ -186,6 +209,28 @@ describe('Prompt Audit components', () => {
     expect(wrapper.findAll('input[type="checkbox"]').every((input) => input.attributes('disabled') !== undefined)).toBe(true)
   })
 
+  it('searches risk-route accounts by group and labels ungrouped accounts explicitly', async () => {
+    const draft = configToDraft({
+      enabled: true, blocking_enabled: true, blocking_latest_turn_only: false, store_pass_events: false, effective_mode: 'blocking', strategy: 'priority',
+      worker_count: 4, queue_capacity: 100, scanners: ['jailbreak'], all_groups: true, group_ids: [], endpoints: [],
+      config_version: 1, updated_at: '', updated_by: 0, change_summary: '',
+    })
+    const wrapper = mount(RiskRouteAccountSelector, {
+      props: {
+        draft,
+        accounts: [
+          { id: 1, name: 'Risk One', platform: 'openai', type: 'oauth', status: 'active', groups: [{ id: 8, name: 'Dedicated Risk' }] },
+          { id: 2, name: 'Ungrouped', platform: 'openai', type: 'oauth', status: 'active', groups: [] },
+        ],
+        loaded: true, loading: false, error: '',
+      },
+    })
+    expect(wrapper.text()).toContain('admin.promptAudit.riskRoute.noGroup')
+    await wrapper.get('[aria-label="admin.promptAudit.riskRoute.search"]').setValue('Dedicated Risk')
+    expect(wrapper.text()).toContain('Risk One')
+    expect(wrapper.text()).not.toContain('Ungrouped')
+  })
+
   it('keeps identity fields separate, supports selection, and opens filter deletion from the toolbar', async () => {
     const event: PromptAuditEvent = {
       id: 1, job_id: 1, decision: 'critical', risk_level: 'critical', action: 'Block', categories: ['pii'], matched_scanners: ['pii'], scanner_scores: { pii: 1 }, scanner_evidence: { pii: 'redacted' }, scanner_backend: 'qwen3guard-openai', scanner_version: '1', guard_endpoint_id: 'guard-1', policy_id: 'priority', policy_version: 1, config_version: 1, chunk_total: 1, latency_ms: 10, issue_summaries: [], created_at: '2026-07-16T00:00:00Z',
@@ -198,6 +243,7 @@ describe('Prompt Audit components', () => {
     expect(wrapper.text()).toContain('alice')
     expect(wrapper.text()).toContain('alice@example.test')
     expect(wrapper.text()).toContain('alice-key')
+    expect(wrapper.get('[data-test="event-identity"]').classes()).toContain('min-w-0')
     expect(wrapper.text()).toContain('admin.promptAudit.decisions.critical · admin.promptAudit.riskLevels.critical')
     expect(wrapper.text()).toContain('admin.promptAudit.scanners.pii')
     expect(wrapper.get('[data-test="filter-delete"]').attributes()).not.toHaveProperty('disabled')
@@ -205,6 +251,24 @@ describe('Prompt Audit components', () => {
     expect(wrapper.emitted('preview-delete')).toHaveLength(1)
     await wrapper.get('[aria-label="admin.promptAudit.events.selectEvent"]').setValue(true)
     expect(wrapper.emitted('selection')?.at(-1)?.[0]).toEqual([1])
+  })
+
+  it('never exposes a key-shaped legacy API Key name in the event list', () => {
+    const secret = 'sk-abcdefghijklmnopqrstuvwx1234567890'
+    const event: PromptAuditEvent = {
+      id: 2, job_id: 2, decision: 'pass', risk_level: 'low', action: 'Allow', categories: [], matched_scanners: [], scanner_scores: {}, scanner_evidence: {}, scanner_backend: 'confidence-json', scanner_version: '1', guard_endpoint_id: 'guard-1', policy_id: 'priority', policy_version: 1, config_version: 1, chunk_total: 1, latency_ms: 10, issue_summaries: [], created_at: '2026-07-16T00:00:00Z',
+      snapshot: { request_id: 'req-2', user_id: 1, username: 'alice-with-an-intentionally-long-username', user_email: `${'very-long-address-'.repeat(8)}@example.test`, api_key_id: 2, api_key_name: secret, group_id: 3, group_name: 'Alpha', provider: 'openai', endpoint: '/v1/responses', protocol: 'openai_responses', model: 'gpt-test', prompt_hash: 'b'.repeat(64), redacted_preview: 'preview', full_prompt: 'prompt', prompt_length: 6, message_count: 1, stage: 'http' },
+    }
+    const wrapper = mount(EventWorkspace, {
+      props: { events: [event], total: 1, page: 1, pageSize: 20, filters: emptyEventFilters(), selectedIds: [], loading: false, error: '' },
+      global: { stubs: { Pagination: PaginationStub } },
+    })
+    expect(wrapper.html()).not.toContain(secret)
+    expect(wrapper.text()).toContain('sk-abc…7890')
+    expect(wrapper.get('table').classes()).toContain('min-w-[1368px]')
+    expect(wrapper.get('table').classes()).toContain('table-fixed')
+    expect(wrapper.get('[data-test="event-identity"]').findAll('.truncate')).toHaveLength(6)
+    expect(wrapper.get('table').element.parentElement?.classList.contains('overflow-x-auto')).toBe(true)
   })
 
   it('resolves delete range presets to an epoch start and a cutoff end', () => {
@@ -380,6 +444,43 @@ describe('Prompt Audit components', () => {
     expect(issue).not.toContain('模型置信度判定')
     expect(issue).not.toContain('通用审核模型按配置的置信度阈值标记了风险')
     expect(wrapper.get('[data-test="risk-guard-return"]').text()).toContain('admin.promptAudit.scanners.confidence_json')
+  })
+
+  it('localizes over-limit audit events in both the list and detail view', async () => {
+    const event: PromptAuditEvent = {
+      id: 4, job_id: 4, decision: 'flag', risk_level: 'high', action: 'Warn',
+      categories: ['input_too_large'], matched_scanners: ['input_too_large'], scanner_scores: { input_too_large: 1 },
+      scanner_evidence: { input_too_large: 'input_too_large' }, scanner_backend: 'local-policy', scanner_version: '1',
+      guard_endpoint_id: '', policy_id: 'relaybases-cyber-safety-v1', policy_version: 1, config_version: 2, chunk_total: 0, latency_ms: 0,
+      issue_summaries: [{
+        category: 'input_too_large', scanner_id: 'input_too_large', title: 'input_too_large', description: 'input_too_large',
+        severity: 'high', severity_label: 'high', action: 'Warn', action_label: 'Warn', code: 'prompt_audit_input_too_large', score: 1,
+        evidence: '', evidence_hash: '',
+      }],
+      created_at: '2026-07-16T00:00:00Z',
+      snapshot: {
+        request_id: 'req-too-large', user_id: 1, username: 'alice', user_email: 'alice@example.test', api_key_id: 2,
+        api_key_name: 'alice-key', group_id: 3, group_name: 'Alpha', provider: 'openai', endpoint: '/v1/responses',
+        protocol: 'openai_responses', model: 'gpt-test', prompt_hash: 'd'.repeat(64), redacted_preview: 'preview', full_prompt: 'full prompt',
+        prompt_length: 40001, message_count: 1, stage: 'http',
+      },
+    }
+    const list = mount(EventWorkspace, {
+      props: { events: [event], total: 1, page: 1, pageSize: 20, filters: emptyEventFilters(), selectedIds: [], loading: false, error: '' },
+      global: { stubs: { Pagination: PaginationStub } },
+    })
+    expect(list.text()).toContain('admin.promptAudit.scanners.input_too_large')
+
+    const detail = mount(EventDetailDialog, {
+      props: { show: true, event, loading: false },
+      global: { stubs: { BaseDialog: DialogStub } },
+    })
+    const riskTab = detail.findAll('[role="tab"]').find((tab) => tab.text().includes('admin.promptAudit.events.tabs.risks'))
+    await riskTab!.trigger('click')
+    const issue = detail.get('[data-test="risk-issue"]').text()
+    expect(issue).toContain('admin.promptAudit.scanners.input_too_large')
+    expect(issue).toContain('admin.promptAudit.scannerDescriptions.input_too_large')
+    expect(issue).not.toContain('prompt_audit_input_too_large')
   })
 
   it('falls back to the redacted preview for events stored before full prompts were kept', async () => {

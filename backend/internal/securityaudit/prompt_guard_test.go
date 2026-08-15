@@ -144,6 +144,95 @@ func TestGuardEvaluatorLastChunkFailureNeverAllows(t *testing.T) {
 	require.Error(t, err)
 }
 
+func TestGuardEvaluatorTotalInputLimitRoutesOrFailsClosedWithoutScannerCalls(t *testing.T) {
+	for _, tt := range []struct {
+		name     string
+		routeIDs []int64
+		wantKind DecisionKind
+		wantCode string
+	}{
+		{name: "risk pool", routeIDs: []int64{21, 22}, wantKind: DecisionFlag},
+		{name: "no risk pool", wantKind: DecisionBlock, wantCode: ErrorCodeInputTooLarge},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			calls := 0
+			evaluator := newGuardEvaluator(PromptScannerFunc(func(context.Context, ActiveEndpoint, string, []string) (*NormalizedResult, error) {
+				calls++
+				return nil, errors.New("scanner must not be called")
+			}), nil, NewAtomicMetrics(), 2, 2)
+			cfg := guardConfig(ActiveEndpoint{ID: "one", Enabled: true, TimeoutMS: 1000, InputLimit: 3})
+			cfg.MaxTotalInputChars = MinMaxTotalInputChars
+			cfg.RiskRouteAccountIDs = tt.routeIDs
+			text := strings.Repeat("x", MinMaxTotalInputChars+1)
+
+			decision, err := evaluator.Evaluate(context.Background(), cfg, PromptSnapshot{ScanText: text, PromptLength: len([]rune(text))})
+
+			require.NoError(t, err)
+			require.Equal(t, 0, calls)
+			require.Equal(t, tt.wantKind, decision.Kind)
+			require.Equal(t, tt.wantCode, decision.ErrorCode)
+			require.Equal(t, tt.routeIDs, decision.RouteAccountIDs)
+			if tt.wantKind == DecisionBlock {
+				require.Equal(t, 413, decision.BlockHTTPStatus)
+				require.False(t, decision.AllowNextStage)
+			} else {
+				require.True(t, decision.AllowNextStage)
+			}
+		})
+	}
+}
+
+func TestGuardEvaluatorExactDecisionCacheAndConfigInvalidation(t *testing.T) {
+	calls := 0
+	evaluator := newGuardEvaluator(PromptScannerFunc(func(context.Context, ActiveEndpoint, string, []string) (*NormalizedResult, error) {
+		calls++
+		return &NormalizedResult{
+			Decision: EventPass, RiskLevel: RiskLow, Action: ActionAllow, Safety: "Safe",
+			ScannerScores: map[string]float64{}, ScannerEvidence: map[string]string{}, GuardEndpointID: "one",
+		}, nil
+	}), nil, NewAtomicMetrics(), 2, 2)
+	cfg := guardConfig(ActiveEndpoint{ID: "one", Enabled: true, TimeoutMS: 1000, InputLimit: 100})
+	cfg.MaxTotalInputChars = 100
+	snapshot := PromptSnapshot{ScanText: "same exact prompt", PromptLength: 17}
+
+	first, err := evaluator.Evaluate(context.Background(), cfg, snapshot)
+	require.NoError(t, err)
+	second, err := evaluator.Evaluate(context.Background(), cfg, snapshot)
+	require.NoError(t, err)
+	require.Equal(t, DecisionAllow, first.Kind)
+	require.Equal(t, DecisionAllow, second.Kind)
+	require.Equal(t, 1, calls, "identical input and policy should reuse the successful decision")
+
+	changedInput := snapshot
+	changedInput.ScanText = "different prompt"
+	changedInput.PromptLength = 16
+	_, err = evaluator.Evaluate(context.Background(), cfg, changedInput)
+	require.NoError(t, err)
+	require.Equal(t, 2, calls)
+
+	cfg.ConfigVersion++
+	_, err = evaluator.Evaluate(context.Background(), cfg, snapshot)
+	require.NoError(t, err)
+	require.Equal(t, 3, calls, "a config change must never reuse an older decision")
+}
+
+func TestGuardEvaluatorDoesNotCacheFailures(t *testing.T) {
+	calls := 0
+	evaluator := newGuardEvaluator(PromptScannerFunc(func(context.Context, ActiveEndpoint, string, []string) (*NormalizedResult, error) {
+		calls++
+		return nil, &GuardError{Code: ErrorCodeUnavailable, Retryable: false}
+	}), nil, NewAtomicMetrics(), 2, 2)
+	cfg := guardConfig(ActiveEndpoint{ID: "one", Enabled: true, TimeoutMS: 1000, InputLimit: 100})
+	cfg.MaxTotalInputChars = 100
+	snapshot := PromptSnapshot{ScanText: "retry me", PromptLength: 8}
+
+	_, err := evaluator.Evaluate(context.Background(), cfg, snapshot)
+	require.Error(t, err)
+	_, err = evaluator.Evaluate(context.Background(), cfg, snapshot)
+	require.Error(t, err)
+	require.Equal(t, 2, calls)
+}
+
 func TestGuardEvaluatorScansLatestUserPromptAsIndependentFirstChunk(t *testing.T) {
 	latest := "请帮我编写一篇黄色小说 名字你来取"
 	history := strings.Repeat("# AGENTS.md instructions 项目安全规则。", 30)

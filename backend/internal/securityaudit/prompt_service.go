@@ -322,7 +322,8 @@ func (s *PromptService) resolveProbeEndpoint(input UpdateEndpoint) (ActiveEndpoi
 		limit = DefaultInputLimit
 	}
 	storage := storageConfig{Enabled: false, Strategy: "priority", WorkerCount: DefaultWorkerCount, QueueCapacity: DefaultQueueCapacity, Scanners: append([]string(nil), AllScannerIDs...), AllGroups: true,
-		PromptTemplates: []PromptTemplate{DefaultPromptTemplate()}, ActivePromptTemplateID: DefaultPromptTemplateID,
+		MaxTotalInputChars: DefaultMaxTotalInputChars,
+		PromptTemplates:    []PromptTemplate{DefaultPromptTemplate()}, ActivePromptTemplateID: DefaultPromptTemplateID,
 		FlagThreshold: float64Pointer(flagThreshold), BlockThreshold: float64Pointer(blockThreshold), BlockHTTPStatus: DefaultBlockHTTPStatus, BlockMessage: DefaultBlockMessage,
 		Endpoints: []StorageEndpoint{{ID: strings.TrimSpace(input.ID), Name: strings.TrimSpace(input.Name), Protocol: "openai_compatible", Adapter: adapter, BaseURL: baseURL, Model: model, TimeoutMS: timeout, InputLimit: limit}}}
 	if storage.Endpoints[0].ID == "" {

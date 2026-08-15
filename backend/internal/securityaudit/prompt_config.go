@@ -14,17 +14,20 @@ import (
 )
 
 const (
-	DefaultWorkerCount   = 4
-	MaxWorkerCount       = 32
-	DefaultQueueCapacity = 32768
-	MaxQueueCapacity     = 100000
-	DefaultTimeoutMS     = 3000
-	MinTimeoutMS         = 100
-	MaxTimeoutMS         = 40000
-	DefaultInputLimit    = 4000
-	MinInputLimit        = 128
-	MaxInputLimit        = 400000
-	DefaultPayloadTTL    = 30 * time.Minute
+	DefaultWorkerCount        = 4
+	MaxWorkerCount            = 32
+	DefaultQueueCapacity      = 32768
+	MaxQueueCapacity          = 100000
+	DefaultTimeoutMS          = 3000
+	MinTimeoutMS              = 100
+	MaxTimeoutMS              = 40000
+	DefaultInputLimit         = 4000
+	MinInputLimit             = 128
+	MaxInputLimit             = 400000
+	DefaultMaxTotalInputChars = 40000
+	MinMaxTotalInputChars     = 128
+	MaxMaxTotalInputChars     = 400000
+	DefaultPayloadTTL         = 30 * time.Minute
 )
 
 type SecretEncryptor interface {
@@ -76,6 +79,7 @@ type storageConfig struct {
 	AllGroups              bool              `json:"all_groups"`
 	GroupIDs               []int64           `json:"group_ids"`
 	RiskRouteAccountIDs    []int64           `json:"risk_route_account_ids"`
+	MaxTotalInputChars     int               `json:"max_total_input_chars"`
 	PromptTemplates        []PromptTemplate  `json:"prompt_templates"`
 	ActivePromptTemplateID string            `json:"active_prompt_template_id"`
 	FlagThreshold          *float64          `json:"flag_threshold"`
@@ -124,6 +128,7 @@ type ActiveConfig struct {
 	AllGroups              bool
 	GroupIDs               []int64
 	RiskRouteAccountIDs    []int64
+	MaxTotalInputChars     int
 	PromptTemplates        []PromptTemplate
 	ActivePromptTemplateID string
 	FlagThreshold          float64
@@ -164,6 +169,7 @@ type PublicConfig struct {
 	AllGroups              bool             `json:"all_groups"`
 	GroupIDs               []int64          `json:"group_ids"`
 	RiskRouteAccountIDs    []int64          `json:"risk_route_account_ids"`
+	MaxTotalInputChars     int              `json:"max_total_input_chars"`
 	PromptTemplates        []PromptTemplate `json:"prompt_templates"`
 	ActivePromptTemplateID string           `json:"active_prompt_template_id"`
 	FlagThreshold          float64          `json:"flag_threshold"`
@@ -204,6 +210,7 @@ type UpdateConfigRequest struct {
 	AllGroups              bool              `json:"all_groups"`
 	GroupIDs               []int64           `json:"group_ids"`
 	RiskRouteAccountIDs    *[]int64          `json:"risk_route_account_ids,omitempty"`
+	MaxTotalInputChars     *int              `json:"max_total_input_chars,omitempty"`
 	PromptTemplates        *[]PromptTemplate `json:"prompt_templates,omitempty"`
 	ActivePromptTemplateID *string           `json:"active_prompt_template_id,omitempty"`
 	FlagThreshold          *float64          `json:"flag_threshold,omitempty"`
@@ -228,6 +235,7 @@ func DefaultStorageConfig() storageConfig {
 		AllGroups:              true,
 		GroupIDs:               []int64{},
 		RiskRouteAccountIDs:    []int64{},
+		MaxTotalInputChars:     DefaultMaxTotalInputChars,
 		PromptTemplates:        []PromptTemplate{DefaultPromptTemplate()},
 		ActivePromptTemplateID: DefaultPromptTemplateID,
 		FlagThreshold:          &flagThreshold,
@@ -276,6 +284,9 @@ func normalizeStorageConfig(cfg *storageConfig) {
 	cfg.Scanners = canonicalScannerIDs(cfg.Scanners)
 	cfg.GroupIDs = canonicalInt64s(cfg.GroupIDs)
 	cfg.RiskRouteAccountIDs = canonicalInt64s(cfg.RiskRouteAccountIDs)
+	if cfg.MaxTotalInputChars == 0 {
+		cfg.MaxTotalInputChars = DefaultMaxTotalInputChars
+	}
 	cfg.PromptTemplates = normalizePromptTemplates(cfg.PromptTemplates)
 	if strings.TrimSpace(cfg.ActivePromptTemplateID) == "" {
 		cfg.ActivePromptTemplateID = DefaultPromptTemplateID
@@ -344,6 +355,9 @@ func validateStorageConfig(cfg storageConfig) error {
 	}
 	if err := validatePositiveIDs(cfg.RiskRouteAccountIDs, "prompt_audit_invalid_risk_route_account", "高风险分流账号 ID 无效"); err != nil {
 		return err
+	}
+	if cfg.MaxTotalInputChars < MinMaxTotalInputChars || cfg.MaxTotalInputChars > MaxMaxTotalInputChars {
+		return infraerrors.BadRequest("prompt_audit_invalid_max_total_input_chars", "审计总字符上限超出允许范围")
 	}
 	if len(cfg.Scanners) == 0 {
 		return infraerrors.BadRequest("prompt_audit_scanners_required", "至少需要启用一个风险分类")
@@ -418,6 +432,9 @@ func validateUpdateConfigRequest(req UpdateConfigRequest) error {
 		if err := validatePositiveIDs(*req.RiskRouteAccountIDs, "prompt_audit_invalid_risk_route_account", "高风险分流账号 ID 无效"); err != nil {
 			return err
 		}
+	}
+	if req.MaxTotalInputChars != nil && (*req.MaxTotalInputChars < MinMaxTotalInputChars || *req.MaxTotalInputChars > MaxMaxTotalInputChars) {
+		return infraerrors.BadRequest("prompt_audit_invalid_max_total_input_chars", "审计总字符上限超出允许范围")
 	}
 	if req.PromptTemplates != nil && len(*req.PromptTemplates) > MaxPromptTemplateCount {
 		return infraerrors.BadRequest("prompt_audit_too_many_templates", "审核提示词模板数量超出允许范围")
@@ -523,7 +540,7 @@ func PublicFromStorage(cfg storageConfig, riskControlEnabled bool, invalidTokenE
 		Enabled: cfg.Enabled, BlockingEnabled: cfg.BlockingEnabled, BlockingLatestTurnOnly: cfg.BlockingLatestTurnOnly, StorePassEvents: cfg.StorePassEvents,
 		EffectiveMode: active.EffectiveMode(), Strategy: cfg.Strategy, WorkerCount: cfg.WorkerCount,
 		QueueCapacity: cfg.QueueCapacity, Scanners: scanners, AllGroups: cfg.AllGroups,
-		GroupIDs: groupIDs, RiskRouteAccountIDs: riskRouteAccountIDs,
+		GroupIDs: groupIDs, RiskRouteAccountIDs: riskRouteAccountIDs, MaxTotalInputChars: cfg.MaxTotalInputChars,
 		PromptTemplates:        clonePromptTemplates(cfg.PromptTemplates),
 		ActivePromptTemplateID: cfg.ActivePromptTemplateID, FlagThreshold: thresholdValue(cfg.FlagThreshold, DefaultFlagThreshold),
 		BlockThreshold: thresholdValue(cfg.BlockThreshold, DefaultBlockThreshold), BlockHTTPStatus: cfg.BlockHTTPStatus,
@@ -539,7 +556,7 @@ func ActiveFromStorage(cfg storageConfig, riskControlEnabled bool, encryptor Sec
 		BlockingLatestTurnOnly: cfg.BlockingLatestTurnOnly,
 		StorePassEvents:        cfg.StorePassEvents, Strategy: cfg.Strategy, WorkerCount: cfg.WorkerCount,
 		QueueCapacity: cfg.QueueCapacity, Scanners: append([]string(nil), cfg.Scanners...), AllGroups: cfg.AllGroups,
-		GroupIDs: append([]int64(nil), cfg.GroupIDs...), RiskRouteAccountIDs: append([]int64(nil), cfg.RiskRouteAccountIDs...),
+		GroupIDs: append([]int64(nil), cfg.GroupIDs...), RiskRouteAccountIDs: append([]int64(nil), cfg.RiskRouteAccountIDs...), MaxTotalInputChars: cfg.MaxTotalInputChars,
 		PromptTemplates:        clonePromptTemplates(cfg.PromptTemplates),
 		ActivePromptTemplateID: template.ID, FlagThreshold: thresholdValue(cfg.FlagThreshold, DefaultFlagThreshold),
 		BlockThreshold: thresholdValue(cfg.BlockThreshold, DefaultBlockThreshold), BlockHTTPStatus: cfg.BlockHTTPStatus,
@@ -589,12 +606,13 @@ func changeSummary(cfg storageConfig) string {
 		GroupCount             int     `json:"group_count"`
 		GroupHash              string  `json:"group_hash"`
 		RiskRouteAccountCount  int     `json:"risk_route_account_count"`
+		MaxTotalInputChars     int     `json:"max_total_input_chars"`
 		TemplateCount          int     `json:"template_count"`
 		ActiveTemplateID       string  `json:"active_template_id"`
 		FlagThreshold          float64 `json:"flag_threshold"`
 		BlockThreshold         float64 `json:"block_threshold"`
 		BlockHTTPStatus        int     `json:"block_http_status"`
-	}{cfg.Enabled, cfg.BlockingEnabled, cfg.BlockingLatestTurnOnly, cfg.StorePassEvents, len(cfg.Endpoints), len(cfg.Scanners), cfg.AllGroups, len(cfg.GroupIDs), "", len(cfg.RiskRouteAccountIDs), len(cfg.PromptTemplates), cfg.ActivePromptTemplateID, thresholdValue(cfg.FlagThreshold, DefaultFlagThreshold), thresholdValue(cfg.BlockThreshold, DefaultBlockThreshold), cfg.BlockHTTPStatus}
+	}{cfg.Enabled, cfg.BlockingEnabled, cfg.BlockingLatestTurnOnly, cfg.StorePassEvents, len(cfg.Endpoints), len(cfg.Scanners), cfg.AllGroups, len(cfg.GroupIDs), "", len(cfg.RiskRouteAccountIDs), cfg.MaxTotalInputChars, len(cfg.PromptTemplates), cfg.ActivePromptTemplateID, thresholdValue(cfg.FlagThreshold, DefaultFlagThreshold), thresholdValue(cfg.BlockThreshold, DefaultBlockThreshold), cfg.BlockHTTPStatus}
 	rawGroups, _ := json.Marshal(cfg.GroupIDs)
 	digest := sha256.Sum256(rawGroups)
 	summary.GroupHash = hex.EncodeToString(digest[:])

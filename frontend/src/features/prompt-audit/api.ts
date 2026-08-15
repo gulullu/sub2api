@@ -122,12 +122,20 @@ export async function listRiskRouteAccounts(): Promise<PromptAuditAccount[]> {
     expectedTotal = Math.max(expectedTotal, result.total)
     pageCount = Math.max(pageCount, result.pages || Math.ceil(result.total / accountPageSize))
     for (const account of result.items) {
+      const groupNames = new Map((account.groups ?? []).map((group) => [group.id, group.name]))
+      const groupIDs = new Set([
+        ...(account.group_ids ?? []),
+        ...(account.groups ?? []).map((group) => group.id),
+      ])
       accounts.set(account.id, {
         id: account.id,
         name: account.name,
         platform: account.platform,
         type: account.type,
         status: account.status,
+        groups: [...groupIDs]
+          .sort((left, right) => left - right)
+          .map((id) => ({ id, name: groupNames.get(id) ?? '' })),
       })
     }
     page += 1

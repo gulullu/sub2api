@@ -25,9 +25,18 @@
             class="flex max-w-full items-center gap-2 rounded-lg border px-2.5 py-1.5 text-sm"
             :class="row.invalid ? 'border-red-200 bg-red-50 text-red-800 dark:border-red-900 dark:bg-red-950/30 dark:text-red-200' : 'border-gray-200 bg-white text-gray-800 dark:border-dark-700 dark:bg-dark-900 dark:text-dark-100'"
           >
-            <span class="min-w-0">
+            <span class="min-w-0 max-w-full">
               <span class="block truncate font-medium">{{ row.account?.name || missingAccountLabel(row.id) }}</span>
               <span v-if="row.account" class="block truncate text-[11px] text-gray-500 dark:text-dark-400">#{{ row.id }} · {{ row.account.platform }} / {{ row.account.type }}</span>
+              <span v-if="row.account" class="mt-1 flex max-w-full flex-wrap gap-1" :aria-label="t('admin.promptAudit.riskRoute.groups')">
+                <span
+                  v-for="group in row.account.groups"
+                  :key="group.id"
+                  class="max-w-full truncate rounded bg-gray-100 px-1.5 py-0.5 text-[10px] font-medium text-gray-600 dark:bg-dark-700 dark:text-dark-200"
+                  :title="groupLabel(group)"
+                >{{ groupLabel(group) }}</span>
+                <span v-if="row.account.groups.length === 0" class="text-[10px] text-gray-400 dark:text-dark-500">{{ t('admin.promptAudit.riskRoute.noGroup') }}</span>
+              </span>
             </span>
             <button
               type="button"
@@ -61,11 +70,20 @@
           class="flex items-center justify-between gap-3 rounded-md px-2 py-2 text-sm hover:bg-gray-50 dark:hover:bg-dark-800"
           :class="editable ? 'cursor-pointer' : 'cursor-not-allowed opacity-60'"
         >
-          <span class="flex min-w-0 items-center gap-2">
+          <span class="flex min-w-0 flex-1 items-start gap-2">
             <input type="checkbox" :checked="selectedIDSet.has(account.id)" :disabled="!editable" :aria-label="account.name" @change="toggle(account.id)" />
-            <span class="min-w-0">
+            <span class="min-w-0 flex-1">
               <span class="block truncate font-medium text-gray-800 dark:text-dark-100">{{ account.name }}</span>
               <span class="block truncate text-[11px] text-gray-500 dark:text-dark-400">#{{ account.id }} · {{ account.platform }} / {{ account.type }}</span>
+              <span class="mt-1.5 flex min-w-0 flex-wrap gap-1" :aria-label="t('admin.promptAudit.riskRoute.groups')">
+                <span
+                  v-for="group in account.groups"
+                  :key="group.id"
+                  class="max-w-full truncate rounded bg-primary-50 px-1.5 py-0.5 text-[10px] font-medium text-primary-700 dark:bg-primary-950/40 dark:text-primary-300"
+                  :title="groupLabel(group)"
+                >{{ groupLabel(group) }}</span>
+                <span v-if="account.groups.length === 0" class="text-[10px] text-gray-400 dark:text-dark-500">{{ t('admin.promptAudit.riskRoute.noGroup') }}</span>
+              </span>
             </span>
           </span>
           <span class="shrink-0 text-xs text-gray-400">{{ account.status }}</span>
@@ -112,7 +130,7 @@ const selectedRows = computed(() => selectedIDs.value.map((id) => {
 const visibleAccounts = computed(() => {
   const query = search.value.trim().toLowerCase()
   const filtered = query
-    ? props.accounts.filter((account) => `${account.name} ${account.id} ${account.platform} ${account.type} ${account.status}`.toLowerCase().includes(query))
+    ? props.accounts.filter((account) => `${account.name} ${account.id} ${account.platform} ${account.type} ${account.status} ${account.groups.map(groupLabel).join(' ')}`.toLowerCase().includes(query))
     : props.accounts
   return [...filtered].sort((left, right) => {
     const selectedOrder = Number(selectedIDSet.value.has(right.id)) - Number(selectedIDSet.value.has(left.id))
@@ -137,5 +155,8 @@ function remove(id: number) {
 function missingAccountLabel(id: number): string {
   if (props.loaded && !props.error) return t('admin.promptAudit.riskRoute.invalidAccount', { id })
   return t('admin.promptAudit.riskRoute.unresolvedAccount', { id })
+}
+function groupLabel(group: PromptAuditAccount['groups'][number]): string {
+  return group.name.trim() || t('admin.promptAudit.riskRoute.unknownGroup', { id: group.id })
 }
 </script>

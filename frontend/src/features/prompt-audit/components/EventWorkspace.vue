@@ -57,17 +57,17 @@
     </form>
     <div v-if="error" role="alert" class="mt-4 rounded-lg bg-red-50 px-4 py-3 text-sm text-red-700 dark:bg-red-950/30 dark:text-red-300">{{ error }}</div>
     <div class="mt-5 overflow-x-auto rounded-xl border border-gray-200 dark:border-dark-700/60">
-      <table class="min-w-[1120px] w-full text-left text-sm">
+      <table class="w-full min-w-[1368px] table-fixed text-left text-sm">
         <thead class="bg-gray-50 text-xs uppercase tracking-wide text-gray-500 dark:bg-dark-900/70 dark:text-dark-400">
           <tr>
             <th class="w-10 px-3 py-3"><input type="checkbox" :checked="allSelected" :aria-label="t('admin.promptAudit.events.selectAll')" @change="toggleAll" /></th>
-            <th class="px-3 py-3 font-medium">{{ t('admin.promptAudit.events.time') }}</th>
-            <th class="px-3 py-3 font-medium">{{ t('admin.promptAudit.events.identity') }}</th>
-            <th class="px-3 py-3 font-medium">{{ t('admin.promptAudit.events.group') }}</th>
-            <th class="px-3 py-3 font-medium">{{ t('admin.promptAudit.events.route') }}</th>
-            <th class="px-3 py-3 font-medium">{{ t('admin.promptAudit.events.result') }}</th>
-            <th class="px-3 py-3 font-medium">{{ t('admin.promptAudit.events.preview') }}</th>
-            <th class="px-3 py-3 text-right font-medium">{{ t('admin.promptAudit.common.actions') }}</th>
+            <th class="w-36 px-3 py-3 font-medium">{{ t('admin.promptAudit.events.time') }}</th>
+            <th class="w-64 px-3 py-3 font-medium">{{ t('admin.promptAudit.events.identity') }}</th>
+            <th class="w-32 px-3 py-3 font-medium">{{ t('admin.promptAudit.events.group') }}</th>
+            <th class="w-56 px-3 py-3 font-medium">{{ t('admin.promptAudit.events.route') }}</th>
+            <th class="w-44 px-3 py-3 font-medium">{{ t('admin.promptAudit.events.result') }}</th>
+            <th class="w-64 px-3 py-3 font-medium">{{ t('admin.promptAudit.events.preview') }}</th>
+            <th class="w-36 px-3 py-3 text-right font-medium">{{ t('admin.promptAudit.common.actions') }}</th>
           </tr>
         </thead>
         <tbody class="divide-y divide-gray-100 bg-white dark:divide-dark-700 dark:bg-transparent">
@@ -76,10 +76,27 @@
           <tr v-for="event in events" v-else :key="event.id" :data-test="`event-${event.id}`" class="align-top hover:bg-gray-50/70 dark:hover:bg-dark-800/70">
             <td class="px-3 py-3"><input type="checkbox" :checked="selectedIds.includes(event.id)" :aria-label="t('admin.promptAudit.events.selectEvent', { id: event.id })" @change="toggleOne(event.id)" /></td>
             <td class="whitespace-nowrap px-3 py-3 text-xs text-gray-600 dark:text-dark-300">{{ formatDate(event.created_at) }}</td>
-            <td class="px-3 py-3">
-              <CopyLine :label="t('admin.promptAudit.events.user')" :value="event.snapshot.username" />
-              <CopyLine :label="t('admin.promptAudit.events.email')" :value="event.snapshot.user_email" />
-              <CopyLine :label="t('admin.promptAudit.events.apiKey')" :value="event.snapshot.api_key_name" />
+            <td class="w-64 max-w-64 overflow-hidden px-3 py-3">
+              <div class="min-w-0 space-y-1.5" data-test="event-identity">
+                <div v-for="row in identityRows(event)" :key="row.key" class="grid min-w-0 grid-cols-[3.25rem_minmax(0,1fr)] items-center gap-x-2 text-xs">
+                  <span class="truncate text-[11px] font-medium text-gray-400 dark:text-dark-500">{{ row.label }}</span>
+                  <span class="flex min-w-0 items-center gap-1.5">
+                    <span class="min-w-0 flex-1 truncate text-gray-800 dark:text-dark-100" :title="row.displayValue">{{ row.displayValue }}</span>
+                    <button
+                      v-if="row.copyValue"
+                      type="button"
+                      class="shrink-0 rounded p-0.5 text-gray-400 hover:bg-gray-100 hover:text-primary-600 dark:hover:bg-dark-700 dark:hover:text-primary-300"
+                      :aria-label="`${t('common.copy')} ${row.label}`"
+                      @click="copyIdentityValue(row.copyValue)"
+                    >
+                      <svg aria-hidden="true" viewBox="0 0 20 20" fill="none" class="h-3.5 w-3.5" stroke="currentColor" stroke-width="1.6">
+                        <rect x="6.5" y="6.5" width="9" height="9" rx="1.5" />
+                        <path d="M13.5 6.5V5A1.5 1.5 0 0 0 12 3.5H5A1.5 1.5 0 0 0 3.5 5v7A1.5 1.5 0 0 0 5 13.5h1.5" />
+                      </svg>
+                    </button>
+                  </span>
+                </div>
+              </div>
             </td>
             <td class="px-3 py-3 text-gray-700 dark:text-dark-200">{{ event.snapshot.group_name || '—' }}</td>
             <td class="px-3 py-3">
@@ -108,7 +125,7 @@ import { computed, defineComponent, h, reactive, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 import Pagination from '@/components/common/Pagination.vue'
 import type { PromptAuditEvent, PromptEventFilters } from '../types'
-import { cloneData, emptyEventFilters, SCANNER_CATALOG } from '../viewModel'
+import { cloneData, emptyEventFilters, LOCALIZED_SCANNER_IDS } from '../viewModel'
 
 const props = defineProps<{
   events: PromptAuditEvent[]; total: number; page: number; pageSize: number
@@ -141,20 +158,6 @@ const FilterInput = defineComponent({
         onInput: (event: Event) => componentEmit('update:modelValue', (event.target as HTMLInputElement).value),
         onChange: () => componentEmit('change'),
       }),
-    ])
-  },
-})
-
-const CopyLine = defineComponent({
-  props: { label: { type: String, required: true }, value: { type: String, default: '' } },
-  setup(componentProps) {
-    return () => h('div', { class: 'flex max-w-56 items-center gap-1 text-xs' }, [
-      h('span', { class: 'w-16 flex-none text-gray-500 dark:text-dark-400' }, componentProps.label),
-      h('span', { class: 'min-w-0 flex-1 truncate text-gray-800 dark:text-dark-100' }, componentProps.value || '—'),
-      componentProps.value ? h('button', {
-        type: 'button', class: 'text-primary-600 hover:underline', 'aria-label': `${t('common.copy')} ${componentProps.label}`,
-        onClick: () => navigator.clipboard?.writeText(componentProps.value),
-      }, t('common.copy')) : null,
     ])
   },
 })
@@ -198,7 +201,7 @@ function translateRiskLevel(riskLevel: string): string {
   return RISK_LEVELS.has(riskLevel) ? t(`admin.promptAudit.riskLevels.${riskLevel}`) : riskLevel
 }
 function translateCategory(category: string): string {
-  return SCANNER_CATALOG.some((scanner) => scanner.id === category)
+  return LOCALIZED_SCANNER_IDS.has(category)
     ? t(`admin.promptAudit.scanners.${category}`)
     : category
 }
@@ -208,5 +211,35 @@ function formatDecisionRisk(decision: string, riskLevel: string): string {
 function formatCategories(categories: string[]): string {
   if (!categories.length) return '—'
   return categories.map(translateCategory).join(', ')
+}
+
+interface IdentityRow {
+  key: 'user' | 'email' | 'api-key'
+  label: string
+  displayValue: string
+  copyValue: string
+}
+
+function maskPotentialAPIKey(value: string): string {
+  const normalized = value.trim()
+  if (!/^sk-[A-Za-z0-9._-]{12,}$/.test(normalized)) return value
+  return `${normalized.slice(0, 6)}…${normalized.slice(-4)}`
+}
+
+function identityRows(event: PromptAuditEvent): IdentityRow[] {
+  const apiKeyName = maskPotentialAPIKey(event.snapshot.api_key_name || '')
+  return [
+    { key: 'user', label: t('admin.promptAudit.events.userShort'), displayValue: event.snapshot.username || '—', copyValue: event.snapshot.username || '' },
+    { key: 'email', label: t('admin.promptAudit.events.emailShort'), displayValue: event.snapshot.user_email || '—', copyValue: event.snapshot.user_email || '' },
+    // The snapshot contract contains the key name, never the credential. If a
+    // legacy/custom record nevertheless looks like a secret, do not expose or
+    // copy the unmasked value from the list.
+    { key: 'api-key', label: t('admin.promptAudit.events.apiKeyShort'), displayValue: apiKeyName || '—', copyValue: apiKeyName },
+  ]
+}
+
+function copyIdentityValue(value: string) {
+  const result = navigator.clipboard?.writeText(value)
+  if (result) void result.catch(() => undefined)
 }
 </script>

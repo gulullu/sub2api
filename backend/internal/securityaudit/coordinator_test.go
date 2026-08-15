@@ -161,6 +161,17 @@ func TestCoordinatorUsesPromptBlockResponseSnapshot(t *testing.T) {
 	require.Equal(t, "custom policy message", decision.ClientMessage)
 }
 
+func TestCoordinatorPreservesPromptInputTooLargeError(t *testing.T) {
+	promptDecision := &PromptDecision{
+		Kind: DecisionBlock, ErrorCode: ErrorCodeInputTooLarge,
+		BlockHTTPStatus: http.StatusRequestEntityTooLarge, BlockMessage: "too large",
+	}
+	decision := NewCoordinator(&fakeLegacyEngine{}, &fakePromptEngine{mode: ModeBlocking, decision: promptDecision}).Check(context.Background(), Request{})
+	require.Equal(t, http.StatusRequestEntityTooLarge, decision.HTTPStatus)
+	require.Equal(t, ErrorCodeInputTooLarge, decision.ErrorCode)
+	require.Equal(t, "too large", decision.ClientMessage)
+}
+
 func TestCoordinatorAsyncEnqueueFailuresNeverChangeResponseOrDownstreamDispatch(t *testing.T) {
 	for _, enqueueErr := range []error{ErrQueueFull, ErrQueueAdmissionBusy, errors.New("redis unavailable"), errors.New("publish failed")} {
 		prompt := &fakePromptEngine{mode: ModeAsync, err: enqueueErr}

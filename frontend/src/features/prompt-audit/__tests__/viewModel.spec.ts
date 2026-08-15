@@ -42,6 +42,7 @@ describe('Prompt Audit view model', () => {
     expect(configToDraft(legacy)).toMatchObject({
       group_ids: [], scanners: [], endpoints: [], risk_route_account_ids: [], active_prompt_template_id: DEFAULT_PROMPT_TEMPLATE_ID,
       flag_threshold: 0.4, block_threshold: 0.7, block_http_status: 403, block_message: DEFAULT_BLOCK_MESSAGE,
+      max_total_input_chars: 40000,
     })
   })
 
@@ -60,6 +61,7 @@ describe('Prompt Audit view model', () => {
       block_threshold: 0.7,
       block_http_status: 403,
       block_message: DEFAULT_BLOCK_MESSAGE,
+      max_total_input_chars: 40000,
       endpoints: [expect.objectContaining({ adapter: 'qwen3guard' })],
     })
     expect(payload.prompt_templates).toHaveLength(1)
@@ -69,6 +71,15 @@ describe('Prompt Audit view model', () => {
     const draft = configToDraft({ ...config(), risk_route_account_ids: [9, 2, 9] })
     expect(draft.risk_route_account_ids).toEqual([2, 9])
     expect(buildUpdateRequest(draft).risk_route_account_ids).toEqual([2, 9])
+  })
+
+  it('clamps and fingerprints the per-request total audit cap', () => {
+    const draft = configToDraft({ ...config(), max_total_input_chars: 500000 })
+    expect(draft.max_total_input_chars).toBe(400000)
+    expect(buildUpdateRequest(draft).max_total_input_chars).toBe(400000)
+    const before = draftFingerprint(draft)
+    draft.max_total_input_chars = 30000
+    expect(draftFingerprint(draft)).not.toBe(before)
   })
 
   it('models all nine official input scanners', () => {

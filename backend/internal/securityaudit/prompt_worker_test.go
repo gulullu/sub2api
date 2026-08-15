@@ -386,6 +386,57 @@ func TestWorkerCompletesPassWithoutEventRefreshesEveryChunkAndDeletesPayload(t *
 	require.Equal(t, int64(1), metrics.Snapshot().Allowed)
 }
 
+func TestWorkerMarksOversizedPromptWithoutCallingScanner(t *testing.T) {
+	repo := &fakeJobRepository{}
+	text := strings.Repeat("x", MinMaxTotalInputChars+1)
+	payload := &fakePayloadStore{values: map[int64]string{51: text}}
+	scannerCalls := 0
+	runner := NewRunner(
+		&fakeConfigStore{cfg: asyncConfig(), active: true}, repo, payload,
+		PromptScannerFunc(func(context.Context, ActiveEndpoint, string, []string) (*NormalizedResult, error) {
+			scannerCalls++
+			return nil, errors.New("scanner must not be called")
+		}), NewAtomicMetrics(),
+	)
+	cfg := asyncConfig()
+	cfg.MaxTotalInputChars = MinMaxTotalInputChars
+	job := workerJob(1, 3)
+	job.Snapshot.PromptLength = len([]rune(text))
+
+	require.NoError(t, runner.processJob(context.Background(), 0, cfg, job))
+	require.Equal(t, 0, scannerCalls)
+	require.NotNil(t, repo.completedResult)
+	require.Equal(t, EventFlag, repo.completedResult.Decision)
+	require.Equal(t, ActionWarn, repo.completedResult.Action)
+	require.Contains(t, repo.completedResult.MatchedScanners, inputTooLargeScannerID)
+	require.Equal(t, []int64{51}, payload.deleted)
+}
+
+func TestWorkerReusesExactSuccessfulDecision(t *testing.T) {
+	repo := &fakeJobRepository{}
+	payload := &fakePayloadStore{values: map[int64]string{51: "abcdef", 52: "abcdef"}}
+	scannerCalls := 0
+	runner := NewRunner(
+		&fakeConfigStore{cfg: asyncConfig(), active: true}, repo, payload,
+		PromptScannerFunc(func(_ context.Context, endpoint ActiveEndpoint, _ string, _ []string) (*NormalizedResult, error) {
+			scannerCalls++
+			return &NormalizedResult{
+				Decision: EventPass, RiskLevel: RiskLow, Action: ActionAllow, Safety: "Safe",
+				ScannerScores: map[string]float64{}, ScannerEvidence: map[string]string{}, GuardEndpointID: endpoint.ID,
+			}, nil
+		}), NewAtomicMetrics(),
+	)
+	first := workerJob(1, 3)
+	second := workerJob(1, 3)
+	second.ID = 52
+
+	require.NoError(t, runner.processJob(context.Background(), 0, asyncConfig(), first))
+	require.NoError(t, runner.processJob(context.Background(), 0, asyncConfig(), second))
+	require.Equal(t, 2, scannerCalls, "only the first request's two chunks should call the scanner")
+	require.Equal(t, 2, repo.completeCount)
+	require.ElementsMatch(t, []int64{51, 52}, payload.deleted)
+}
+
 func TestWorkerRetryBackoffTerminalFailureAndFailover(t *testing.T) {
 	now := time.Unix(200, 0).UTC()
 	for _, tt := range []struct {

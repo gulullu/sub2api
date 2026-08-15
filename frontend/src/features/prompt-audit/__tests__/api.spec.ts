@@ -35,13 +35,13 @@ describe('Prompt Audit API', () => {
       const page = options?.params?.page ?? 1
       return {
         data: page === 1
-          ? { items: [{ id: 1, name: 'One', platform: 'openai', type: 'oauth', status: 'active' }], total: 2, page: 1, page_size: 1, pages: 2 }
-          : { items: [{ id: 2, name: 'Two', platform: 'anthropic', type: 'setup-token', status: 'inactive' }], total: 2, page: 2, page_size: 1, pages: 2 },
+          ? { items: [{ id: 1, name: 'One', platform: 'openai', type: 'oauth', status: 'active', group_ids: [9, 3], groups: [{ id: 3, name: 'Codex Plus' }] }], total: 2, page: 1, page_size: 1, pages: 2 }
+          : { items: [{ id: 2, name: 'Two', platform: 'anthropic', type: 'setup-token', status: 'inactive', group_ids: [] }], total: 2, page: 2, page_size: 1, pages: 2 },
       }
     })
     await expect(promptAuditAPI.listRiskRouteAccounts()).resolves.toEqual([
-      { id: 1, name: 'One', platform: 'openai', type: 'oauth', status: 'active' },
-      { id: 2, name: 'Two', platform: 'anthropic', type: 'setup-token', status: 'inactive' },
+      { id: 1, name: 'One', platform: 'openai', type: 'oauth', status: 'active', groups: [{ id: 3, name: 'Codex Plus' }, { id: 9, name: '' }] },
+      { id: 2, name: 'Two', platform: 'anthropic', type: 'setup-token', status: 'inactive', groups: [] },
     ])
     expect(client.get).toHaveBeenCalledTimes(2)
     expect(client.get).toHaveBeenNthCalledWith(1, '/admin/accounts', expect.objectContaining({ params: expect.objectContaining({ page: 1, page_size: 1000, lite: '1' }) }))
@@ -50,7 +50,7 @@ describe('Prompt Audit API', () => {
 
   it('rejects an incomplete account list instead of mislabeling persisted IDs as deleted', async () => {
     client.get.mockResolvedValue({
-      data: { items: [{ id: 1, name: 'One', platform: 'openai', type: 'oauth', status: 'active' }], total: 2, page: 1, page_size: 1000, pages: 1 },
+      data: { items: [{ id: 1, name: 'One', platform: 'openai', type: 'oauth', status: 'active', group_ids: [], groups: [] }], total: 2, page: 1, page_size: 1000, pages: 1 },
     })
     await expect(promptAuditAPI.listRiskRouteAccounts()).rejects.toThrow('account list is incomplete')
   })

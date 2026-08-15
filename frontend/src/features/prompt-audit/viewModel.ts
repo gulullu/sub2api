@@ -15,6 +15,7 @@ export const DEFAULT_FLAG_THRESHOLD = 0.4
 export const DEFAULT_BLOCK_THRESHOLD = 0.7
 export const DEFAULT_BLOCK_HTTP_STATUS = 403
 export const DEFAULT_BLOCK_MESSAGE = 'Please modify your input and try again as it violates our content safety policy.'
+export const DEFAULT_MAX_TOTAL_INPUT_CHARS = 40000
 
 export const DEFAULT_AUDIT_SYSTEM_PROMPT = `[SYSTEM — IMMUTABLE]
 
@@ -71,6 +72,12 @@ export const SCANNER_CATALOG = [
   { id: 'jailbreak', label: 'Jailbreak' },
 ] as const
 
+export const LOCALIZED_SCANNER_IDS = new Set<string>([
+  ...SCANNER_CATALOG.map((scanner) => scanner.id),
+  'confidence_json',
+  'input_too_large',
+])
+
 // Vue props/refs are proxies and cannot be passed to structuredClone in every
 // browser. Prompt Audit state is JSON-only, so this produces a detached draft
 // without retaining reactive proxies or browser storage references.
@@ -103,6 +110,9 @@ export function configToDraft(config: PromptAuditConfig): PromptAuditDraft {
     block_threshold: Number.isFinite(config.block_threshold) ? Number(config.block_threshold) : DEFAULT_BLOCK_THRESHOLD,
     block_http_status: Number.isInteger(config.block_http_status) ? Number(config.block_http_status) : DEFAULT_BLOCK_HTTP_STATUS,
     block_message: config.block_message?.trim() || DEFAULT_BLOCK_MESSAGE,
+    max_total_input_chars: Number.isInteger(config.max_total_input_chars)
+      ? Math.min(400000, Math.max(128, Number(config.max_total_input_chars)))
+      : DEFAULT_MAX_TOTAL_INPUT_CHARS,
     endpoints: (config.endpoints ?? []).map((endpoint) => ({
       ...endpoint,
       adapter: endpoint.adapter === 'confidence_json' ? 'confidence_json' : 'qwen3guard',
@@ -156,6 +166,7 @@ export function buildUpdateRequest(draft: PromptAuditDraft): PromptAuditUpdateRe
     block_threshold: Number(draft.block_threshold),
     block_http_status: Number(draft.block_http_status),
     block_message: draft.block_message.trim() || DEFAULT_BLOCK_MESSAGE,
+    max_total_input_chars: Math.min(400000, Math.max(128, Math.round(Number(draft.max_total_input_chars)))),
     endpoints: draft.endpoints.map((endpoint) => ({
       id: endpoint.id.trim(),
       name: endpoint.name.trim(),

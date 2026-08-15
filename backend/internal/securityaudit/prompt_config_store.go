@@ -340,6 +340,7 @@ func (m *ConfigManager) buildNextStorage(current storageConfig, req UpdateConfig
 		QueueCapacity: req.QueueCapacity, Scanners: append([]string(nil), req.Scanners...),
 		AllGroups: req.AllGroups, GroupIDs: append([]int64(nil), req.GroupIDs...),
 		RiskRouteAccountIDs: append([]int64(nil), current.RiskRouteAccountIDs...),
+		MaxTotalInputChars:  current.MaxTotalInputChars,
 		PromptTemplates:     clonePromptTemplates(current.PromptTemplates), ActivePromptTemplateID: current.ActivePromptTemplateID,
 		FlagThreshold:   float64Pointer(thresholdValue(current.FlagThreshold, DefaultFlagThreshold)),
 		BlockThreshold:  float64Pointer(thresholdValue(current.BlockThreshold, DefaultBlockThreshold)),
@@ -349,6 +350,9 @@ func (m *ConfigManager) buildNextStorage(current storageConfig, req UpdateConfig
 	}
 	if req.RiskRouteAccountIDs != nil {
 		next.RiskRouteAccountIDs = append([]int64(nil), (*req.RiskRouteAccountIDs)...)
+	}
+	if req.MaxTotalInputChars != nil {
+		next.MaxTotalInputChars = *req.MaxTotalInputChars
 	}
 	if req.PromptTemplates != nil {
 		next.PromptTemplates = clonePromptTemplates(*req.PromptTemplates)
