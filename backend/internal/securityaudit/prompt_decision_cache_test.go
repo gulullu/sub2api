@@ -1,6 +1,7 @@
 package securityaudit
 
 import (
+	"encoding/json"
 	"testing"
 	"time"
 
@@ -48,6 +49,23 @@ func TestPromptDecisionCacheDeepCloneTTLAndLRUEviction(t *testing.T) {
 	_, ok = cache.get("a", now.Add(2*time.Minute))
 	require.False(t, ok)
 	require.Len(t, cache.entries, 1)
+}
+
+func TestPromptDecisionCacheCloneKeepsEmptyCollectionsAsJSONArrays(t *testing.T) {
+	cache := newPromptDecisionCache(1, time.Minute)
+	now := time.Now()
+	cache.put("pass", &NormalizedResult{Decision: EventPass}, now)
+
+	result, ok := cache.get("pass", now)
+	require.True(t, ok)
+	require.NotNil(t, result.Categories)
+	require.NotNil(t, result.MatchedScanners)
+	require.NotNil(t, result.UnknownCategories)
+
+	payload, err := json.Marshal(result)
+	require.NoError(t, err)
+	require.Contains(t, string(payload), `"categories":[]`)
+	require.Contains(t, string(payload), `"matched_scanners":[]`)
 }
 
 func TestPromptDecisionCacheKeyCoversInputAndPolicy(t *testing.T) {

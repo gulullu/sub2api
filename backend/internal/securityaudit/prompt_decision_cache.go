@@ -141,9 +141,12 @@ func cloneNormalizedResult(result *NormalizedResult) *NormalizedResult {
 		return nil
 	}
 	cloned := *result
-	cloned.Categories = append([]string(nil), result.Categories...)
-	cloned.MatchedScanners = append([]string(nil), result.MatchedScanners...)
-	cloned.UnknownCategories = append([]string(nil), result.UnknownCategories...)
+	// Event persistence requires JSON arrays, not null. Start from non-nil
+	// empty slices so cached pass results retain the same storage shape as
+	// freshly scanned results.
+	cloned.Categories = append([]string{}, result.Categories...)
+	cloned.MatchedScanners = append([]string{}, result.MatchedScanners...)
+	cloned.UnknownCategories = append([]string{}, result.UnknownCategories...)
 	cloned.ScannerScores = make(map[string]float64, len(result.ScannerScores))
 	for key, value := range result.ScannerScores {
 		cloned.ScannerScores[key] = value
