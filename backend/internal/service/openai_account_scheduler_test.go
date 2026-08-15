@@ -3628,7 +3628,9 @@ func TestOpenAIGatewayService_SelectAccountWithScheduler_SubscriptionPriorityWai
 	groupID := int64(101091)
 	accounts := []Account{
 		{
-			// 订阅账号：支持 compact，但并发已满（busy-but-waitable）。
+			// 订阅账号：管理员显式强制允许 legacy compact，但并发已满
+			// (busy-but-waitable)。OAuth 的自动探测只代表 native v2，不能代表
+			// legacy /responses/compact 可用。
 			ID:          38011,
 			Platform:    PlatformOpenAI,
 			Type:        AccountTypeOAuth,
@@ -3638,7 +3640,7 @@ func TestOpenAIGatewayService_SelectAccountWithScheduler_SubscriptionPriorityWai
 			Priority:    0,
 			GroupIDs:    []int64{groupID},
 			Credentials: map[string]any{"plan_type": "team"},
-			Extra:       map[string]any{"openai_compact_supported": true},
+			Extra:       map[string]any{"openai_compact_mode": OpenAICompactModeForceOn},
 		},
 		{
 			// 常规账号：明确不支持 compact，无法服务本次请求。

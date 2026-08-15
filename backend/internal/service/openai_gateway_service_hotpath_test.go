@@ -23,8 +23,20 @@ func TestOpenAIRequestView_ExtractsRawScalars(t *testing.T) {
 	require.True(t, view.Stream)
 	require.Equal(t, "ses-1", view.PromptCacheKey)
 	require.Equal(t, "resp-1", view.PreviousResponseID)
+	require.True(t, view.HasPreviousResponseID)
 	require.Equal(t, "fast", view.ServiceTier)
 	require.Equal(t, "medium", view.ReasoningEffort)
+}
+
+func TestOpenAIRequestView_DetectsEmptyNullAndEscapedPreviousResponseID(t *testing.T) {
+	for _, body := range [][]byte{
+		[]byte(`{"previous_response_id":""}`),
+		[]byte(`{"previous_response_id":null}`),
+		[]byte(`{"previous\u005fresponse\u005fid":"resp-escaped"}`),
+	} {
+		view := newOpenAIRequestView(body)
+		require.True(t, view.HasPreviousResponseID, string(body))
+	}
 }
 
 func TestOpenAIRequestView_ExtractsFieldsAfterLargeInput(t *testing.T) {
@@ -72,6 +84,45 @@ func TestOpenAIRequestView_ApplyPatches(t *testing.T) {
 	patched, err := view.ApplyPatches()
 	require.NoError(t, err)
 	require.JSONEq(t, `{"model":"gpt-5.1","reasoning":{"effort":"none"},"input":[{"type":"message","content":"hi"}]}`, string(patched))
+}
+
+func TestOpenAIRequestView_ApplyPatchesDeletesEveryPreviousResponseID(t *testing.T) {
+	var bodyBuilder strings.Builder
+	bodyBuilder.WriteString(`{"previous_response_id":null,"model":"gpt-5","previous\u005fresponse\u005fid":"resp_escaped","metadata":{"previous_response_id":"keep_nested"}`)
+	for range 128 {
+		bodyBuilder.WriteString(`,"previous_response_id":"resp_duplicate"`)
+	}
+	bodyBuilder.WriteByte('}')
+	body := []byte(bodyBuilder.String())
+	view := newOpenAIRequestView(body)
+	view.MarkPatchDelete("previous_response_id")
+
+	patched, err := view.ApplyPatches()
+	require.NoError(t, err)
+	require.False(t, newOpenAIRequestView(patched).HasPreviousResponseID)
+	require.Equal(t, "keep_nested", gjson.GetBytes(patched, "metadata.previous_response_id").String())
+	require.Equal(t, "gpt-5", gjson.GetBytes(patched, "model").String())
+}
+
+func TestStripAllTopLevelOpenAIPreviousResponseIDsFailsClosed(t *testing.T) {
+	for _, body := range [][]byte{
+		nil,
+		[]byte(`[{"previous_response_id":"nested_in_array"}]`),
+		[]byte(`{"previous_response_id":"resp_invalid"`),
+	} {
+		updated, removed, err := stripAllTopLevelOpenAIPreviousResponseIDs(body)
+		require.Error(t, err, string(body))
+		require.False(t, removed, string(body))
+		require.Equal(t, body, updated, string(body))
+	}
+}
+
+func TestStripAllTopLevelOpenAIPreviousResponseIDsNoFieldIsExactNoOp(t *testing.T) {
+	body := []byte("  { \"model\" : \"gpt-5\", \"metadata\": {\"previous_response_id\":\"keep_nested\"} }\n")
+	updated, removed, err := stripAllTopLevelOpenAIPreviousResponseIDs(body)
+	require.NoError(t, err)
+	require.False(t, removed)
+	require.Equal(t, body, updated)
 }
 
 func TestOpenAIRequestView_RejectsEscapedPatchPath(t *testing.T) {
@@ -736,27 +787,39 @@ func TestOpenAIGatewayService_Forward_HTTPDeletesPreviousResponseIDWhenPresent(t
 		Extra: map[string]any{"use_responses_api": true},
 	}
 
-	for _, body := range [][]byte{
-		[]byte(`{"model":"gpt-5","stream":false,"previous_response_id":"","input":"hi"}`),
-		[]byte(`{"model":"gpt-5","stream":false,"previous_response_id":null,"input":"hi"}`),
-	} {
-		upstream := &httpUpstreamRecorder{
-			resp: &http.Response{
-				StatusCode: http.StatusOK,
-				Header:     http.Header{"Content-Type": []string{"application/json"}},
-				Body:       io.NopCloser(strings.NewReader(`{"usage":{"input_tokens":1,"output_tokens":2}}`)),
-			},
+	for _, passthrough := range []bool{false, true} {
+		name := "transformed"
+		if passthrough {
+			name = "passthrough"
 		}
-		svc := &OpenAIGatewayService{cfg: cfg, httpUpstream: upstream}
-		rec := httptest.NewRecorder()
-		c, _ := gin.CreateTestContext(rec)
-		c.Request = httptest.NewRequest(http.MethodPost, "/openai/v1/responses", nil)
-		SetOpenAIClientTransport(c, OpenAIClientTransportHTTP)
+		t.Run(name, func(t *testing.T) {
+			account.Extra["openai_passthrough"] = passthrough
+			for _, body := range [][]byte{
+				[]byte(`{"model":"gpt-5","stream":false,"previous_response_id":"","input":"hi"}`),
+				[]byte(`{"model":"gpt-5","stream":false,"previous_response_id":null,"input":"hi"}`),
+				[]byte(`{"model":"gpt-5","stream":false,"previous_response_id":"","previous_response_id":"resp_duplicate","input":"hi"}`),
+				[]byte(`{"model":"gpt-5","stream":false,"previous_response_id":null,"previous\u005fresponse\u005fid":"resp_escaped","input":"hi"}`),
+				[]byte(`{"model":"gpt-5","stream":false,"previous_response_id":"1","previous_response_id":"2","previous_response_id":"3","previous_response_id":"4","previous_response_id":"5","previous_response_id":"6","previous_response_id":"7","previous_response_id":"8","previous_response_id":"9","previous_response_id":"10","input":"hi"}`),
+			} {
+				upstream := &httpUpstreamRecorder{
+					resp: &http.Response{
+						StatusCode: http.StatusOK,
+						Header:     http.Header{"Content-Type": []string{"application/json"}},
+						Body:       io.NopCloser(strings.NewReader(`{"usage":{"input_tokens":1,"output_tokens":2}}`)),
+					},
+				}
+				svc := &OpenAIGatewayService{cfg: cfg, httpUpstream: upstream}
+				rec := httptest.NewRecorder()
+				c, _ := gin.CreateTestContext(rec)
+				c.Request = httptest.NewRequest(http.MethodPost, "/openai/v1/responses", nil)
+				SetOpenAIClientTransport(c, OpenAIClientTransportHTTP)
 
-		result, err := svc.Forward(context.Background(), c, account, body)
-		require.NoError(t, err)
-		require.NotNil(t, result)
-		require.False(t, gjson.GetBytes(upstream.lastBody, "previous_response_id").Exists())
+				result, err := svc.Forward(context.Background(), c, account, body)
+				require.NoError(t, err)
+				require.NotNil(t, result)
+				require.False(t, newOpenAIRequestView(upstream.lastBody).HasPreviousResponseID)
+			}
+		})
 	}
 }
 

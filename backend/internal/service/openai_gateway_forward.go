@@ -161,6 +161,19 @@ func (s *OpenAIGatewayService) Forward(ctx context.Context, c *gin.Context, acco
 		}
 		return nil, errors.New("openai ws v1 is temporarily unsupported; use ws v2")
 	}
+	// Ordinary HTTP forwarding never carries upstream response state. Scrub the
+	// field before the passthrough/non-passthrough split so duplicate or escaped
+	// top-level keys cannot bypass either outbound path. Native WSv2 keeps its
+	// existing stateful recovery semantics and is intentionally untouched.
+	if wsDecision.Transport != OpenAIUpstreamTransportResponsesWebsocketV2 && requestView.HasPreviousResponseID {
+		strippedBody, _, stripErr := stripAllTopLevelOpenAIPreviousResponseIDs(body)
+		if stripErr != nil {
+			return nil, fmt.Errorf("strip previous_response_id from HTTP request: %w", stripErr)
+		}
+		body = strippedBody
+		originalBody = strippedBody
+		requestView = newOpenAIRequestView(strippedBody)
+	}
 	if passthroughEnabled {
 		attemptImageIntentInvalidated := false
 		if isCodexCLI && codexImageGenerationExplicitToolPolicy == codexImageGenerationExplicitToolPolicyStrip {
@@ -487,9 +500,6 @@ func (s *OpenAIGatewayService) Forward(ctx context.Context, c *gin.Context, acco
 				markPatchDelete(unsupportedField)
 			}
 		}
-	}
-	if wsDecision.Transport != OpenAIUpstreamTransportResponsesWebsocketV2 && gjson.GetBytes(body, "previous_response_id").Exists() {
-		markPatchDelete("previous_response_id")
 	}
 	if openAIRequestBodyMayContainEmptyBase64InputImage(body) {
 		decoded, decodeErr := ensureReqBody()
@@ -923,6 +933,30 @@ func (s *OpenAIGatewayService) Forward(ctx context.Context, c *gin.Context, acco
 				reqBody = nil
 				logger.LegacyPrintf("service.openai_gateway", "[OpenAI] Retrying non-WSv2 request after %s (account: %s)", reason, account.Name)
 				continue
+			}
+			if compactPath && isOpenAILegacyCompactRouteNotFound(resp.StatusCode, respBody) {
+				upstreamDetail := ""
+				if s.cfg != nil && s.cfg.Gateway.LogUpstreamErrorBody {
+					maxBytes := s.cfg.Gateway.LogUpstreamErrorBodyMaxBytes
+					if maxBytes <= 0 {
+						maxBytes = 2048
+					}
+					upstreamDetail = truncateString(string(respBody), maxBytes)
+				}
+				appendOpsUpstreamError(c, OpsUpstreamErrorEvent{
+					Platform:           account.Platform,
+					AccountID:          account.ID,
+					AccountName:        account.Name,
+					UpstreamStatusCode: resp.StatusCode,
+					UpstreamRequestID:  resp.Header.Get("x-request-id"),
+					Kind:               "failover",
+					Message:            upstreamMsg,
+					Detail:             upstreamDetail,
+				})
+				// A bare route 404 says only that this account does not expose
+				// legacy compact. Do not run generic upstream side effects: the
+				// account remains healthy for ordinary Responses and native v2.
+				return nil, newOpenAILegacyCompactRouteNotFoundFailoverError(resp, respBody)
 			}
 			if s.shouldFailoverOpenAIUpstreamResponse(resp.StatusCode, upstreamMsg, respBody) {
 				upstreamDetail := ""

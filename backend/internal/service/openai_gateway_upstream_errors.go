@@ -237,8 +237,48 @@ const OpenAIRequestBodyTooLargeClientMessage = "Request payload is too large"
 
 const openAIRequestBodyTooLargeReason = GatewayFailureReason("openai_request_body_too_large")
 
+// openAILegacyCompactRouteNotFoundReason identifies an account-local endpoint
+// capability miss. It is intentionally separate from ordinary upstream 404s:
+// another account may expose legacy /responses/compact, but this signal must
+// not degrade the current account's general scheduler-health score.
+const openAILegacyCompactRouteNotFoundReason = GatewayFailureReason("openai_legacy_compact_route_not_found")
+
 func isOpenAIRequestBodyTooLargeError(statusCode int, upstreamMsg string, upstreamBody []byte) bool {
 	return statusCode == http.StatusRequestEntityTooLarge && !isOpenAIContextWindowError(upstreamMsg, upstreamBody)
+}
+
+// isOpenAILegacyCompactRouteNotFound recognizes only the bare route-level 404
+// emitted by OpenAI-compatible HTTP routers. Model/request errors also use 404
+// on some providers, so accepting a generic message or an error envelope here
+// would replay deterministic failures across the whole account pool.
+func isOpenAILegacyCompactRouteNotFound(statusCode int, responseBody []byte) bool {
+	if statusCode != http.StatusNotFound || len(responseBody) == 0 {
+		return false
+	}
+	var envelope map[string]json.RawMessage
+	if err := json.Unmarshal(responseBody, &envelope); err != nil || len(envelope) != 1 {
+		return false
+	}
+	rawDetail, ok := envelope["detail"]
+	if !ok {
+		return false
+	}
+	var detail string
+	return json.Unmarshal(rawDetail, &detail) == nil && detail == "Not Found"
+}
+
+func newOpenAILegacyCompactRouteNotFoundFailoverError(resp *http.Response, responseBody []byte) *UpstreamFailoverError {
+	failoverErr := newOpenAIUpstreamFailoverError(
+		resp.StatusCode,
+		resp.Header,
+		responseBody,
+		"Not Found",
+		false,
+	)
+	failoverErr.Scope = GatewayFailureScopeAccount
+	failoverErr.Reason = openAILegacyCompactRouteNotFoundReason
+	failoverErr.NextAccountAction = NextAccountRetry
+	return failoverErr
 }
 
 func newOpenAIUpstreamFailoverError(

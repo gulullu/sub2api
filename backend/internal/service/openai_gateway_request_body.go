@@ -496,15 +496,16 @@ func deriveOpenAIReasoningEffortFromModelCandidates(models []string) string {
 }
 
 type openAIRequestView struct {
-	body               []byte
-	Model              string
-	Stream             bool
-	PromptCacheKey     string
-	PreviousResponseID string
-	ServiceTier        string
-	ReasoningEffort    string
-	patches            []openAIRequestPatch
-	patchesDisabled    bool
+	body                  []byte
+	Model                 string
+	Stream                bool
+	PromptCacheKey        string
+	PreviousResponseID    string
+	HasPreviousResponseID bool
+	ServiceTier           string
+	ReasoningEffort       string
+	patches               []openAIRequestPatch
+	patchesDisabled       bool
 }
 
 type openAIRequestPatch struct {
@@ -551,6 +552,7 @@ func newOpenAIRequestView(body []byte) openAIRequestView {
 			}
 		case "previous_response_id":
 			if seen&previousResponseIDField == 0 {
+				view.HasPreviousResponseID = true
 				view.PreviousResponseID = strings.TrimSpace(value.String())
 				seen |= previousResponseIDField
 			}
@@ -631,7 +633,11 @@ func (v openAIRequestView) ApplyPatches() ([]byte, error) {
 	for _, patch := range v.patches {
 		var err error
 		if patch.delete {
-			body, err = sjson.DeleteBytes(body, patch.path)
+			if patch.path == "previous_response_id" {
+				body, _, err = stripAllTopLevelOpenAIPreviousResponseIDs(body)
+			} else {
+				body, err = sjson.DeleteBytes(body, patch.path)
+			}
 		} else {
 			body, err = sjson.SetBytes(body, patch.path, patch.value)
 		}
@@ -640,6 +646,93 @@ func (v openAIRequestView) ApplyPatches() ([]byte, error) {
 		}
 	}
 	return body, nil
+}
+
+// stripAllTopLevelOpenAIPreviousResponseIDs removes every top-level
+// previous_response_id member while preserving the order and raw values of all
+// other members. A streaming decode is intentional here: a map decode would
+// silently collapse unrelated duplicate keys, while sjson.DeleteBytes removes
+// only one duplicate per pass.
+func stripAllTopLevelOpenAIPreviousResponseIDs(body []byte) ([]byte, bool, error) {
+	if !json.Valid(body) {
+		return body, false, errors.New("openai request body is not valid JSON")
+	}
+	if trimmed := bytes.TrimSpace(body); len(trimmed) == 0 || trimmed[0] != '{' {
+		return body, false, errors.New("openai request body must be a JSON object")
+	}
+
+	hasPreviousResponseID := false
+	parseRawJSONView(body).ForEach(func(key, _ gjson.Result) bool {
+		if key.Str == "previous_response_id" {
+			hasPreviousResponseID = true
+			return false
+		}
+		return true
+	})
+	if !hasPreviousResponseID {
+		return body, false, nil
+	}
+
+	type topLevelMember struct {
+		key   string
+		value json.RawMessage
+	}
+
+	decoder := json.NewDecoder(bytes.NewReader(body))
+	opening, err := decoder.Token()
+	if err != nil {
+		return body, false, err
+	}
+	if delimiter, ok := opening.(json.Delim); !ok || delimiter != '{' {
+		return body, false, errors.New("openai request body must be a JSON object")
+	}
+
+	members := make([]topLevelMember, 0, 8)
+	removed := false
+	for decoder.More() {
+		keyToken, tokenErr := decoder.Token()
+		if tokenErr != nil {
+			return body, false, tokenErr
+		}
+		key, ok := keyToken.(string)
+		if !ok {
+			return body, false, errors.New("openai request body contains a non-string object key")
+		}
+
+		var value json.RawMessage
+		if decodeErr := decoder.Decode(&value); decodeErr != nil {
+			return body, false, decodeErr
+		}
+		if key == "previous_response_id" {
+			removed = true
+			continue
+		}
+		members = append(members, topLevelMember{key: key, value: value})
+	}
+	if _, err = decoder.Token(); err != nil {
+		return body, false, err
+	}
+	if !removed {
+		return body, false, nil
+	}
+
+	var normalized bytes.Buffer
+	normalized.Grow(len(body))
+	normalized.WriteByte('{')
+	for index, member := range members {
+		if index > 0 {
+			normalized.WriteByte(',')
+		}
+		encodedKey, marshalErr := json.Marshal(member.key)
+		if marshalErr != nil {
+			return body, false, marshalErr
+		}
+		normalized.Write(encodedKey)
+		normalized.WriteByte(':')
+		normalized.Write(member.value)
+	}
+	normalized.WriteByte('}')
+	return normalized.Bytes(), true, nil
 }
 
 func setOpenAIRequestMapPath(reqBody map[string]any, path string, value any) {

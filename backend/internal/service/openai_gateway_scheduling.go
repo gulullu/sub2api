@@ -286,8 +286,17 @@ func (e openAINoAvailableSelectionError) Unwrap() error {
 	return ErrNoAvailableAccounts
 }
 
-// openAICompactSupportTier classifies an OpenAI-compatible account by compact capability.
-// 0 = explicitly unsupported, 1 = unknown / not yet probed, 2 = explicitly supported.
+// openAICompactSupportTier classifies an OpenAI-compatible account for the
+// legacy /responses/compact endpoint. Native Responses v2 compaction does not
+// set requireCompact and therefore does not pass through this gate.
+//
+// OpenAI OAuth's capability probe exercises native v2 (/responses with a
+// compaction_trigger), not the legacy endpoint. A successful probe must not
+// make an OAuth account eligible for legacy compact: OpenAI's OAuth upstream
+// returns 404 for that route. Administrators can still opt in explicitly with
+// force_on for a compatible/custom OAuth upstream.
+//
+// 0 = ineligible, 1 = unknown / not yet probed, 2 = explicitly eligible.
 func openAICompactSupportTier(account *Account) int {
 	if account == nil {
 		return 0
@@ -296,6 +305,12 @@ func openAICompactSupportTier(account *Account) int {
 		return 2
 	}
 	if !account.IsOpenAI() {
+		return 0
+	}
+	if account.Type == AccountTypeOAuth {
+		if account.GetOpenAICompactMode() == OpenAICompactModeForceOn {
+			return 2
+		}
 		return 0
 	}
 	supported, known := account.OpenAICompactSupportKnown()

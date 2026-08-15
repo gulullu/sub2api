@@ -133,8 +133,13 @@ func newOpenAICompactionSchedulerTestService(accounts []Account, advanced bool) 
 
 func selectOpenAICompactionSchedulerTestAccount(t *testing.T, svc *OpenAIGatewayService, groupID int64, requireCompact bool) (*AccountSelectionResult, error) {
 	t.Helper()
+	return selectOpenAICompactionSchedulerTestAccountWithContext(t, context.Background(), svc, groupID, requireCompact)
+}
+
+func selectOpenAICompactionSchedulerTestAccountWithContext(t *testing.T, ctx context.Context, svc *OpenAIGatewayService, groupID int64, requireCompact bool) (*AccountSelectionResult, error) {
+	t.Helper()
 	selection, _, err := svc.SelectAccountWithSchedulerForCapability(
-		context.Background(),
+		ctx,
 		&groupID,
 		"",
 		"",
@@ -147,6 +152,105 @@ func selectOpenAICompactionSchedulerTestAccount(t *testing.T, svc *OpenAIGateway
 		false,
 	)
 	return selection, err
+}
+
+func TestOpenAIGatewayService_SelectAccountWithScheduler_OAuthLegacyCompactEligibility(t *testing.T) {
+	newAccount := func(id int64, accountType string, priority int, extra map[string]any) Account {
+		return Account{
+			ID:          id,
+			Platform:    PlatformOpenAI,
+			Type:        accountType,
+			Status:      StatusActive,
+			Schedulable: true,
+			Concurrency: 1,
+			Priority:    priority,
+			Extra:       extra,
+		}
+	}
+	responsesExtra := func(extra map[string]any) map[string]any {
+		if extra == nil {
+			extra = map[string]any{}
+		}
+		extra["openai_responses_supported"] = true
+		return extra
+	}
+
+	tests := []struct {
+		name           string
+		accounts       []Account
+		requireCompact bool
+		riskAccountIDs []int64
+		wantAccountID  int64
+		wantErr        error
+	}{
+		{
+			name: "legacy skips oauth auto unknown",
+			accounts: []Account{
+				newAccount(71070, AccountTypeOAuth, 0, responsesExtra(nil)),
+				newAccount(71071, AccountTypeAPIKey, 10, responsesExtra(nil)),
+			},
+			requireCompact: true,
+			wantAccountID:  71071,
+		},
+		{
+			name: "legacy skips oauth native probe true",
+			accounts: []Account{
+				newAccount(71072, AccountTypeOAuth, 0, responsesExtra(map[string]any{"openai_compact_supported": true})),
+				newAccount(71073, AccountTypeAPIKey, 10, responsesExtra(nil)),
+			},
+			requireCompact: true,
+			wantAccountID:  71073,
+		},
+		{
+			name: "legacy keeps oauth force on override",
+			accounts: []Account{
+				newAccount(71074, AccountTypeOAuth, 0, responsesExtra(map[string]any{"openai_compact_mode": OpenAICompactModeForceOn})),
+			},
+			requireCompact: true,
+			wantAccountID:  71074,
+		},
+		{
+			name: "native v2 remains eligible",
+			accounts: []Account{
+				newAccount(71075, AccountTypeOAuth, 0, responsesExtra(map[string]any{"openai_compact_supported": true})),
+			},
+			requireCompact: false,
+			wantAccountID:  71075,
+		},
+		{
+			name: "legacy does not escape prompt risk hard pool",
+			accounts: []Account{
+				newAccount(71076, AccountTypeOAuth, 0, responsesExtra(map[string]any{"openai_compact_supported": true})),
+				newAccount(71077, AccountTypeAPIKey, 0, responsesExtra(nil)),
+			},
+			requireCompact: true,
+			riskAccountIDs: []int64{71076},
+			wantErr:        ErrNoAvailableCompactAccounts,
+		},
+	}
+
+	for _, tt := range tests {
+		for _, advanced := range []bool{false, true} {
+			t.Run(tt.name+"/"+map[bool]string{false: "legacy_scheduler", true: "advanced_scheduler"}[advanced], func(t *testing.T) {
+				resetOpenAIAdvancedSchedulerSettingCacheForTest()
+				svc := newOpenAICompactionSchedulerTestService(tt.accounts, advanced)
+				ctx := context.Background()
+				if len(tt.riskAccountIDs) > 0 {
+					ctx = WithPromptRiskRouteAccounts(ctx, tt.riskAccountIDs)
+				}
+
+				selection, err := selectOpenAICompactionSchedulerTestAccountWithContext(t, ctx, svc, 91011, tt.requireCompact)
+				if tt.wantErr != nil {
+					require.ErrorIs(t, err, tt.wantErr)
+					require.Nil(t, selection, "legacy compact must not escape the prompt-risk account pool")
+					return
+				}
+				require.NoError(t, err)
+				require.NotNil(t, selection)
+				require.Equal(t, tt.wantAccountID, selection.Account.ID)
+			})
+		}
+	}
 }
 
 func TestOpenAIGatewayService_SelectAccountWithScheduler_NativeCompactionIgnoresLegacyCompactProbe(t *testing.T) {
@@ -486,11 +590,15 @@ func TestOpenAICompactSupportTier(t *testing.T) {
 		{name: "nil", account: nil, want: 0},
 		{name: "non openai", account: &Account{Platform: PlatformAnthropic}, want: 0},
 		{name: "grok", account: &Account{Platform: PlatformGrok}, want: 2},
-		{name: "openai unknown", account: &Account{Platform: PlatformOpenAI, Extra: map[string]any{}}, want: 1},
-		{name: "openai supported", account: &Account{Platform: PlatformOpenAI, Extra: map[string]any{"openai_compact_supported": true}}, want: 2},
-		{name: "openai unsupported", account: &Account{Platform: PlatformOpenAI, Extra: map[string]any{"openai_compact_supported": false}}, want: 0},
-		{name: "force on", account: &Account{Platform: PlatformOpenAI, Extra: map[string]any{"openai_compact_mode": OpenAICompactModeForceOn}}, want: 2},
-		{name: "force off overrides probe true", account: &Account{Platform: PlatformOpenAI, Extra: map[string]any{"openai_compact_mode": OpenAICompactModeForceOff, "openai_compact_supported": true}}, want: 0},
+		{name: "openai api key unknown", account: &Account{Platform: PlatformOpenAI, Type: AccountTypeAPIKey, Extra: map[string]any{}}, want: 1},
+		{name: "openai api key supported", account: &Account{Platform: PlatformOpenAI, Type: AccountTypeAPIKey, Extra: map[string]any{"openai_compact_supported": true}}, want: 2},
+		{name: "openai api key unsupported", account: &Account{Platform: PlatformOpenAI, Type: AccountTypeAPIKey, Extra: map[string]any{"openai_compact_supported": false}}, want: 0},
+		{name: "openai api key force on", account: &Account{Platform: PlatformOpenAI, Type: AccountTypeAPIKey, Extra: map[string]any{"openai_compact_mode": OpenAICompactModeForceOn}}, want: 2},
+		{name: "openai api key force off overrides probe true", account: &Account{Platform: PlatformOpenAI, Type: AccountTypeAPIKey, Extra: map[string]any{"openai_compact_mode": OpenAICompactModeForceOff, "openai_compact_supported": true}}, want: 0},
+		{name: "openai oauth unknown", account: &Account{Platform: PlatformOpenAI, Type: AccountTypeOAuth, Extra: map[string]any{}}, want: 0},
+		{name: "openai oauth native probe supported", account: &Account{Platform: PlatformOpenAI, Type: AccountTypeOAuth, Extra: map[string]any{"openai_compact_supported": true}}, want: 0},
+		{name: "openai oauth force on", account: &Account{Platform: PlatformOpenAI, Type: AccountTypeOAuth, Extra: map[string]any{"openai_compact_mode": OpenAICompactModeForceOn}}, want: 2},
+		{name: "openai oauth force off", account: &Account{Platform: PlatformOpenAI, Type: AccountTypeOAuth, Extra: map[string]any{"openai_compact_mode": OpenAICompactModeForceOff, "openai_compact_supported": true}}, want: 0},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
