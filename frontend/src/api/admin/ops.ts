@@ -138,6 +138,7 @@ export interface OpsRequestDetailsParams {
   end_time?: string
 
   kind?: OpsRequestDetailsKind
+  sla_only?: boolean
 
   platform?: string
   group_id?: number | null

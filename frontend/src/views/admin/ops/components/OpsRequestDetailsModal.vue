@@ -12,6 +12,7 @@ import { parseTimeRangeMinutes, formatDateTime } from '../utils/opsFormatters'
 export interface OpsRequestDetailsPreset {
   title: string
   kind?: OpsRequestDetailsParams['kind']
+  sla_only?: boolean
   sort?: OpsRequestDetailsParams['sort']
   min_duration_ms?: number
   max_duration_ms?: number
@@ -71,6 +72,7 @@ const fetchData = async () => {
       page: page.value,
       page_size: pageSize.value,
       kind: props.preset.kind ?? 'all',
+      sla_only: props.preset.sla_only,
       sort: props.preset.sort ?? 'created_at_desc'
     }
 
@@ -111,6 +113,7 @@ watch(
     props.platform,
     props.groupId,
     props.preset.kind,
+    props.preset.sla_only,
     props.preset.sort,
     props.preset.min_duration_ms,
     props.preset.max_duration_ms

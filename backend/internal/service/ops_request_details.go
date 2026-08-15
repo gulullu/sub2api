@@ -46,6 +46,9 @@ type OpsRequestDetailFilter struct {
 
 	// kind: success|error|all
 	Kind string
+	// SLAOnly keeps error drill-down aligned with the dashboard's SLA error set.
+	// It excludes local business-policy rejections and count_tokens probes.
+	SLAOnly bool
 
 	Platform string
 	GroupID  *int64

@@ -132,6 +132,7 @@ WITH combined AS (
   LEFT JOIN accounts a ON a.id = o.account_id
   WHERE o.created_at >= $1 AND o.created_at < $2
     AND COALESCE(o.status_code, 0) >= 400
+` + opsRequestDetailsSLAPredicate(filter != nil && filter.SLAOnly) + `
 )
 `
 
@@ -283,4 +284,11 @@ LIMIT $%d OFFSET $%d
 	}
 
 	return out, total, nil
+}
+
+func opsRequestDetailsSLAPredicate(slaOnly bool) string {
+	if !slaOnly {
+		return ""
+	}
+	return "    AND NOT o.is_business_limited\n    AND o.is_count_tokens = FALSE\n"
 }

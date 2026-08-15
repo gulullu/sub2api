@@ -583,6 +583,14 @@ func (h *OpsHandler) ListRequestDetails(c *gin.Context) {
 	}
 
 	filter.Kind = strings.TrimSpace(c.Query("kind"))
+	if v := strings.TrimSpace(c.Query("sla_only")); v != "" {
+		parsed, err := strconv.ParseBool(v)
+		if err != nil {
+			response.BadRequest(c, "Invalid sla_only")
+			return
+		}
+		filter.SLAOnly = parsed
+	}
 	filter.Platform = strings.TrimSpace(c.Query("platform"))
 	filter.Model = strings.TrimSpace(c.Query("model"))
 	filter.RequestID = strings.TrimSpace(c.Query("request_id"))
