@@ -38,6 +38,9 @@ func (a *Account) IsSchedulableForModelWithContext(ctx context.Context, requeste
 	if a == nil {
 		return false
 	}
+	if !PromptRiskRouteAllowsAccount(ctx, a.ID) {
+		return false
+	}
 	if !a.IsSchedulable() {
 		return false
 	}

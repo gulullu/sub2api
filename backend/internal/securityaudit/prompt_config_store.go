@@ -339,20 +339,50 @@ func (m *ConfigManager) buildNextStorage(current storageConfig, req UpdateConfig
 		Strategy: strings.TrimSpace(req.Strategy), WorkerCount: req.WorkerCount,
 		QueueCapacity: req.QueueCapacity, Scanners: append([]string(nil), req.Scanners...),
 		AllGroups: req.AllGroups, GroupIDs: append([]int64(nil), req.GroupIDs...),
+		RiskRouteAccountIDs: append([]int64(nil), current.RiskRouteAccountIDs...),
+		PromptTemplates:     clonePromptTemplates(current.PromptTemplates), ActivePromptTemplateID: current.ActivePromptTemplateID,
+		FlagThreshold:   float64Pointer(thresholdValue(current.FlagThreshold, DefaultFlagThreshold)),
+		BlockThreshold:  float64Pointer(thresholdValue(current.BlockThreshold, DefaultBlockThreshold)),
+		BlockHTTPStatus: current.BlockHTTPStatus, BlockMessage: current.BlockMessage,
 		ConfigVersion: current.ConfigVersion, UpdatedBy: actorID,
 		Endpoints: make([]StorageEndpoint, 0, len(req.Endpoints)),
+	}
+	if req.RiskRouteAccountIDs != nil {
+		next.RiskRouteAccountIDs = append([]int64(nil), (*req.RiskRouteAccountIDs)...)
+	}
+	if req.PromptTemplates != nil {
+		next.PromptTemplates = clonePromptTemplates(*req.PromptTemplates)
+	}
+	if req.ActivePromptTemplateID != nil {
+		next.ActivePromptTemplateID = strings.TrimSpace(*req.ActivePromptTemplateID)
+	}
+	if req.FlagThreshold != nil {
+		next.FlagThreshold = float64Pointer(*req.FlagThreshold)
+	}
+	if req.BlockThreshold != nil {
+		next.BlockThreshold = float64Pointer(*req.BlockThreshold)
+	}
+	if req.BlockHTTPStatus != nil {
+		next.BlockHTTPStatus = *req.BlockHTTPStatus
+	}
+	if req.BlockMessage != nil {
+		next.BlockMessage = strings.TrimSpace(*req.BlockMessage)
 	}
 	for _, endpoint := range req.Endpoints {
 		baseURL, err := NormalizeBaseURL(endpoint.BaseURL)
 		if err != nil {
 			return storageConfig{}, err
 		}
+		old, hadOld := currentByID[strings.TrimSpace(endpoint.ID)]
+		adapter := strings.TrimSpace(endpoint.Adapter)
+		if adapter == "" && hadOld {
+			adapter = old.Adapter
+		}
 		stored := StorageEndpoint{
 			ID: strings.TrimSpace(endpoint.ID), Name: strings.TrimSpace(endpoint.Name),
-			Protocol: strings.TrimSpace(endpoint.Protocol), BaseURL: baseURL, Model: strings.TrimSpace(endpoint.Model),
+			Protocol: strings.TrimSpace(endpoint.Protocol), Adapter: adapter, BaseURL: baseURL, Model: strings.TrimSpace(endpoint.Model),
 			TimeoutMS: endpoint.TimeoutMS, InputLimit: endpoint.InputLimit, Enabled: endpoint.Enabled,
 		}
-		old, hadOld := currentByID[stored.ID]
 		switch {
 		case endpoint.ClearToken:
 			stored.TokenCiphertext = ""
@@ -500,6 +530,10 @@ func (m *ConfigManager) clearLoadError() {
 func cloneStorageConfig(cfg storageConfig) storageConfig {
 	cfg.Scanners = append([]string(nil), cfg.Scanners...)
 	cfg.GroupIDs = append([]int64(nil), cfg.GroupIDs...)
+	cfg.RiskRouteAccountIDs = append([]int64(nil), cfg.RiskRouteAccountIDs...)
+	cfg.PromptTemplates = clonePromptTemplates(cfg.PromptTemplates)
+	cfg.FlagThreshold = float64Pointer(thresholdValue(cfg.FlagThreshold, DefaultFlagThreshold))
+	cfg.BlockThreshold = float64Pointer(thresholdValue(cfg.BlockThreshold, DefaultBlockThreshold))
 	cfg.Endpoints = append([]StorageEndpoint(nil), cfg.Endpoints...)
 	return cfg
 }
@@ -507,6 +541,8 @@ func cloneStorageConfig(cfg storageConfig) storageConfig {
 func cloneActiveConfig(cfg ActiveConfig) ActiveConfig {
 	cfg.Scanners = append([]string(nil), cfg.Scanners...)
 	cfg.GroupIDs = append([]int64(nil), cfg.GroupIDs...)
+	cfg.RiskRouteAccountIDs = append([]int64(nil), cfg.RiskRouteAccountIDs...)
+	cfg.PromptTemplates = clonePromptTemplates(cfg.PromptTemplates)
 	cfg.Endpoints = append([]ActiveEndpoint(nil), cfg.Endpoints...)
 	return cfg
 }

@@ -37,10 +37,69 @@ func TestDefaultConfigIsOff(t *testing.T) {
 	require.NoError(t, err)
 	require.Equal(t, ModeOff, active.EffectiveMode())
 	require.Equal(t, AllScannerIDs, storage.Scanners)
+	require.Equal(t, DefaultPromptTemplateID, storage.ActivePromptTemplateID)
+	require.Equal(t, DefaultFlagThreshold, thresholdValue(storage.FlagThreshold, -1))
+	require.Equal(t, DefaultBlockThreshold, thresholdValue(storage.BlockThreshold, -1))
+	require.Equal(t, DefaultBlockHTTPStatus, storage.BlockHTTPStatus)
+	require.Equal(t, DefaultBlockMessage, storage.BlockMessage)
+	require.Equal(t, []PromptTemplate{DefaultPromptTemplate()}, storage.PromptTemplates)
 	publicJSON, err := json.Marshal(PublicFromStorage(storage, true, nil))
 	require.NoError(t, err)
 	require.Contains(t, string(publicJSON), `"group_ids":[]`)
+	require.Contains(t, string(publicJSON), `"risk_route_account_ids":[]`)
 	require.Contains(t, string(publicJSON), `"endpoints":[]`)
+}
+
+func TestLegacyConfigDefaultsToQwenAdapterAndBuiltInPolicy(t *testing.T) {
+	storage, err := ParseStorageConfig(`{"enabled":false,"strategy":"priority","worker_count":1,"queue_capacity":10,"scanners":["pii"],"all_groups":true,"endpoints":[{"id":"old","name":"Old","protocol":"openai_compatible","base_url":"http://127.0.0.1:8080","model":"guard","timeout_ms":1000,"input_limit":1000}]}`)
+	require.NoError(t, err)
+	require.Equal(t, AdapterQwen3Guard, storage.Endpoints[0].Adapter)
+	require.Equal(t, DefaultPromptTemplateID, storage.ActivePromptTemplateID)
+	require.Equal(t, DefaultFlagThreshold, thresholdValue(storage.FlagThreshold, -1))
+	require.Equal(t, DefaultBlockThreshold, thresholdValue(storage.BlockThreshold, -1))
+}
+
+func TestOldUpdatePreservesNewPromptPolicyFields(t *testing.T) {
+	manager := &ConfigManager{encryptor: prefixEncryptor{}, encryptionKeyConfigured: true}
+	current := DefaultStorageConfig()
+	current.PromptTemplates = append(current.PromptTemplates, PromptTemplate{ID: "custom", Name: "Custom", SystemPrompt: "custom instructions"})
+	current.ActivePromptTemplateID = "custom"
+	current.FlagThreshold = float64Pointer(0.3)
+	current.BlockThreshold = float64Pointer(0.8)
+	current.BlockHTTPStatus = 422
+	current.BlockMessage = "custom block"
+	current.RiskRouteAccountIDs = []int64{9}
+	current.Endpoints = []StorageEndpoint{{ID: "one", Name: "One", Protocol: "openai_compatible", Adapter: AdapterConfidenceJSON, BaseURL: "http://127.0.0.1:8080", Model: "deepseek-chat", TimeoutMS: 1000, InputLimit: 1000}}
+	req := UpdateConfigRequest{ExpectedConfigVersion: 1, Strategy: "priority", WorkerCount: 1, QueueCapacity: 10, Scanners: []string{"pii"}, AllGroups: true,
+		Endpoints: []UpdateEndpoint{{ID: "one", Name: "One", Protocol: "openai_compatible", BaseURL: "http://127.0.0.1:8080", Model: "deepseek-chat", TimeoutMS: 1000, InputLimit: 1000}}}
+
+	next, err := manager.buildNextStorage(current, req, 9)
+	require.NoError(t, err)
+	require.Equal(t, AdapterConfidenceJSON, next.Endpoints[0].Adapter)
+	require.Equal(t, current.PromptTemplates, next.PromptTemplates)
+	require.Equal(t, "custom", next.ActivePromptTemplateID)
+	require.Equal(t, 0.3, thresholdValue(next.FlagThreshold, -1))
+	require.Equal(t, 0.8, thresholdValue(next.BlockThreshold, -1))
+	require.Equal(t, 422, next.BlockHTTPStatus)
+	require.Equal(t, "custom block", next.BlockMessage)
+	require.Equal(t, []int64{9}, next.RiskRouteAccountIDs)
+}
+
+func TestPromptAuditRiskRouteConfigRoundTrip(t *testing.T) {
+	manager := &ConfigManager{encryptor: prefixEncryptor{}, encryptionKeyConfigured: true}
+	routeIDs := []int64{102, 101, 102}
+	req := promptAuditUpdateRequest(1, 1, "")
+	req.RiskRouteAccountIDs = &routeIDs
+
+	next, err := manager.buildNextStorage(DefaultStorageConfig(), req, 5)
+	require.NoError(t, err)
+	require.Equal(t, []int64{101, 102}, next.RiskRouteAccountIDs)
+
+	active, err := ActiveFromStorage(next, true, prefixEncryptor{})
+	require.NoError(t, err)
+	require.Equal(t, next.RiskRouteAccountIDs, active.RiskRouteAccountIDs)
+	public := PublicFromStorage(next, true, nil)
+	require.Equal(t, next.RiskRouteAccountIDs, public.RiskRouteAccountIDs)
 }
 
 func TestBlockingLatestTurnOnlyConfigRoundTrip(t *testing.T) {
@@ -436,6 +495,7 @@ func TestUpdateConfigStrictBoundsAndKnownValues(t *testing.T) {
 		{name: "unknown scanner", mutate: func(req *UpdateConfigRequest) { req.Scanners = []string{"made_up"} }, reason: "prompt_audit_invalid_scanner"},
 		{name: "group required", mutate: func(req *UpdateConfigRequest) { req.AllGroups = false; req.GroupIDs = nil }, reason: "prompt_audit_groups_required"},
 		{name: "group positive", mutate: func(req *UpdateConfigRequest) { req.AllGroups = false; req.GroupIDs = []int64{0} }, reason: "prompt_audit_invalid_group"},
+		{name: "route account positive", mutate: func(req *UpdateConfigRequest) { values := []int64{0}; req.RiskRouteAccountIDs = &values }, reason: "prompt_audit_invalid_risk_route_account"},
 		{name: "timeout low", mutate: func(req *UpdateConfigRequest) { req.Endpoints[0].TimeoutMS = MinTimeoutMS - 1 }, reason: "prompt_audit_invalid_timeout"},
 		{name: "timeout high", mutate: func(req *UpdateConfigRequest) { req.Endpoints[0].TimeoutMS = MaxTimeoutMS + 1 }, reason: "prompt_audit_invalid_timeout"},
 		{name: "input low", mutate: func(req *UpdateConfigRequest) { req.Endpoints[0].InputLimit = MinInputLimit - 1 }, reason: "prompt_audit_invalid_input_limit"},
@@ -453,4 +513,14 @@ func TestUpdateConfigStrictBoundsAndKnownValues(t *testing.T) {
 			require.Equal(t, tt.reason, infraerrors.Reason(err))
 		})
 	}
+}
+
+func TestUpdateConfigAcceptsMaximumEndpointLimits(t *testing.T) {
+	req := promptAuditUpdateRequest(1, 1, "")
+	req.Endpoints[0].TimeoutMS = 40000
+	req.Endpoints[0].InputLimit = 400000
+
+	require.Equal(t, 40000, MaxTimeoutMS)
+	require.Equal(t, 400000, MaxInputLimit)
+	require.NoError(t, validateUpdateConfigRequest(req))
 }

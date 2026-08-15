@@ -152,7 +152,7 @@ func (s *OpenAIGatewayService) getStickySessionAccountID(ctx context.Context, gr
 }
 
 func (s *OpenAIGatewayService) setStickySessionAccountID(ctx context.Context, groupID *int64, sessionHash string, accountID int64, ttl time.Duration) error {
-	if s == nil || s.cache == nil || accountID <= 0 {
+	if s == nil || s.cache == nil || accountID <= 0 || PromptRiskRouteEnabled(ctx) {
 		return nil
 	}
 	primaryKey := s.openAISessionCacheKey(sessionHash)
@@ -179,7 +179,7 @@ func (s *OpenAIGatewayService) setStickySessionAccountID(ctx context.Context, gr
 }
 
 func (s *OpenAIGatewayService) refreshStickySessionTTL(ctx context.Context, groupID *int64, sessionHash string, ttl time.Duration) error {
-	if s == nil || s.cache == nil {
+	if s == nil || s.cache == nil || PromptRiskRouteEnabled(ctx) {
 		return nil
 	}
 	primaryKey := s.openAISessionCacheKey(sessionHash)

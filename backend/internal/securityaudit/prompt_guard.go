@@ -138,8 +138,19 @@ func (g *GuardEvaluator) Evaluate(ctx context.Context, cfg ActiveConfig, snapsho
 		kind = DecisionBlock
 	}
 	decision := &PromptDecision{Kind: kind, Result: aggregated, AllowNextStage: kind == DecisionAllow || kind == DecisionFlag}
+	if kind == DecisionFlag && matchedPromptScanner(aggregated.MatchedScanners, confidenceScoreKey) && len(cfg.RiskRouteAccountIDs) > 0 {
+		decision.RouteAccountIDs = append([]int64(nil), cfg.RiskRouteAccountIDs...)
+	}
 	if kind == DecisionBlock {
 		decision.ErrorCode = ErrorCodeBlocked
+		decision.BlockHTTPStatus = cfg.BlockHTTPStatus
+		if decision.BlockHTTPStatus < 400 || decision.BlockHTTPStatus > 499 {
+			decision.BlockHTTPStatus = DefaultBlockHTTPStatus
+		}
+		decision.BlockMessage = cfg.BlockMessage
+		if decision.BlockMessage == "" {
+			decision.BlockMessage = DefaultBlockMessage
+		}
 	}
 	if g.metrics != nil {
 		g.metrics.Observe(kind, g.clock.Now().Sub(start))
@@ -176,6 +187,15 @@ func (g *GuardEvaluator) Evaluate(ctx context.Context, cfg ActiveConfig, snapsho
 		}))
 	}
 	return decision, nil
+}
+
+func matchedPromptScanner(scanners []string, target string) bool {
+	for _, scanner := range scanners {
+		if scanner == target {
+			return true
+		}
+	}
+	return false
 }
 
 func logGuardFailure(snapshot PromptSnapshot, cfg ActiveConfig, kind DecisionKind, code, guardEndpointID string, latency time.Duration) {

@@ -1,7 +1,7 @@
 export default {
   promptAudit: {
     title: 'Prompt Audit',
-    description: 'Review user input asynchronously or block it synchronously through OpenAI-compatible Qwen3Guard nodes. Full prompts are stored with events for admin review.',
+    description: 'Review user input asynchronously or block it synchronously through OpenAI-compatible audit nodes. Full prompts are stored with events for admin review.',
     configVersion: 'Config version v{version}',
     tabs: { config: 'Configuration', events: 'Events' },
     actions: { refresh: 'Refresh runtime', retry: 'Retry', Allow: 'Allow', Warn: 'Warn', Block: 'Block' },
@@ -20,6 +20,7 @@ export default {
       politically_sensitive_topics: 'Politically Sensitive Topics',
       copyright_violation: 'Copyright Violation',
       jailbreak: 'Jailbreak',
+      confidence_json: 'Model confidence decision',
     },
     scannerDescriptions: {
       violent: 'Violence or threats of violence',
@@ -31,6 +32,7 @@ export default {
       politically_sensitive_topics: 'Politically sensitive topics',
       copyright_violation: 'Copyright infringement',
       jailbreak: 'Prompt injection or jailbreak attempt',
+      confidence_json: 'The general audit model flagged risk at the configured confidence threshold',
     },
     runtime: {
       title: 'Runtime overview',
@@ -42,13 +44,34 @@ export default {
     },
     metrics: { total: 'Total', allowed: 'Allowed', flagged: 'Flagged', blocked: 'Blocked', unavailable: 'Unavailable', timeouts: 'Timeouts', failovers: 'Failovers' },
     pool: {
-      title: 'Audit pool', description: 'Enabled OpenAI-compatible nodes are tried in order. Probes run from the server network.',
+      title: 'Audit pool', description: 'Enabled OpenAI-compatible nodes are tried in order. Probes validate a real audit response from the server network.',
       add: 'Add node', edit: 'Edit node', empty: 'No audit nodes configured.', node: 'Node', model: 'Model', limits: 'Timeout / chunk limit', credential: 'Credential and probe',
       configured: 'API Key configured', missing: 'API Key missing', invalid: 'API Key cannot be decrypted; re-enter it', probe: 'Test connection', probing: 'Probing…',
       probeProgress: 'Config validated ✓ · request sent · awaiting service response…', probeResult: 'Config ✓ · request ✓ · HTTP {http} · {status} · {latency} ms',
       name: 'Node name', id: 'Stable node ID', baseUrl: 'Base URL', apiKey: 'API Key', keepSecret: 'Leave blank to keep the saved API Key', reenterSecret: 'The saved API Key cannot be decrypted (encryption key changed); enter a new one',
-      secretHint: 'Plaintext exists only in this editor and is cleared immediately after a successful save.', clearSecret: 'Explicitly clear the saved API Key', timeout: 'Total timeout (ms)', inputLimit: 'Unicode characters per chunk',
+      secretHint: 'Plaintext exists only in this editor and is cleared immediately after a successful save.', clearSecret: 'Explicitly clear the saved API Key', timeout: 'Total timeout (ms)', inputLimit: 'Unicode characters per chunk', limitBounds: 'Allowed range: timeout 100–40,000 ms; input limit 128–400,000 Unicode characters.',
+      adapter: 'Response adapter',
+      adapters: { confidence_json: 'JSON confidence (DeepSeek / OpenAI-compatible)', qwen3guard: 'Qwen3Guard Safety / Categories' },
+      adapterHints: { confidence_json: 'Sends the active system prompt and expects JSON with confidence and reason.', qwen3guard: 'Uses the original Qwen3Guard Safety and Categories text format.' },
       toggleNode: 'Toggle node {name}', deleteConfirm: 'Remove “{name}” from the draft? It takes effect after saving.',
+    },
+    templates: {
+      title: 'Audit prompt templates', description: 'Choose the system prompt used by JSON-confidence nodes. Built-in templates are read-only; copy one to customize it.',
+      add: 'Add template', edit: 'Edit template', copy: 'Copy', copyName: '{name} copy', builtin: 'Built-in', active: 'Active', activate: 'Use template {name}',
+      name: 'Template name', systemPrompt: 'System prompt', deleteConfirm: 'Delete custom template “{name}”?',
+    },
+    decisionPolicy: {
+      title: 'Decision policy', description: 'Map the model confidence score to Allow, Flag, or Block, and customize the client-facing block response.',
+      flagThreshold: 'Flag threshold', blockThreshold: 'Block threshold', allow: 'Allow', flag: 'Flag and route', block: 'Block',
+      httpStatus: 'Block HTTP status (400–499)', blockMessage: 'Block response message',
+    },
+    riskRoute: {
+      title: 'High-risk routing accounts', description: 'For JSON-confidence results in the Flag range, restrict scheduling to a dedicated upstream account pool.',
+      selectedCount: '{count} selected', off: 'Routing off', blockingRequired: 'This account pool is editable only while Prompt Audit and synchronous blocking are enabled. Saved IDs are retained while disabled.',
+      selected: 'Selected hard pool', search: 'Search accounts by name, ID, platform, or type', loading: 'Loading all non-deleted upstream accounts…', noAccounts: 'No matching accounts.',
+      invalidAccount: 'Invalid account ID #{id}', unresolvedAccount: 'Account ID #{id}', remove: 'Remove account ID {id}',
+      hardPoolWarning: 'For confidence in [{flag}, {block}), scheduling is restricted to this hard pool. If every selected account is unavailable, the request returns HTTP 503 and never falls back to normal accounts.',
+      emptyHint: 'No accounts selected: high-risk routing is disabled and Flag requests use normal scheduling.',
     },
     policy: {
       title: 'Audit policy', description: 'Configure group scope, nine input-risk categories, workers, and queue bounds.', scope: 'Scope', allGroups: 'All groups', selectedGroups: 'Selected groups',
@@ -91,10 +114,14 @@ export default {
     },
     messages: { saved: 'Prompt Audit configuration saved; plaintext API Key state was cleared.', probeSucceeded: 'The audit node is reachable.', deleted: 'Deleted {count} audit events.' },
     errors: {
-      loadConfig: 'Unable to load Prompt Audit configuration.', loadRuntime: 'Unable to load Prompt Audit runtime.', loadGroups: 'Unable to load groups.', loadEvents: 'Unable to load audit events.', loadDetail: 'Unable to load event details.', saveConfig: 'Unable to save the configuration.', probe: 'Node probe failed.', delete: 'Unable to delete events.', previewDelete: 'Unable to create a deletion preview. Check the time range.', deleteConfirmation: 'The deletion confirmation is invalid or expired. Preview again.',
+      loadConfig: 'Unable to load Prompt Audit configuration.', loadRuntime: 'Unable to load Prompt Audit runtime.', loadGroups: 'Unable to load groups.', loadAccounts: 'Unable to load the complete upstream account list.', loadEvents: 'Unable to load audit events.', loadDetail: 'Unable to load event details.', saveConfig: 'Unable to save the configuration.', probe: 'Node probe failed.', delete: 'Unable to delete events.', previewDelete: 'Unable to create a deletion preview. Check the time range.', deleteConfirmation: 'The deletion confirmation is invalid or expired. Preview again.',
       prompt_audit_config_conflict: 'Another administrator updated this configuration. Reload the server version before deciding how to merge your draft.',
       prompt_audit_encryption_key_required: 'No fixed encryption key is configured, so audit node API Keys would be lost on restart. Set the TOTP_ENCRYPTION_KEY environment variable and restart the service first.',
       prompt_guard_requires_audit_enabled: 'Enable Prompt Audit before synchronous blocking.', prompt_audit_invalid_endpoint: 'The audit node configuration is invalid.', prompt_audit_endpoint_required: 'Enable at least one audit node before enabling Prompt Audit.', prompt_audit_groups_required: 'Select at least one group in selected-group mode.', prompt_audit_scanners_required: 'Enable at least one risk category.',
+      prompt_audit_invalid_endpoint_adapter: 'Choose a supported response adapter.', prompt_audit_invalid_templates: 'The prompt template list is invalid.', prompt_audit_invalid_template: 'A prompt template is empty or exceeds its length limit.', prompt_audit_duplicate_template: 'Prompt template IDs must be unique.', prompt_audit_active_template_not_found: 'The active prompt template no longer exists.', prompt_audit_too_many_templates: 'At most 32 prompt templates are allowed.',
+      prompt_audit_invalid_flag_threshold: 'The flag threshold must be between 0 and 1.', prompt_audit_invalid_block_threshold: 'The block threshold must be between 0 and 1.', prompt_audit_invalid_threshold_order: 'The flag threshold must be lower than the block threshold.', prompt_audit_invalid_block_http_status: 'The block HTTP status must be from 400 through 499.', prompt_audit_invalid_block_message: 'The block message must contain 1–1,000 characters.',
+      prompt_audit_invalid_risk_route_account: 'High-risk routing account IDs must be valid positive IDs.',
+      prompt_audit_invalid_timeout: 'Audit node timeout must be from 100 through 40,000 ms.', prompt_audit_invalid_input_limit: 'Audit node input limit must be from 128 through 400,000 Unicode characters.',
     },
   },
 }

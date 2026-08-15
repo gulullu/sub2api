@@ -180,6 +180,10 @@ func (h *OpenAIGatewayHandler) ChatCompletions(c *gin.Context) {
 				zap.Error(openAICompatibleSelectionErrorForLog(err, requestPlatform)),
 				zap.Int("excluded_account_count", len(failedAccountIDs)),
 			)
+			if isPromptRiskRouteSelectionError(c.Request.Context(), err) {
+				h.handleStreamingAwareError(c, http.StatusServiceUnavailable, "api_error", promptRiskRouteSafeMessage, streamStarted)
+				return
+			}
 			if len(failedAccountIDs) == 0 {
 				cls := classifyOpenAICompatibleNoAccountErrorFromGin(c, h.gatewayService, apiKey, reqModel, reqModel)
 				if !cls.ModelNotFound {

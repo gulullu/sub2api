@@ -1,7 +1,7 @@
 export default {
   promptAudit: {
     title: '提示词审计',
-    description: '通过 OpenAI 兼容 Qwen3Guard 节点异步复核或同步阻止用户输入；事件的完整提示词会入库保存，仅供管理员复核。',
+    description: '通过 OpenAI 兼容审计节点异步复核或同步阻止用户输入；事件的完整提示词会入库保存，仅供管理员复核。',
     configVersion: '配置版本 v{version}',
     tabs: { config: '配置', events: '事件' },
     actions: { refresh: '刷新运行态', retry: '重试', Allow: '放行', Warn: '警告', Block: '阻止' },
@@ -20,6 +20,7 @@ export default {
       politically_sensitive_topics: '政治敏感话题',
       copyright_violation: '版权侵犯',
       jailbreak: '越狱',
+      confidence_json: '模型置信度判定',
     },
     scannerDescriptions: {
       violent: '暴力或暴力威胁',
@@ -31,6 +32,7 @@ export default {
       politically_sensitive_topics: '政治敏感话题',
       copyright_violation: '版权侵权',
       jailbreak: '提示注入或越狱尝试',
+      confidence_json: '通用审核模型按配置的置信度阈值标记了风险',
     },
     runtime: {
       title: '运行概览',
@@ -42,13 +44,34 @@ export default {
     },
     metrics: { total: '总计', allowed: '放行', flagged: '标记', blocked: '阻止', unavailable: '不可用', timeouts: '超时', failovers: '故障切换' },
     pool: {
-      title: '审计池', description: '按顺序使用启用的 OpenAI 兼容节点；探测由服务端真实网络环境发起。',
+      title: '审计池', description: '按顺序使用启用的 OpenAI 兼容节点；连接测试会从服务端真实发起审计请求并校验响应。',
       add: '新增节点', edit: '编辑节点', empty: '尚未配置审计节点。', node: '节点', model: '模型', limits: '超时 / 单片上限', credential: '凭据与探测',
       configured: 'API Key 已配置', missing: '未配置 API Key', invalid: 'API Key 无法解密，请重新输入', probe: '连接测试', probing: '探测中…',
       probeProgress: '配置校验 ✓ · 请求已发送 · 等待服务响应…', probeResult: '配置校验 ✓ · 请求 ✓ · HTTP {http} · {status} · {latency} ms',
       name: '节点名称', id: '稳定节点 ID', baseUrl: 'Base URL', apiKey: 'API Key', keepSecret: '留空以保留已保存的 API Key', reenterSecret: '已保存的 API Key 无法解密（加密密钥已变更），请重新输入',
-      secretHint: '明文只在本次编辑内存中存在；保存成功后会立即清除。', clearSecret: '显式清除已保存的 API Key', timeout: '总超时（毫秒）', inputLimit: '单片 Unicode 字符上限',
+      secretHint: '明文只在本次编辑内存中存在；保存成功后会立即清除。', clearSecret: '显式清除已保存的 API Key', timeout: '总超时（毫秒）', inputLimit: '单片 Unicode 字符上限', limitBounds: '允许范围：超时 100–40,000 毫秒；输入上限 128–400,000 个 Unicode 字符。',
+      adapter: '响应适配器',
+      adapters: { confidence_json: 'JSON 置信度（DeepSeek / OpenAI 兼容）', qwen3guard: 'Qwen3Guard Safety / Categories' },
+      adapterHints: { confidence_json: '发送当前启用的系统审核提示词，并读取 confidence 与 reason JSON。', qwen3guard: '沿用原有 Qwen3Guard Safety 与 Categories 文本格式。' },
       toggleNode: '切换节点 {name}', deleteConfirm: '从草稿中删除节点“{name}”？保存配置后生效。',
+    },
+    templates: {
+      title: '审核提示词模板', description: '选择 JSON 置信度节点使用的系统提示词。内置模板只读，可复制后自定义。',
+      add: '新增模板', edit: '编辑模板', copy: '复制', copyName: '{name} 副本', builtin: '内置', active: '使用中', activate: '使用模板 {name}',
+      name: '模板名称', systemPrompt: '系统审核提示词', deleteConfirm: '删除自定义模板“{name}”？',
+    },
+    decisionPolicy: {
+      title: '判定策略', description: '按模型置信度决定放行、标记或阻断，并配置返回给下游的阻断响应。',
+      flagThreshold: '标记阈值', blockThreshold: '阻断阈值', allow: '放行', flag: '标记并分流', block: '阻断',
+      httpStatus: '阻断 HTTP 状态码（400–499）', blockMessage: '阻断提示文案',
+    },
+    riskRoute: {
+      title: '高风险分流账号', description: 'JSON 置信度处于标记区间时，只允许调度到指定的上游账号硬池。',
+      selectedCount: '已选 {count} 个', off: '分流关闭', blockingRequired: '仅在提示词审计和同步阻断都开启时可编辑此账号池；关闭时已保存的 ID 会继续保留。',
+      selected: '已选硬池', search: '按账号名称、ID、平台或类型搜索', loading: '正在加载全部未删除的上游账号…', noAccounts: '没有匹配账号。',
+      invalidAccount: '已失效账号 ID #{id}', unresolvedAccount: '账号 ID #{id}', remove: '移除账号 ID {id}',
+      hardPoolWarning: '当 confidence ∈ [{flag}, {block}) 时，只会从此硬池选号。所选账号全部不可用时，请求返回 HTTP 503，绝不回落普通账号。',
+      emptyHint: '未选择账号：高风险分流关闭，Flag 请求仍使用普通调度。',
     },
     policy: {
       title: '审计策略', description: '配置适用分组、九类输入风险、Worker 与队列边界。', scope: '适用范围', allGroups: '全部分组', selectedGroups: '指定分组',
@@ -91,10 +114,14 @@ export default {
     },
     messages: { saved: '提示词审计配置已保存，明文 API Key 状态已清除。', probeSucceeded: '审计节点连接正常。', deleted: '已删除 {count} 条审计事件。' },
     errors: {
-      loadConfig: '无法加载提示词审计配置。', loadRuntime: '无法加载提示词审计运行态。', loadGroups: '无法加载分组列表。', loadEvents: '无法加载审计事件。', loadDetail: '无法加载事件详情。', saveConfig: '配置保存失败。', probe: '节点探测失败。', delete: '事件删除失败。', previewDelete: '无法生成删除预览，请检查时间范围。', deleteConfirmation: '删除确认无效或已过期，请重新预览。',
+      loadConfig: '无法加载提示词审计配置。', loadRuntime: '无法加载提示词审计运行态。', loadGroups: '无法加载分组列表。', loadAccounts: '无法加载完整的上游账号列表。', loadEvents: '无法加载审计事件。', loadDetail: '无法加载事件详情。', saveConfig: '配置保存失败。', probe: '节点探测失败。', delete: '事件删除失败。', previewDelete: '无法生成删除预览，请检查时间范围。', deleteConfirmation: '删除确认无效或已过期，请重新预览。',
       prompt_audit_config_conflict: '配置已被其他管理员更新。请重新加载服务端配置，再决定如何合并本地草稿。',
       prompt_audit_encryption_key_required: '未配置固定加密密钥，审计节点 API Key 将在服务重启后失效。请先设置 TOTP_ENCRYPTION_KEY 环境变量并重启服务。',
       prompt_guard_requires_audit_enabled: '开启同步阻止前必须先启用提示词审计。', prompt_audit_invalid_endpoint: '审计节点配置无效。', prompt_audit_endpoint_required: '启用审计前至少需要一个启用节点。', prompt_audit_groups_required: '指定分组模式至少需要选择一个分组。', prompt_audit_scanners_required: '至少需要启用一个风险分类。',
+      prompt_audit_invalid_endpoint_adapter: '请选择受支持的响应适配器。', prompt_audit_invalid_templates: '审核提示词模板列表无效。', prompt_audit_invalid_template: '审核提示词模板为空或超出长度限制。', prompt_audit_duplicate_template: '审核提示词模板 ID 不能重复。', prompt_audit_active_template_not_found: '当前启用的审核提示词模板已不存在。', prompt_audit_too_many_templates: '审核提示词模板最多允许 32 个。',
+      prompt_audit_invalid_flag_threshold: '标记阈值必须在 0 到 1 之间。', prompt_audit_invalid_block_threshold: '阻断阈值必须在 0 到 1 之间。', prompt_audit_invalid_threshold_order: '标记阈值必须小于阻断阈值。', prompt_audit_invalid_block_http_status: '阻断 HTTP 状态码必须在 400 到 499 之间。', prompt_audit_invalid_block_message: '阻断提示文案长度必须为 1 到 1000 个字符。',
+      prompt_audit_invalid_risk_route_account: '高风险分流账号必须是有效的正数 ID。',
+      prompt_audit_invalid_timeout: '审计节点超时必须在 100 到 40,000 毫秒之间。', prompt_audit_invalid_input_limit: '审计节点输入上限必须在 128 到 400,000 个 Unicode 字符之间。',
     },
   },
 }

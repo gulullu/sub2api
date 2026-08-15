@@ -154,6 +154,13 @@ func TestCoordinatorPreservesIndependentEngineFactsAndMapsOnlyGatewayOutcome(t *
 	require.Equal(t, ErrorCodeBlocked, decision.ErrorCode)
 }
 
+func TestCoordinatorUsesPromptBlockResponseSnapshot(t *testing.T) {
+	promptDecision := &PromptDecision{Kind: DecisionBlock, BlockHTTPStatus: http.StatusUnprocessableEntity, BlockMessage: "custom policy message"}
+	decision := NewCoordinator(&fakeLegacyEngine{}, &fakePromptEngine{mode: ModeBlocking, decision: promptDecision}).Check(context.Background(), Request{})
+	require.Equal(t, http.StatusUnprocessableEntity, decision.HTTPStatus)
+	require.Equal(t, "custom policy message", decision.ClientMessage)
+}
+
 func TestCoordinatorAsyncEnqueueFailuresNeverChangeResponseOrDownstreamDispatch(t *testing.T) {
 	for _, enqueueErr := range []error{ErrQueueFull, ErrQueueAdmissionBusy, errors.New("redis unavailable"), errors.New("publish failed")} {
 		prompt := &fakePromptEngine{mode: ModeAsync, err: enqueueErr}

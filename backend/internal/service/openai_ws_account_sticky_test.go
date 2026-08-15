@@ -2,12 +2,105 @@ package service
 
 import (
 	"context"
+	"errors"
 	"testing"
 	"time"
 
 	"github.com/Wei-Shaw/sub2api/internal/config"
 	"github.com/stretchr/testify/require"
 )
+
+func TestOpenAIGatewayService_PreviousResponseOutsidePromptRiskPoolConflicts(t *testing.T) {
+	groupID := int64(23)
+	account := Account{
+		ID: 2, Platform: PlatformOpenAI, Type: AccountTypeAPIKey,
+		Status: StatusActive, Schedulable: true, Concurrency: 2,
+		Extra: map[string]any{"openai_apikey_responses_websockets_v2_enabled": true},
+	}
+	cache := &stubGatewayCache{}
+	store := NewOpenAIWSStateStore(cache)
+	svc := &OpenAIGatewayService{
+		accountRepo: stubOpenAIAccountRepo{accounts: []Account{account}}, cache: cache,
+		cfg: newOpenAIWSV2TestConfig(), concurrencyService: NewConcurrencyService(stubConcurrencyCache{}),
+		openaiWSStateStore: store,
+	}
+	require.NoError(t, store.BindResponseAccount(context.Background(), groupID, "resp_risk_conflict", account.ID, time.Hour))
+	ctx := WithPromptRiskRouteAccounts(context.Background(), []int64{3})
+
+	selection, err := svc.SelectAccountByPreviousResponseID(ctx, &groupID, "resp_risk_conflict", "gpt-5.1", nil, false)
+
+	require.Nil(t, selection)
+	require.True(t, errors.Is(err, ErrPromptRiskRouteStateConflict))
+	boundID, getErr := store.GetResponseAccount(context.Background(), groupID, "resp_risk_conflict")
+	require.NoError(t, getErr)
+	require.Equal(t, account.ID, boundID, "risk request must preserve the ordinary response binding")
+}
+
+func TestOpenAIGatewayService_PromptRiskNonMovablePreviousResponseFailsClosedWithoutVerifiedBinding(t *testing.T) {
+	groupID := int64(23)
+	ctx := WithPromptRiskRouteAccounts(context.Background(), []int64{2})
+
+	t.Run("nil service state", func(t *testing.T) {
+		var svc *OpenAIGatewayService
+		selection, err := svc.selectAccountByPreviousResponseIDForCapability(ctx, &groupID, "resp_nil_store", "gpt-5.1", nil, "", false)
+		require.Nil(t, selection)
+		require.ErrorIs(t, err, ErrPromptRiskRouteStateConflict)
+	})
+
+	t.Run("binding missing", func(t *testing.T) {
+		svc := &OpenAIGatewayService{openaiWSStateStore: NewOpenAIWSStateStore(nil)}
+		selection, err := svc.selectAccountByPreviousResponseIDForCapability(ctx, &groupID, "resp_missing", "gpt-5.1", nil, "", false)
+		require.Nil(t, selection)
+		require.ErrorIs(t, err, ErrPromptRiskRouteStateConflict)
+	})
+
+	t.Run("binding lookup error", func(t *testing.T) {
+		svc := &OpenAIGatewayService{openaiWSStateStore: promptRiskRouteFailingStateStore{
+			OpenAIWSStateStore: NewOpenAIWSStateStore(nil),
+		}}
+		selection, err := svc.selectAccountByPreviousResponseIDForCapability(ctx, &groupID, "resp_lookup_error", "gpt-5.1", nil, "", false)
+		require.Nil(t, selection)
+		require.ErrorIs(t, err, ErrPromptRiskRouteStateConflict)
+	})
+}
+
+func TestOpenAIGatewayService_PromptRiskNonMovablePreviousResponseUsesVerifiedPoolAccount(t *testing.T) {
+	groupID := int64(23)
+	account := Account{
+		ID: 2, Platform: PlatformOpenAI, Type: AccountTypeAPIKey,
+		Status: StatusActive, Schedulable: true, Concurrency: 2,
+		Extra: map[string]any{"openai_apikey_responses_websockets_v2_enabled": true},
+	}
+	store := NewOpenAIWSStateStore(nil)
+	svc := &OpenAIGatewayService{
+		accountRepo: stubOpenAIAccountRepo{accounts: []Account{account}},
+		cfg:         newOpenAIWSV2TestConfig(), concurrencyService: NewConcurrencyService(stubConcurrencyCache{}),
+		openaiWSStateStore: store,
+	}
+	require.NoError(t, store.BindResponseAccount(context.Background(), groupID, "resp_verified", account.ID, time.Hour))
+	ctx := WithPromptRiskRouteAccounts(context.Background(), []int64{account.ID})
+
+	selection, decision, err := svc.SelectAccountWithSchedulerForCapability(
+		ctx, &groupID, "resp_verified", "", "gpt-5.1", nil,
+		OpenAIUpstreamTransportResponsesWebsocketV2, "", false, false, true,
+	)
+
+	require.NoError(t, err)
+	require.NotNil(t, selection)
+	require.Equal(t, account.ID, selection.Account.ID)
+	require.True(t, decision.StickyPreviousHit)
+	if selection.ReleaseFunc != nil {
+		selection.ReleaseFunc()
+	}
+}
+
+type promptRiskRouteFailingStateStore struct {
+	OpenAIWSStateStore
+}
+
+func (promptRiskRouteFailingStateStore) GetResponseAccount(context.Context, int64, string) (int64, error) {
+	return 0, errors.New("state store unavailable")
+}
 
 func TestOpenAIGatewayService_SelectAccountByPreviousResponseID_Hit(t *testing.T) {
 	ctx := context.Background()

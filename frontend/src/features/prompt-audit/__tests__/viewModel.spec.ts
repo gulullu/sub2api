@@ -3,6 +3,9 @@ import type { PromptAuditConfig } from '../types'
 import {
   buildUpdateRequest,
   configToDraft,
+  createDefaultEndpoint,
+  DEFAULT_BLOCK_MESSAGE,
+  DEFAULT_PROMPT_TEMPLATE_ID,
   draftFingerprint,
   emptyEventFilters,
   eventFilterPayload,
@@ -36,7 +39,36 @@ const config = (): PromptAuditConfig => ({
 describe('Prompt Audit view model', () => {
   it('normalizes legacy null collections from the public config', () => {
     const legacy = { ...config(), group_ids: null, scanners: null, endpoints: null } as unknown as PromptAuditConfig
-    expect(configToDraft(legacy)).toMatchObject({ group_ids: [], scanners: [], endpoints: [] })
+    expect(configToDraft(legacy)).toMatchObject({
+      group_ids: [], scanners: [], endpoints: [], risk_route_account_ids: [], active_prompt_template_id: DEFAULT_PROMPT_TEMPLATE_ID,
+      flag_threshold: 0.4, block_threshold: 0.7, block_http_status: 403, block_message: DEFAULT_BLOCK_MESSAGE,
+    })
+  })
+
+  it('normalizes legacy endpoints and creates confidence nodes with DeepSeek limits', () => {
+    expect(configToDraft(config()).endpoints[0].adapter).toBe('qwen3guard')
+    expect(createDefaultEndpoint(1)).toMatchObject({
+      adapter: 'confidence_json', model: 'deepseek-chat', timeout_ms: 4000, input_limit: 40000,
+    })
+  })
+
+  it('includes templates, thresholds, block response, and endpoint adapter in updates', () => {
+    const payload = buildUpdateRequest(configToDraft(config()))
+    expect(payload).toMatchObject({
+      active_prompt_template_id: DEFAULT_PROMPT_TEMPLATE_ID,
+      flag_threshold: 0.4,
+      block_threshold: 0.7,
+      block_http_status: 403,
+      block_message: DEFAULT_BLOCK_MESSAGE,
+      endpoints: [expect.objectContaining({ adapter: 'qwen3guard' })],
+    })
+    expect(payload.prompt_templates).toHaveLength(1)
+  })
+
+  it('preserves and canonicalizes persisted high-risk route account IDs on save', () => {
+    const draft = configToDraft({ ...config(), risk_route_account_ids: [9, 2, 9] })
+    expect(draft.risk_route_account_ids).toEqual([2, 9])
+    expect(buildUpdateRequest(draft).risk_route_account_ids).toEqual([2, 9])
   })
 
   it('models all nine official input scanners', () => {

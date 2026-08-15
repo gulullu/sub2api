@@ -22,11 +22,37 @@ describe('Prompt Audit API', () => {
   it('sends a temporary probe token only in the request and never invents response credentials', async () => {
     client.post.mockResolvedValue({ data: { ok: true, token_applied: true } })
     const result = await promptAuditAPI.probeEndpoint({
-      id: 'guard-1', name: 'Guard', protocol: 'openai_compatible', base_url: 'http://127.0.0.1:8000', model: 'guard',
+      id: 'guard-1', name: 'Guard', protocol: 'openai_compatible', adapter: 'confidence_json', base_url: 'http://127.0.0.1:8000', model: 'guard',
       token: 'api-canary-secret', clear_token: false, timeout_ms: 1000, input_limit: 1000, enabled: true, has_token: false, token_status: 'missing',
     })
-    expect(client.post).toHaveBeenCalledWith('/admin/prompt-audit/endpoints/probe', expect.objectContaining({ endpoint: expect.objectContaining({ token: 'api-canary-secret' }) }))
+    expect(client.post).toHaveBeenCalledWith('/admin/prompt-audit/endpoints/probe', expect.objectContaining({ endpoint: expect.objectContaining({ token: 'api-canary-secret', adapter: 'confidence_json' }) }))
     expect(JSON.stringify(result)).not.toContain('api-canary-secret')
+  })
+
+  it('loads every account page before resolving stale risk-route IDs', async () => {
+    client.get.mockImplementation(async (url: string, options?: { params?: { page?: number } }) => {
+      expect(url).toBe('/admin/accounts')
+      const page = options?.params?.page ?? 1
+      return {
+        data: page === 1
+          ? { items: [{ id: 1, name: 'One', platform: 'openai', type: 'oauth', status: 'active' }], total: 2, page: 1, page_size: 1, pages: 2 }
+          : { items: [{ id: 2, name: 'Two', platform: 'anthropic', type: 'setup-token', status: 'inactive' }], total: 2, page: 2, page_size: 1, pages: 2 },
+      }
+    })
+    await expect(promptAuditAPI.listRiskRouteAccounts()).resolves.toEqual([
+      { id: 1, name: 'One', platform: 'openai', type: 'oauth', status: 'active' },
+      { id: 2, name: 'Two', platform: 'anthropic', type: 'setup-token', status: 'inactive' },
+    ])
+    expect(client.get).toHaveBeenCalledTimes(2)
+    expect(client.get).toHaveBeenNthCalledWith(1, '/admin/accounts', expect.objectContaining({ params: expect.objectContaining({ page: 1, page_size: 1000, lite: '1' }) }))
+    expect(client.get).toHaveBeenNthCalledWith(2, '/admin/accounts', expect.objectContaining({ params: expect.objectContaining({ page: 2, page_size: 1000, lite: '1' }) }))
+  })
+
+  it('rejects an incomplete account list instead of mislabeling persisted IDs as deleted', async () => {
+    client.get.mockResolvedValue({
+      data: { items: [{ id: 1, name: 'One', platform: 'openai', type: 'oauth', status: 'active' }], total: 2, page: 1, page_size: 1000, pages: 1 },
+    })
+    await expect(promptAuditAPI.listRiskRouteAccounts()).rejects.toThrow('account list is incomplete')
   })
 
   it('passes a server preview token through the confirmed filter-delete contract', async () => {

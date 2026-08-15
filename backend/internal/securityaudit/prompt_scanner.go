@@ -32,32 +32,44 @@ func AggregateResults(results []*NormalizedResult, latency time.Duration) (*Norm
 	}
 	aggregated := &NormalizedResult{
 		Decision: EventPass, RiskLevel: RiskLow, Action: ActionAllow,
-		ScannerBackend: "qwen3guard-openai", Categories: []string{}, MatchedScanners: []string{},
+		Categories: []string{}, MatchedScanners: []string{},
 		ScannerScores: map[string]float64{}, ScannerEvidence: map[string]string{}, ChunkTotal: len(results),
 		LatencyMS: int(latency.Milliseconds()),
 	}
 	categories := map[string]struct{}{}
 	matched := map[string]struct{}{}
 	unknown := map[string]struct{}{}
+	selectedResult := false
+	selectedConfidence := 0.0
+	confidenceResult := false
+	confidenceReason := ""
 	for _, result := range results {
 		if result == nil {
 			return nil, errors.New("prompt guard partial result is not allowed")
 		}
-		if resultSeverity(result.Decision) > resultSeverity(aggregated.Decision) {
+		candidateDecisionSeverity := resultSeverity(result.Decision)
+		selectedDecisionSeverity := resultSeverity(aggregated.Decision)
+		moreSevere := candidateDecisionSeverity > selectedDecisionSeverity
+		sameDecisionSeverity := candidateDecisionSeverity == selectedDecisionSeverity
+		higherRisk := sameDecisionSeverity && riskSeverity(result.RiskLevel) > riskSeverity(aggregated.RiskLevel)
+		sameRisk := riskSeverity(result.RiskLevel) == riskSeverity(aggregated.RiskLevel)
+		higherConfidence := sameDecisionSeverity && sameRisk && result.Confidence > selectedConfidence
+		if moreSevere {
 			aggregated.Decision = result.Decision
-			aggregated.RiskLevel = result.RiskLevel
 			aggregated.Action = result.Action
+		}
+		if moreSevere || higherRisk {
+			aggregated.RiskLevel = result.RiskLevel
+		}
+		if moreSevere || higherRisk || higherConfidence || !selectedResult {
 			aggregated.Safety = result.Safety
 			aggregated.GuardEndpointID = result.GuardEndpointID
+			aggregated.ScannerBackend = result.ScannerBackend
 			aggregated.ScannerVersion = result.ScannerVersion
 			aggregated.PolicyID = result.PolicyID
 			aggregated.PolicyVersion = result.PolicyVersion
-		}
-		if aggregated.GuardEndpointID == "" {
-			aggregated.GuardEndpointID = result.GuardEndpointID
-			aggregated.ScannerVersion = result.ScannerVersion
-			aggregated.PolicyID = result.PolicyID
-			aggregated.PolicyVersion = result.PolicyVersion
+			selectedConfidence = result.Confidence
+			selectedResult = true
 		}
 		for _, category := range result.Categories {
 			categories[category] = struct{}{}
@@ -66,8 +78,17 @@ func AggregateResults(results []*NormalizedResult, latency time.Duration) (*Norm
 			matched[scanner] = struct{}{}
 		}
 		for scanner, score := range result.ScannerScores {
-			if score > aggregated.ScannerScores[scanner] {
+			currentScore, hasScore := aggregated.ScannerScores[scanner]
+			if !hasScore || score > currentScore {
 				aggregated.ScannerScores[scanner] = score
+			}
+			if scanner == confidenceScoreKey && (!confidenceResult || score > aggregated.Confidence) {
+				aggregated.Confidence = score
+				confidenceReason = result.ScannerEvidence[confidenceScoreKey]
+				if strings.TrimSpace(confidenceReason) == "" {
+					confidenceReason = result.Reason
+				}
+				confidenceResult = true
 			}
 		}
 		for scanner, evidence := range result.ScannerEvidence {
@@ -82,6 +103,10 @@ func AggregateResults(results []*NormalizedResult, latency time.Duration) (*Norm
 	aggregated.Categories = orderedScannerKeys(categories)
 	aggregated.MatchedScanners = orderedScannerKeys(matched)
 	aggregated.UnknownCategories = sortedKeys(unknown)
+	if confidenceResult {
+		aggregated.Reason = RedactPreview(confidenceReason, 160)
+		aggregated.ScannerEvidence[confidenceScoreKey] = aggregated.Reason
+	}
 	return aggregated, nil
 }
 
@@ -90,6 +115,19 @@ func resultSeverity(decision EventDecision) int {
 	case EventCritical:
 		return 3
 	case EventFlag:
+		return 2
+	default:
+		return 1
+	}
+}
+
+func riskSeverity(risk RiskLevel) int {
+	switch risk {
+	case RiskCritical:
+		return 4
+	case RiskHigh:
+		return 3
+	case RiskMedium:
 		return 2
 	default:
 		return 1

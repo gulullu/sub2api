@@ -400,10 +400,17 @@ func (s *OpenAIGatewayService) selectAccountByPreviousResponseIDForCapability(
 	requireCompact bool,
 ) (*AccountSelectionResult, error) {
 	if s == nil {
+		if PromptRiskRouteEnabled(ctx) && strings.TrimSpace(previousResponseID) != "" {
+			return nil, newPromptRiskRouteStateConflictError()
+		}
 		return nil, nil
 	}
+	riskRouteRequiresBinding := PromptRiskRouteEnabled(ctx) && strings.TrimSpace(previousResponseID) != ""
 	accountID, account, responseID, store := s.resolveAccountByPreviousResponseIDForCapability(ctx, groupID, previousResponseID, requestedModel, excludedIDs, requiredCapability, requireCompact)
 	if accountID <= 0 || account == nil || store == nil {
+		if riskRouteRequiresBinding {
+			return nil, newPromptRiskRouteStateConflictError()
+		}
 		return nil, nil
 	}
 
@@ -433,6 +440,9 @@ func (s *OpenAIGatewayService) selectAccountByPreviousResponseIDForCapability(
 				MaxWaiting:     cfg.StickySessionMaxWaiting,
 			},
 		}), nil
+	}
+	if riskRouteRequiresBinding {
+		return nil, newPromptRiskRouteStateConflictError()
 	}
 	return nil, nil
 }
@@ -473,6 +483,12 @@ func (s *OpenAIGatewayService) resolveAccountByPreviousResponseIDForCapability(
 
 	accountID, err := store.GetResponseAccount(ctx, derefGroupID(groupID), responseID)
 	if err != nil || accountID <= 0 {
+		return 0, nil, "", nil
+	}
+	// A flagged prompt must never inherit a previous-response binding outside
+	// the audit-selected hard pool. Keep the binding intact for ordinary future
+	// requests; simply skip it for this request and continue within the pool.
+	if !PromptRiskRouteAllowsAccount(ctx, accountID) {
 		return 0, nil, "", nil
 	}
 	if excludedIDs != nil {

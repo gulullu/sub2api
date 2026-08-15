@@ -20,10 +20,10 @@ const (
 	MaxQueueCapacity     = 100000
 	DefaultTimeoutMS     = 3000
 	MinTimeoutMS         = 100
-	MaxTimeoutMS         = 30000
+	MaxTimeoutMS         = 40000
 	DefaultInputLimit    = 4000
 	MinInputLimit        = 128
-	MaxInputLimit        = 100000
+	MaxInputLimit        = 400000
 	DefaultPayloadTTL    = 30 * time.Minute
 )
 
@@ -55,6 +55,7 @@ type StorageEndpoint struct {
 	ID              string `json:"id"`
 	Name            string `json:"name"`
 	Protocol        string `json:"protocol"`
+	Adapter         string `json:"adapter"`
 	BaseURL         string `json:"base_url"`
 	Model           string `json:"model"`
 	TokenCiphertext string `json:"token_ciphertext,omitempty"`
@@ -74,6 +75,13 @@ type storageConfig struct {
 	Scanners               []string          `json:"scanners"`
 	AllGroups              bool              `json:"all_groups"`
 	GroupIDs               []int64           `json:"group_ids"`
+	RiskRouteAccountIDs    []int64           `json:"risk_route_account_ids"`
+	PromptTemplates        []PromptTemplate  `json:"prompt_templates"`
+	ActivePromptTemplateID string            `json:"active_prompt_template_id"`
+	FlagThreshold          *float64          `json:"flag_threshold"`
+	BlockThreshold         *float64          `json:"block_threshold"`
+	BlockHTTPStatus        int               `json:"block_http_status"`
+	BlockMessage           string            `json:"block_message"`
 	Endpoints              []StorageEndpoint `json:"endpoints"`
 	ConfigVersion          int64             `json:"config_version"`
 	UpdatedAt              time.Time         `json:"updated_at"`
@@ -82,15 +90,20 @@ type storageConfig struct {
 }
 
 type ActiveEndpoint struct {
-	ID         string
-	Name       string
-	Protocol   string
-	BaseURL    string
-	Model      string
-	Token      string
-	TimeoutMS  int
-	InputLimit int
-	Enabled    bool
+	ID               string
+	Name             string
+	Protocol         string
+	Adapter          string
+	BaseURL          string
+	Model            string
+	Token            string
+	TimeoutMS        int
+	InputLimit       int
+	Enabled          bool
+	PromptTemplateID string
+	SystemPrompt     string
+	FlagThreshold    float64
+	BlockThreshold   float64
 	// TokenInvalid marks an endpoint whose persisted token ciphertext cannot be
 	// decrypted with the current encryption key (key changed or auto-generated
 	// on restart). The endpoint is kept visible for admins but excluded from
@@ -110,6 +123,13 @@ type ActiveConfig struct {
 	Scanners               []string
 	AllGroups              bool
 	GroupIDs               []int64
+	RiskRouteAccountIDs    []int64
+	PromptTemplates        []PromptTemplate
+	ActivePromptTemplateID string
+	FlagThreshold          float64
+	BlockThreshold         float64
+	BlockHTTPStatus        int
+	BlockMessage           string
 	Endpoints              []ActiveEndpoint
 	ConfigVersion          int64
 	UpdatedAt              time.Time
@@ -121,6 +141,7 @@ type PublicEndpoint struct {
 	ID          string `json:"id"`
 	Name        string `json:"name"`
 	Protocol    string `json:"protocol"`
+	Adapter     string `json:"adapter"`
 	BaseURL     string `json:"base_url"`
 	Model       string `json:"model"`
 	TimeoutMS   int    `json:"timeout_ms"`
@@ -142,6 +163,13 @@ type PublicConfig struct {
 	Scanners               []string         `json:"scanners"`
 	AllGroups              bool             `json:"all_groups"`
 	GroupIDs               []int64          `json:"group_ids"`
+	RiskRouteAccountIDs    []int64          `json:"risk_route_account_ids"`
+	PromptTemplates        []PromptTemplate `json:"prompt_templates"`
+	ActivePromptTemplateID string           `json:"active_prompt_template_id"`
+	FlagThreshold          float64          `json:"flag_threshold"`
+	BlockThreshold         float64          `json:"block_threshold"`
+	BlockHTTPStatus        int              `json:"block_http_status"`
+	BlockMessage           string           `json:"block_message"`
 	Endpoints              []PublicEndpoint `json:"endpoints"`
 	ConfigVersion          int64            `json:"config_version"`
 	UpdatedAt              time.Time        `json:"updated_at"`
@@ -153,6 +181,7 @@ type UpdateEndpoint struct {
 	ID         string `json:"id" binding:"required"`
 	Name       string `json:"name" binding:"required"`
 	Protocol   string `json:"protocol"`
+	Adapter    string `json:"adapter"`
 	BaseURL    string `json:"base_url" binding:"required"`
 	Model      string `json:"model"`
 	Token      string `json:"token,omitempty"`
@@ -163,21 +192,30 @@ type UpdateEndpoint struct {
 }
 
 type UpdateConfigRequest struct {
-	ExpectedConfigVersion  int64            `json:"expected_config_version" binding:"required"`
-	Enabled                bool             `json:"enabled"`
-	BlockingEnabled        bool             `json:"blocking_enabled"`
-	BlockingLatestTurnOnly bool             `json:"blocking_latest_turn_only"`
-	StorePassEvents        bool             `json:"store_pass_events"`
-	Strategy               string           `json:"strategy"`
-	WorkerCount            int              `json:"worker_count"`
-	QueueCapacity          int              `json:"queue_capacity"`
-	Scanners               []string         `json:"scanners"`
-	AllGroups              bool             `json:"all_groups"`
-	GroupIDs               []int64          `json:"group_ids"`
-	Endpoints              []UpdateEndpoint `json:"endpoints"`
+	ExpectedConfigVersion  int64             `json:"expected_config_version" binding:"required"`
+	Enabled                bool              `json:"enabled"`
+	BlockingEnabled        bool              `json:"blocking_enabled"`
+	BlockingLatestTurnOnly bool              `json:"blocking_latest_turn_only"`
+	StorePassEvents        bool              `json:"store_pass_events"`
+	Strategy               string            `json:"strategy"`
+	WorkerCount            int               `json:"worker_count"`
+	QueueCapacity          int               `json:"queue_capacity"`
+	Scanners               []string          `json:"scanners"`
+	AllGroups              bool              `json:"all_groups"`
+	GroupIDs               []int64           `json:"group_ids"`
+	RiskRouteAccountIDs    *[]int64          `json:"risk_route_account_ids,omitempty"`
+	PromptTemplates        *[]PromptTemplate `json:"prompt_templates,omitempty"`
+	ActivePromptTemplateID *string           `json:"active_prompt_template_id,omitempty"`
+	FlagThreshold          *float64          `json:"flag_threshold,omitempty"`
+	BlockThreshold         *float64          `json:"block_threshold,omitempty"`
+	BlockHTTPStatus        *int              `json:"block_http_status,omitempty"`
+	BlockMessage           *string           `json:"block_message,omitempty"`
+	Endpoints              []UpdateEndpoint  `json:"endpoints"`
 }
 
 func DefaultStorageConfig() storageConfig {
+	flagThreshold := DefaultFlagThreshold
+	blockThreshold := DefaultBlockThreshold
 	return storageConfig{
 		Enabled:                false,
 		BlockingEnabled:        false,
@@ -189,6 +227,13 @@ func DefaultStorageConfig() storageConfig {
 		Scanners:               append([]string(nil), AllScannerIDs...),
 		AllGroups:              true,
 		GroupIDs:               []int64{},
+		RiskRouteAccountIDs:    []int64{},
+		PromptTemplates:        []PromptTemplate{DefaultPromptTemplate()},
+		ActivePromptTemplateID: DefaultPromptTemplateID,
+		FlagThreshold:          &flagThreshold,
+		BlockThreshold:         &blockThreshold,
+		BlockHTTPStatus:        DefaultBlockHTTPStatus,
+		BlockMessage:           DefaultBlockMessage,
 		Endpoints:              []StorageEndpoint{},
 		ConfigVersion:          1,
 	}
@@ -230,6 +275,29 @@ func normalizeStorageConfig(cfg *storageConfig) {
 	}
 	cfg.Scanners = canonicalScannerIDs(cfg.Scanners)
 	cfg.GroupIDs = canonicalInt64s(cfg.GroupIDs)
+	cfg.RiskRouteAccountIDs = canonicalInt64s(cfg.RiskRouteAccountIDs)
+	cfg.PromptTemplates = normalizePromptTemplates(cfg.PromptTemplates)
+	if strings.TrimSpace(cfg.ActivePromptTemplateID) == "" {
+		cfg.ActivePromptTemplateID = DefaultPromptTemplateID
+	} else {
+		cfg.ActivePromptTemplateID = strings.TrimSpace(cfg.ActivePromptTemplateID)
+	}
+	if cfg.FlagThreshold == nil {
+		value := DefaultFlagThreshold
+		cfg.FlagThreshold = &value
+	}
+	if cfg.BlockThreshold == nil {
+		value := DefaultBlockThreshold
+		cfg.BlockThreshold = &value
+	}
+	if cfg.BlockHTTPStatus == 0 {
+		cfg.BlockHTTPStatus = DefaultBlockHTTPStatus
+	}
+	if strings.TrimSpace(cfg.BlockMessage) == "" {
+		cfg.BlockMessage = DefaultBlockMessage
+	} else {
+		cfg.BlockMessage = strings.TrimSpace(cfg.BlockMessage)
+	}
 	// Preserve an invalid blocking-without-audit combination so validation can
 	// reject it instead of silently changing administrator intent.
 	for i := range cfg.Endpoints {
@@ -239,6 +307,10 @@ func normalizeStorageConfig(cfg *storageConfig) {
 		ep.Protocol = strings.TrimSpace(ep.Protocol)
 		if ep.Protocol == "" {
 			ep.Protocol = "openai_compatible"
+		}
+		ep.Adapter = strings.TrimSpace(ep.Adapter)
+		if ep.Adapter == "" {
+			ep.Adapter = AdapterQwen3Guard
 		}
 		ep.BaseURL = strings.TrimSpace(ep.BaseURL)
 		ep.Model = strings.TrimSpace(ep.Model)
@@ -270,8 +342,14 @@ func validateStorageConfig(cfg storageConfig) error {
 	if !cfg.AllGroups && len(cfg.GroupIDs) == 0 {
 		return infraerrors.BadRequest("prompt_audit_groups_required", "指定分组模式至少需要选择一个分组")
 	}
+	if err := validatePositiveIDs(cfg.RiskRouteAccountIDs, "prompt_audit_invalid_risk_route_account", "高风险分流账号 ID 无效"); err != nil {
+		return err
+	}
 	if len(cfg.Scanners) == 0 {
 		return infraerrors.BadRequest("prompt_audit_scanners_required", "至少需要启用一个风险分类")
+	}
+	if err := validatePromptPolicy(cfg.PromptTemplates, cfg.ActivePromptTemplateID, cfg.FlagThreshold, cfg.BlockThreshold, cfg.BlockHTTPStatus, cfg.BlockMessage); err != nil {
+		return err
 	}
 	seen := make(map[string]struct{}, len(cfg.Endpoints))
 	enabled := 0
@@ -285,6 +363,9 @@ func validateStorageConfig(cfg storageConfig) error {
 		seen[ep.ID] = struct{}{}
 		if ep.Protocol != "openai_compatible" {
 			return infraerrors.BadRequest("prompt_audit_invalid_endpoint_protocol", "审计节点仅支持 OpenAI 兼容协议")
+		}
+		if !validPromptAdapter(ep.Adapter) {
+			return infraerrors.BadRequest("prompt_audit_invalid_endpoint_adapter", "审计节点适配器无效")
 		}
 		if _, err := NormalizeBaseURL(ep.BaseURL); err != nil {
 			return err
@@ -333,7 +414,33 @@ func validateUpdateConfigRequest(req UpdateConfigRequest) error {
 			}
 		}
 	}
+	if req.RiskRouteAccountIDs != nil {
+		if err := validatePositiveIDs(*req.RiskRouteAccountIDs, "prompt_audit_invalid_risk_route_account", "高风险分流账号 ID 无效"); err != nil {
+			return err
+		}
+	}
+	if req.PromptTemplates != nil && len(*req.PromptTemplates) > MaxPromptTemplateCount {
+		return infraerrors.BadRequest("prompt_audit_too_many_templates", "审核提示词模板数量超出允许范围")
+	}
+	if req.FlagThreshold != nil && (*req.FlagThreshold < 0 || *req.FlagThreshold > 1) {
+		return infraerrors.BadRequest("prompt_audit_invalid_flag_threshold", "标记阈值必须在 0 到 1 之间")
+	}
+	if req.BlockThreshold != nil && (*req.BlockThreshold < 0 || *req.BlockThreshold > 1) {
+		return infraerrors.BadRequest("prompt_audit_invalid_block_threshold", "阻断阈值必须在 0 到 1 之间")
+	}
+	if req.BlockHTTPStatus != nil && (*req.BlockHTTPStatus < 400 || *req.BlockHTTPStatus > 499) {
+		return infraerrors.BadRequest("prompt_audit_invalid_block_http_status", "阻断状态码必须在 400 到 499 之间")
+	}
+	if req.BlockMessage != nil {
+		message := strings.TrimSpace(*req.BlockMessage)
+		if message == "" || len([]rune(message)) > MaxBlockMessageRunes {
+			return infraerrors.BadRequest("prompt_audit_invalid_block_message", "阻断提示文案为空或过长")
+		}
+	}
 	for _, endpoint := range req.Endpoints {
+		if strings.TrimSpace(endpoint.Adapter) != "" && !validPromptAdapter(strings.TrimSpace(endpoint.Adapter)) {
+			return infraerrors.BadRequest("prompt_audit_invalid_endpoint_adapter", "审计节点适配器无效")
+		}
 		if endpoint.TimeoutMS < MinTimeoutMS || endpoint.TimeoutMS > MaxTimeoutMS {
 			return infraerrors.BadRequest("prompt_audit_invalid_timeout", "审计节点超时超出允许范围")
 		}
@@ -394,6 +501,7 @@ func PublicFromStorage(cfg storageConfig, riskControlEnabled bool, invalidTokenE
 	}
 	scanners := append([]string{}, cfg.Scanners...)
 	groupIDs := append([]int64{}, cfg.GroupIDs...)
+	riskRouteAccountIDs := append([]int64{}, cfg.RiskRouteAccountIDs...)
 	endpoints := make([]PublicEndpoint, 0, len(cfg.Endpoints))
 	for _, ep := range cfg.Endpoints {
 		hasToken := strings.TrimSpace(ep.TokenCiphertext) != ""
@@ -405,7 +513,7 @@ func PublicFromStorage(cfg storageConfig, riskControlEnabled bool, invalidTokenE
 			}
 		}
 		endpoints = append(endpoints, PublicEndpoint{
-			ID: ep.ID, Name: ep.Name, Protocol: ep.Protocol, BaseURL: ep.BaseURL,
+			ID: ep.ID, Name: ep.Name, Protocol: ep.Protocol, Adapter: ep.Adapter, BaseURL: ep.BaseURL,
 			Model: ep.Model, TimeoutMS: ep.TimeoutMS, InputLimit: ep.InputLimit,
 			Enabled: ep.Enabled, HasToken: hasToken, TokenStatus: status,
 		})
@@ -415,18 +523,27 @@ func PublicFromStorage(cfg storageConfig, riskControlEnabled bool, invalidTokenE
 		Enabled: cfg.Enabled, BlockingEnabled: cfg.BlockingEnabled, BlockingLatestTurnOnly: cfg.BlockingLatestTurnOnly, StorePassEvents: cfg.StorePassEvents,
 		EffectiveMode: active.EffectiveMode(), Strategy: cfg.Strategy, WorkerCount: cfg.WorkerCount,
 		QueueCapacity: cfg.QueueCapacity, Scanners: scanners, AllGroups: cfg.AllGroups,
-		GroupIDs: groupIDs, Endpoints: endpoints, ConfigVersion: cfg.ConfigVersion,
+		GroupIDs: groupIDs, RiskRouteAccountIDs: riskRouteAccountIDs,
+		PromptTemplates:        clonePromptTemplates(cfg.PromptTemplates),
+		ActivePromptTemplateID: cfg.ActivePromptTemplateID, FlagThreshold: thresholdValue(cfg.FlagThreshold, DefaultFlagThreshold),
+		BlockThreshold: thresholdValue(cfg.BlockThreshold, DefaultBlockThreshold), BlockHTTPStatus: cfg.BlockHTTPStatus,
+		BlockMessage: cfg.BlockMessage, Endpoints: endpoints, ConfigVersion: cfg.ConfigVersion,
 		UpdatedAt: cfg.UpdatedAt, UpdatedBy: cfg.UpdatedBy, ChangeSummary: cfg.ChangeSummary,
 	}
 }
 
 func ActiveFromStorage(cfg storageConfig, riskControlEnabled bool, encryptor SecretEncryptor) (ActiveConfig, error) {
+	template := activePromptTemplate(cfg.PromptTemplates, cfg.ActivePromptTemplateID)
 	active := ActiveConfig{
 		RiskControlEnabled: riskControlEnabled, Enabled: cfg.Enabled, BlockingEnabled: cfg.BlockingEnabled,
 		BlockingLatestTurnOnly: cfg.BlockingLatestTurnOnly,
 		StorePassEvents:        cfg.StorePassEvents, Strategy: cfg.Strategy, WorkerCount: cfg.WorkerCount,
 		QueueCapacity: cfg.QueueCapacity, Scanners: append([]string(nil), cfg.Scanners...), AllGroups: cfg.AllGroups,
-		GroupIDs: append([]int64(nil), cfg.GroupIDs...), ConfigVersion: cfg.ConfigVersion,
+		GroupIDs: append([]int64(nil), cfg.GroupIDs...), RiskRouteAccountIDs: append([]int64(nil), cfg.RiskRouteAccountIDs...),
+		PromptTemplates:        clonePromptTemplates(cfg.PromptTemplates),
+		ActivePromptTemplateID: template.ID, FlagThreshold: thresholdValue(cfg.FlagThreshold, DefaultFlagThreshold),
+		BlockThreshold: thresholdValue(cfg.BlockThreshold, DefaultBlockThreshold), BlockHTTPStatus: cfg.BlockHTTPStatus,
+		BlockMessage: cfg.BlockMessage, ConfigVersion: cfg.ConfigVersion,
 		UpdatedAt: cfg.UpdatedAt, UpdatedBy: cfg.UpdatedBy, ChangeSummary: cfg.ChangeSummary,
 		Endpoints: make([]ActiveEndpoint, 0, len(cfg.Endpoints)),
 	}
@@ -450,8 +567,10 @@ func ActiveFromStorage(cfg storageConfig, riskControlEnabled bool, encryptor Sec
 			}
 		}
 		active.Endpoints = append(active.Endpoints, ActiveEndpoint{
-			ID: ep.ID, Name: ep.Name, Protocol: ep.Protocol, BaseURL: ep.BaseURL, Model: ep.Model,
+			ID: ep.ID, Name: ep.Name, Protocol: ep.Protocol, Adapter: ep.Adapter, BaseURL: ep.BaseURL, Model: ep.Model,
 			Token: token, TimeoutMS: ep.TimeoutMS, InputLimit: ep.InputLimit,
+			PromptTemplateID: template.ID, SystemPrompt: template.SystemPrompt,
+			FlagThreshold: active.FlagThreshold, BlockThreshold: active.BlockThreshold,
 			Enabled: ep.Enabled && !tokenInvalid, TokenInvalid: tokenInvalid,
 		})
 	}
@@ -460,16 +579,22 @@ func ActiveFromStorage(cfg storageConfig, riskControlEnabled bool, encryptor Sec
 
 func changeSummary(cfg storageConfig) string {
 	summary := struct {
-		Enabled                bool   `json:"enabled"`
-		BlockingEnabled        bool   `json:"blocking_enabled"`
-		BlockingLatestTurnOnly bool   `json:"blocking_latest_turn_only"`
-		StorePassEvents        bool   `json:"store_pass_events"`
-		EndpointCount          int    `json:"endpoint_count"`
-		ScannerCount           int    `json:"scanner_count"`
-		AllGroups              bool   `json:"all_groups"`
-		GroupCount             int    `json:"group_count"`
-		GroupHash              string `json:"group_hash"`
-	}{cfg.Enabled, cfg.BlockingEnabled, cfg.BlockingLatestTurnOnly, cfg.StorePassEvents, len(cfg.Endpoints), len(cfg.Scanners), cfg.AllGroups, len(cfg.GroupIDs), ""}
+		Enabled                bool    `json:"enabled"`
+		BlockingEnabled        bool    `json:"blocking_enabled"`
+		BlockingLatestTurnOnly bool    `json:"blocking_latest_turn_only"`
+		StorePassEvents        bool    `json:"store_pass_events"`
+		EndpointCount          int     `json:"endpoint_count"`
+		ScannerCount           int     `json:"scanner_count"`
+		AllGroups              bool    `json:"all_groups"`
+		GroupCount             int     `json:"group_count"`
+		GroupHash              string  `json:"group_hash"`
+		RiskRouteAccountCount  int     `json:"risk_route_account_count"`
+		TemplateCount          int     `json:"template_count"`
+		ActiveTemplateID       string  `json:"active_template_id"`
+		FlagThreshold          float64 `json:"flag_threshold"`
+		BlockThreshold         float64 `json:"block_threshold"`
+		BlockHTTPStatus        int     `json:"block_http_status"`
+	}{cfg.Enabled, cfg.BlockingEnabled, cfg.BlockingLatestTurnOnly, cfg.StorePassEvents, len(cfg.Endpoints), len(cfg.Scanners), cfg.AllGroups, len(cfg.GroupIDs), "", len(cfg.RiskRouteAccountIDs), len(cfg.PromptTemplates), cfg.ActivePromptTemplateID, thresholdValue(cfg.FlagThreshold, DefaultFlagThreshold), thresholdValue(cfg.BlockThreshold, DefaultBlockThreshold), cfg.BlockHTTPStatus}
 	rawGroups, _ := json.Marshal(cfg.GroupIDs)
 	digest := sha256.Sum256(rawGroups)
 	summary.GroupHash = hex.EncodeToString(digest[:])
@@ -494,6 +619,15 @@ func canonicalInt64s(values []int64) []int64 {
 	return result
 }
 
+func validatePositiveIDs(values []int64, code, message string) error {
+	for _, value := range values {
+		if value <= 0 {
+			return infraerrors.BadRequest(code, message)
+		}
+	}
+	return nil
+}
+
 func canonicalScannerIDs(values []string) []string {
 	seen := make(map[string]struct{}, len(values))
 	for _, value := range values {
@@ -509,4 +643,49 @@ func canonicalScannerIDs(values []string) []string {
 		}
 	}
 	return result
+}
+
+func validatePromptPolicy(templates []PromptTemplate, activeID string, flagThreshold, blockThreshold *float64, blockHTTPStatus int, blockMessage string) error {
+	if len(templates) == 0 || len(templates) > MaxPromptTemplateCount {
+		return infraerrors.BadRequest("prompt_audit_invalid_templates", "审核提示词模板数量无效")
+	}
+	seen := make(map[string]struct{}, len(templates))
+	activeFound := false
+	for _, template := range templates {
+		id := strings.TrimSpace(template.ID)
+		name := strings.TrimSpace(template.Name)
+		prompt := strings.TrimSpace(template.SystemPrompt)
+		if id == "" || len([]rune(id)) > MaxPromptTemplateIDRunes || name == "" || len([]rune(name)) > MaxPromptTemplateNameRunes || prompt == "" || len([]rune(prompt)) > MaxPromptTemplateRunes {
+			return infraerrors.BadRequest("prompt_audit_invalid_template", "审核提示词模板无效")
+		}
+		if _, exists := seen[id]; exists {
+			return infraerrors.BadRequest("prompt_audit_duplicate_template", "审核提示词模板 ID 不能重复")
+		}
+		seen[id] = struct{}{}
+		if id == activeID {
+			activeFound = true
+		}
+	}
+	if !activeFound {
+		return infraerrors.BadRequest("prompt_audit_active_template_not_found", "当前审核提示词模板不存在")
+	}
+	flag := thresholdValue(flagThreshold, DefaultFlagThreshold)
+	block := thresholdValue(blockThreshold, DefaultBlockThreshold)
+	if flag < 0 || flag > 1 {
+		return infraerrors.BadRequest("prompt_audit_invalid_flag_threshold", "标记阈值必须在 0 到 1 之间")
+	}
+	if block < 0 || block > 1 {
+		return infraerrors.BadRequest("prompt_audit_invalid_block_threshold", "阻断阈值必须在 0 到 1 之间")
+	}
+	if flag >= block {
+		return infraerrors.BadRequest("prompt_audit_invalid_threshold_order", "标记阈值必须小于阻断阈值")
+	}
+	if blockHTTPStatus < 400 || blockHTTPStatus > 499 {
+		return infraerrors.BadRequest("prompt_audit_invalid_block_http_status", "阻断状态码必须在 400 到 499 之间")
+	}
+	message := strings.TrimSpace(blockMessage)
+	if message == "" || len([]rune(message)) > MaxBlockMessageRunes {
+		return infraerrors.BadRequest("prompt_audit_invalid_block_message", "阻断提示文案为空或过长")
+	}
+	return nil
 }

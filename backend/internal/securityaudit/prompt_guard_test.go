@@ -188,12 +188,15 @@ func TestGuardEvaluatorFlagSharedDeadlineFailClosedAndContextCancel(t *testing.T
 	t.Run("flag allows next stage", func(t *testing.T) {
 		metrics := NewAtomicMetrics()
 		evaluator := newGuardEvaluator(PromptScannerFunc(func(context.Context, ActiveEndpoint, string, []string) (*NormalizedResult, error) {
-			return &NormalizedResult{Decision: EventFlag, RiskLevel: RiskMedium, Action: ActionWarn, Safety: "Controversial", Categories: []string{"violent"}, MatchedScanners: []string{"violent"}, ScannerScores: map[string]float64{"violent": .5}, ScannerEvidence: map[string]string{"violent": "Violent"}}, nil
+			return &NormalizedResult{Decision: EventFlag, RiskLevel: RiskMedium, Action: ActionWarn, Safety: "Controversial", MatchedScanners: []string{confidenceScoreKey}, ScannerScores: map[string]float64{confidenceScoreKey: .5}, ScannerEvidence: map[string]string{confidenceScoreKey: "risk"}, ScannerBackend: "confidence-json-openai", Confidence: .5}, nil
 		}), nil, metrics, 2, 2)
-		decision, err := evaluator.Evaluate(context.Background(), guardConfig(ActiveEndpoint{ID: "one", Enabled: true, TimeoutMS: 1000, InputLimit: 100}), PromptSnapshot{ScanText: "review", PromptLength: 6})
+		cfg := guardConfig(ActiveEndpoint{ID: "one", Enabled: true, TimeoutMS: 1000, InputLimit: 100})
+		cfg.RiskRouteAccountIDs = []int64{21, 22}
+		decision, err := evaluator.Evaluate(context.Background(), cfg, PromptSnapshot{ScanText: "review", PromptLength: 6})
 		require.NoError(t, err)
 		require.Equal(t, DecisionFlag, decision.Kind)
 		require.True(t, decision.AllowNextStage)
+		require.Equal(t, []int64{21, 22}, decision.RouteAccountIDs)
 		require.Equal(t, int64(1), metrics.Snapshot().Flagged)
 	})
 
@@ -246,6 +249,35 @@ func TestGuardEvaluatorFlagSharedDeadlineFailClosedAndContextCancel(t *testing.T
 	})
 }
 
+func TestGuardEvaluatorFlagRoutesWhenConfidenceMarkerSurvivesMixedAdapterAggregation(t *testing.T) {
+	scanner := PromptScannerFunc(func(_ context.Context, _ ActiveEndpoint, prompt string, _ []string) (*NormalizedResult, error) {
+		if prompt == "confidence" {
+			return &NormalizedResult{
+				Decision: EventFlag, RiskLevel: RiskMedium, Action: ActionWarn, Confidence: .55,
+				ScannerBackend: "confidence-json-openai", MatchedScanners: []string{confidenceScoreKey},
+				ScannerScores: map[string]float64{confidenceScoreKey: .55}, ScannerEvidence: map[string]string{confidenceScoreKey: "risk"},
+			}, nil
+		}
+		return &NormalizedResult{
+			Decision: EventFlag, RiskLevel: RiskHigh, Action: ActionWarn, ScannerBackend: "qwen3guard-openai",
+			MatchedScanners: []string{"jailbreak"}, ScannerScores: map[string]float64{"jailbreak": 1}, ScannerEvidence: map[string]string{"jailbreak": "risk"},
+		}, nil
+	})
+	evaluator := newGuardEvaluator(scanner, nil, NewAtomicMetrics(), 2, 2)
+	cfg := guardConfig(ActiveEndpoint{ID: "mixed", Enabled: true, TimeoutMS: 1000, InputLimit: 100})
+	cfg.RiskRouteAccountIDs = []int64{31, 32}
+
+	decision, err := evaluator.Evaluate(context.Background(), cfg, PromptSnapshot{
+		ScanText: "confidence" + promptAuditPrioritySeparator + "qwen", PromptLength: 14,
+	})
+
+	require.NoError(t, err)
+	require.Equal(t, DecisionFlag, decision.Kind)
+	require.Equal(t, "qwen3guard-openai", decision.Result.ScannerBackend, "higher-risk peer may own presentation metadata")
+	require.Contains(t, decision.Result.MatchedScanners, confidenceScoreKey)
+	require.Equal(t, []int64{31, 32}, decision.RouteAccountIDs)
+}
+
 func TestGuardEvaluatorRecordsExistingResultOnceAndRecordFailureDoesNotChangeDecision(t *testing.T) {
 	for _, recordErr := range []error{nil, errors.New("database unavailable")} {
 		repo := &fakeJobRepository{recordBlockingErr: recordErr}
@@ -255,9 +287,14 @@ func TestGuardEvaluatorRecordsExistingResultOnceAndRecordFailureDoesNotChangeDec
 			scannerCalls++
 			return &NormalizedResult{Decision: EventCritical, RiskLevel: RiskCritical, Action: ActionBlock, Safety: "Unsafe", Categories: []string{"pii"}, MatchedScanners: []string{"pii"}, ScannerScores: map[string]float64{"pii": 1}, ScannerEvidence: map[string]string{"pii": "PII"}}, nil
 		}), repo, metrics, 2, 2)
-		decision, err := evaluator.Evaluate(context.Background(), guardConfig(ActiveEndpoint{ID: "one", Enabled: true, TimeoutMS: 1000, InputLimit: 100}), PromptSnapshot{ScanText: "raw prompt", RedactedPreview: "raw***", PromptLength: 10})
+		cfg := guardConfig(ActiveEndpoint{ID: "one", Enabled: true, TimeoutMS: 1000, InputLimit: 100})
+		cfg.BlockHTTPStatus = 422
+		cfg.BlockMessage = "custom block"
+		decision, err := evaluator.Evaluate(context.Background(), cfg, PromptSnapshot{ScanText: "raw prompt", RedactedPreview: "raw***", PromptLength: 10})
 		require.NoError(t, err)
 		require.Equal(t, DecisionBlock, decision.Kind)
+		require.Equal(t, 422, decision.BlockHTTPStatus)
+		require.Equal(t, "custom block", decision.BlockMessage)
 		require.Equal(t, 1, scannerCalls)
 		require.Equal(t, 1, repo.recordBlockingCalls)
 		require.Empty(t, repo.recordBlockingSnapshot.ScanText)

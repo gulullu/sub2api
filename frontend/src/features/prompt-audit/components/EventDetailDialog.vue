@@ -92,6 +92,10 @@ watch(() => props.event?.id, () => { activeTab.value = 'summary' })
 const DECISIONS = new Set(['pass', 'flag', 'critical'])
 const ACTIONS = new Set(['Allow', 'Warn', 'Block'])
 const RISK_LEVELS = new Set(['low', 'medium', 'high', 'critical'])
+const LOCALIZED_CATEGORY_IDS = new Set<string>([
+  ...SCANNER_CATALOG.map((scanner) => scanner.id),
+  'confidence_json',
+])
 
 function displayPrompt(event: PromptAuditEvent): string {
   return event.snapshot.full_prompt || event.snapshot.redacted_preview || '—'
@@ -103,7 +107,7 @@ function formatDecisionAction(decision: string, action: string): string {
   return `${decisionLabel} · ${actionLabel}`
 }
 function translateCategory(category: string): string {
-  return SCANNER_CATALOG.some((scanner) => scanner.id === category)
+  return LOCALIZED_CATEGORY_IDS.has(category)
     ? t(`admin.promptAudit.scanners.${category}`)
     : category
 }
@@ -144,6 +148,7 @@ function issueTitle(issue: PromptIssueSummary): string {
 function issueDescription(issue: PromptIssueSummary): string {
   const category = issue.category || issue.scanner_id
   const key = `admin.promptAudit.scannerDescriptions.${category}`
+  if (LOCALIZED_CATEGORY_IDS.has(category)) return t(key)
   const label = t(key)
   return label === key ? issue.description : label
 }

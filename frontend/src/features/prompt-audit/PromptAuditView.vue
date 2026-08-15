@@ -49,6 +49,17 @@
                 @update:endpoints="updateEndpoints"
                 @probe="runProbe"
               />
+              <PromptTemplatePanel :draft="draft" @update:draft="replaceDraft" />
+              <DecisionPolicyPanel :draft="draft" @update:draft="replaceDraft" />
+              <RiskRouteAccountSelector
+                :draft="draft"
+                :accounts="riskRouteAccounts"
+                :loaded="riskRouteAccountsLoaded"
+                :loading="loading.accounts"
+                :error="loadErrors.accounts"
+                @update:draft="replaceDraft"
+                @retry="loadRiskRouteAccounts"
+              />
               <div v-if="loadErrors.groups" role="alert" class="mt-5 rounded-lg bg-amber-50 px-4 py-3 text-sm text-amber-800 dark:bg-amber-950/30 dark:text-amber-200">{{ loadErrors.groups }}</div>
               <PolicyPanel :draft="draft" :groups="groups" @update:draft="replaceDraft" />
             </template>
@@ -152,6 +163,9 @@ import { useAppStore } from '@/stores/app'
 import { extractApiErrorCode, extractApiErrorMessage } from '@/utils/apiError'
 import RuntimeOverview from './components/RuntimeOverview.vue'
 import EndpointPool from './components/EndpointPool.vue'
+import PromptTemplatePanel from './components/PromptTemplatePanel.vue'
+import DecisionPolicyPanel from './components/DecisionPolicyPanel.vue'
+import RiskRouteAccountSelector from './components/RiskRouteAccountSelector.vue'
 import PolicyPanel from './components/PolicyPanel.vue'
 import EventWorkspace from './components/EventWorkspace.vue'
 import EventDetailDialog from './components/EventDetailDialog.vue'
@@ -162,6 +176,7 @@ import type {
   PromptAuditEndpointDraft,
   PromptAuditEvent,
   PromptAuditGroup,
+  PromptAuditAccount,
   PromptAuditRuntime,
   PromptDeletePreview,
   PromptEventFilters,
@@ -183,6 +198,8 @@ const serverConfig = ref<PromptAuditDraft | null>(null)
 const draft = ref<PromptAuditDraft | null>(null)
 const runtime = ref<PromptAuditRuntime | null>(null)
 const groups = ref<PromptAuditGroup[]>([])
+const riskRouteAccounts = ref<PromptAuditAccount[]>([])
+const riskRouteAccountsLoaded = ref(false)
 const events = reactive<PromptEventPage>({ items: [], total: 0, page: 1, page_size: 20, pages: 0 })
 const filters = ref<PromptEventFilters>(emptyEventFilters())
 const appliedFilters = ref<PromptEventFilters>(emptyEventFilters())
@@ -196,8 +213,8 @@ const deletePreview = ref<PromptDeletePreview | null>(null)
 const deletePreviewFilters = ref<PromptEventFilters | null>(null)
 const showBlockingConfirmation = ref(false)
 const deleteRequest = reactive<{ mode: '' | 'single' | 'batch'; ids: number[] }>({ mode: '', ids: [] })
-const loading = reactive({ config: false, runtime: false, groups: false, events: false, saving: false, detail: false, deleting: false, previewing: false })
-const loadErrors = reactive<PromptLoadErrors>({ config: '', runtime: '', groups: '', events: '' })
+const loading = reactive({ config: false, runtime: false, groups: false, accounts: false, events: false, saving: false, detail: false, deleting: false, previewing: false })
+const loadErrors = reactive<PromptLoadErrors>({ config: '', runtime: '', groups: '', accounts: '', events: '' })
 const dirty = computed(() => draftFingerprint(draft.value) !== draftFingerprint(serverConfig.value))
 
 const SaveToggle = defineComponent({
@@ -272,6 +289,18 @@ async function loadGroups() {
   catch (error) { loadErrors.groups = errorMessage(error, 'admin.promptAudit.errors.loadGroups') }
   finally { loading.groups = false }
 }
+async function loadRiskRouteAccounts() {
+  loading.accounts = true
+  loadErrors.accounts = ''
+  try {
+    riskRouteAccounts.value = await promptAuditAPI.listRiskRouteAccounts()
+    riskRouteAccountsLoaded.value = true
+  } catch (error) {
+    loadErrors.accounts = errorMessage(error, 'admin.promptAudit.errors.loadAccounts')
+  } finally {
+    loading.accounts = false
+  }
+}
 async function loadEvents() {
   loading.events = true
   loadErrors.events = ''
@@ -286,7 +315,7 @@ async function loadEvents() {
   }
 }
 async function loadInitial() {
-  await Promise.allSettled([loadConfig(), loadRuntime(), loadGroups(), loadEvents()])
+  await Promise.allSettled([loadConfig(), loadRuntime(), loadGroups(), loadRiskRouteAccounts(), loadEvents()])
 }
 
 function replaceDraft(value: PromptAuditDraft) { draft.value = cloneData(value) }

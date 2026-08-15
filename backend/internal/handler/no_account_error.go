@@ -2,6 +2,7 @@ package handler
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"net/http"
 	"strings"
@@ -10,6 +11,16 @@ import (
 
 	"github.com/Wei-Shaw/sub2api/internal/service"
 )
+
+const opsClientBusinessLimitedReasonLocalModelUnsupported = "local_model_unsupported"
+
+const promptRiskRouteSafeMessage = "Service temporarily unavailable"
+
+func isPromptRiskRouteSelectionError(ctx context.Context, err error) bool {
+	return err != nil && (service.PromptRiskRouteEnabled(ctx) ||
+		errors.Is(err, service.ErrPromptRiskRouteUnavailable) ||
+		errors.Is(err, service.ErrPromptRiskRouteStateConflict))
+}
 
 // noAccountErrorClassification describes the HTTP response to emit when
 // account selection failed with ErrNoAvailableAccounts. Handlers obtain it
@@ -69,6 +80,12 @@ func classifyNoAccountError(
 		ErrType: "api_error",
 		Message: "Service temporarily unavailable",
 	}
+	// Prompt-audit risk routing is a server-side hard pool. Its exhaustion is
+	// temporary routing capacity, never evidence that the client model is
+	// globally unsupported by the group, so it must remain a retryable 503.
+	if service.PromptRiskRouteEnabled(ctx) {
+		return fallback
+	}
 
 	routingModel = strings.TrimSpace(routingModel)
 	displayModel = strings.TrimSpace(displayModel)
@@ -106,7 +123,14 @@ func classifyNoAccountErrorFromGin(
 	if c != nil && c.Request != nil {
 		ctx = c.Request.Context()
 	}
-	return classifyNoAccountError(ctx, diag, apiKey, routingModel, displayModel, platform)
+	classification := classifyNoAccountError(ctx, diag, apiKey, routingModel, displayModel, platform)
+	if classification.ModelNotFound {
+		// This is a deterministic local configuration/client-model mismatch, not
+		// an upstream failure or transient lack of capacity. Keep the existing
+		// 404 response while excluding it from Ops SLA calculations.
+		service.MarkOpsClientBusinessLimited(c, opsClientBusinessLimitedReasonLocalModelUnsupported)
+	}
+	return classification
 }
 
 func classifyOpenAICompatibleNoAccountErrorFromGin(

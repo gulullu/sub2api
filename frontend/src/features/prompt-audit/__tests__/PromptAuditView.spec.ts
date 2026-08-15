@@ -7,7 +7,7 @@ import PromptAuditView from '../PromptAuditView.vue'
 
 const mocks = vi.hoisted(() => ({
   getConfig: vi.fn(), updateConfig: vi.fn(), probeEndpoint: vi.fn(), getRuntime: vi.fn(), listEvents: vi.fn(),
-  getEvent: vi.fn(), deleteEvent: vi.fn(), batchDeleteEvents: vi.fn(), previewDelete: vi.fn(), deleteEventsByFilter: vi.fn(), listGroups: vi.fn(),
+  getEvent: vi.fn(), deleteEvent: vi.fn(), batchDeleteEvents: vi.fn(), previewDelete: vi.fn(), deleteEventsByFilter: vi.fn(), listGroups: vi.fn(), listRiskRouteAccounts: vi.fn(),
   showSuccess: vi.fn(), showError: vi.fn(),
 }))
 
@@ -20,7 +20,7 @@ vi.mock('vue-i18n', async () => {
 
 const baseConfig = (): PromptAuditConfig => ({
   enabled: true, blocking_enabled: false, blocking_latest_turn_only: false, store_pass_events: false, effective_mode: 'async_audit', strategy: 'priority',
-  worker_count: 4, queue_capacity: 100, scanners: SCANNER_CATALOG.map((item) => item.id), all_groups: true, group_ids: [],
+  worker_count: 4, queue_capacity: 100, scanners: SCANNER_CATALOG.map((item) => item.id), all_groups: true, group_ids: [], risk_route_account_ids: [17],
   endpoints: [{ id: 'guard-1', name: 'Guard One', protocol: 'openai_compatible', base_url: 'http://127.0.0.1:8000', model: 'guard-model', timeout_ms: 3000, input_limit: 4000, enabled: true, has_token: true, token_status: 'configured' }],
   config_version: 7, updated_at: '2026-07-16T00:00:00Z', updated_by: 1, change_summary: '{}',
 })
@@ -39,6 +39,7 @@ const EndpointStub = defineComponent({
   template: '<div data-test="endpoint"><button data-test="inject-secret" @click="$emit(\'update:endpoints\', endpoints.map((e) => ({ ...e, token: \'PROMPT_AUDIT_CANARY_SECRET_DO_NOT_PERSIST\' })))">secret</button><button data-test="probe" @click="$emit(\'probe\', endpoints[0])">probe</button></div>',
 })
 const PolicyStub = defineComponent({ props: ['draft', 'groups'], emits: ['update:draft'], template: '<div data-test="policy" />' })
+const RiskRouteStub = defineComponent({ props: ['draft', 'accounts', 'loaded', 'loading', 'error'], emits: ['update:draft', 'retry'], template: '<div data-test="risk-route" />' })
 const EventsStub = defineComponent({
   props: ['events', 'filters', 'selectedIds', 'loading', 'error', 'total', 'page', 'pageSize'],
   emits: ['filters-change', 'search', 'selection', 'page', 'page-size', 'view', 'delete', 'batch-delete', 'preview-delete'],
@@ -54,7 +55,7 @@ const FilterDeleteStub = defineComponent({
 
 function mountView() {
   return mount(PromptAuditView, {
-    global: { stubs: { AppLayout: AppLayoutStub, RuntimeOverview: RuntimeStub, EndpointPool: EndpointStub, PolicyPanel: PolicyStub, EventWorkspace: EventsStub, EventDetailDialog: DetailStub, FilterDeleteDialog: FilterDeleteStub, ConfirmDialog: ConfirmStub } },
+    global: { stubs: { AppLayout: AppLayoutStub, RuntimeOverview: RuntimeStub, EndpointPool: EndpointStub, RiskRouteAccountSelector: RiskRouteStub, PolicyPanel: PolicyStub, EventWorkspace: EventsStub, EventDetailDialog: DetailStub, FilterDeleteDialog: FilterDeleteStub, ConfirmDialog: ConfirmStub } },
   })
 }
 
@@ -64,6 +65,7 @@ describe('PromptAuditView', () => {
     mocks.getConfig.mockResolvedValue(baseConfig())
     mocks.getRuntime.mockResolvedValue(runtime())
     mocks.listGroups.mockResolvedValue([])
+    mocks.listRiskRouteAccounts.mockResolvedValue([{ id: 17, name: 'Risk Pool', platform: 'openai', type: 'oauth', status: 'active' }])
     mocks.listEvents.mockResolvedValue({ items: [], total: 0, page: 1, page_size: 20, pages: 0 })
     mocks.updateConfig.mockImplementation(async () => ({ ...baseConfig(), config_version: 8 }))
     mocks.probeEndpoint.mockResolvedValue({ ok: true, status: 'healthy', message: 'ok', latency_ms: 2, http_status: 200, retryable: false, checked_at: '2026-07-16T00:00:00Z', token_applied: true })
@@ -73,11 +75,12 @@ describe('PromptAuditView', () => {
     mocks.batchDeleteEvents.mockResolvedValue({ deleted_events: 2, deleted_jobs: 2 })
   })
 
-  it('starts config, runtime, groups, and events loads independently', async () => {
+  it('starts config, runtime, groups, accounts, and events loads independently', async () => {
     mocks.getRuntime.mockRejectedValue(new Error('runtime offline'))
     const wrapper = mountView()
     expect(mocks.getConfig).toHaveBeenCalledOnce()
     expect(mocks.getRuntime).toHaveBeenCalledOnce()
+    expect(mocks.listRiskRouteAccounts).toHaveBeenCalledOnce()
     expect(mocks.listGroups).toHaveBeenCalledOnce()
     expect(mocks.listEvents).toHaveBeenCalledOnce()
     await flushPromises()
@@ -143,7 +146,10 @@ describe('PromptAuditView', () => {
     expect(wrapper.text()).toContain('admin.promptAudit.saveBar.dirty')
     await wrapper.get('[data-test="save-config"]').trigger('click')
     await flushPromises()
-    expect(mocks.updateConfig).toHaveBeenCalledWith(expect.objectContaining({ endpoints: [expect.objectContaining({ token: 'PROMPT_AUDIT_CANARY_SECRET_DO_NOT_PERSIST' })] }))
+    expect(mocks.updateConfig).toHaveBeenCalledWith(expect.objectContaining({
+      risk_route_account_ids: [17],
+      endpoints: [expect.objectContaining({ token: 'PROMPT_AUDIT_CANARY_SECRET_DO_NOT_PERSIST' })],
+    }))
     const endpointProps = wrapper.getComponent(EndpointStub).props('endpoints') as Array<{ token: string }>
     expect(endpointProps[0].token).toBe('')
     expect(wrapper.html()).not.toContain('PROMPT_AUDIT_CANARY_SECRET_DO_NOT_PERSIST')

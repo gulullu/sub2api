@@ -952,13 +952,16 @@ func (s *BatchImagePublicService) selectProviderAndAccount(ctx context.Context, 
 		})
 		for i := range accounts {
 			account := accounts[i]
-			if !account.IsSchedulable() || !account.IsModelSupported(model) {
+			if !PromptRiskRouteAllowsAccount(ctx, account.ID) || !account.IsSchedulable() || !account.IsModelSupported(model) {
 				continue
 			}
 			if provider.SupportsAccount(&account) {
 				return provider, &account, nil
 			}
 		}
+	}
+	if PromptRiskRouteEnabled(ctx) {
+		return nil, nil, newPromptRiskRouteUnavailableError(ErrBatchImageNoAccountAvailable)
 	}
 	if requestedProvider != "" {
 		return nil, nil, ErrBatchImageNoAccountAvailable

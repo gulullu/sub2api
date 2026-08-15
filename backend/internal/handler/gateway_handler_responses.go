@@ -119,6 +119,10 @@ func (h *GatewayHandler) Responses(c *gin.Context) {
 		h.responsesSecurityAuditError(c, decision)
 		return
 	}
+	// Prompt audit may install a server-only hard account pool on the request
+	// context. This handler cached requestCtx before auditing, so refresh it
+	// before billing, selection and every failover attempt.
+	requestCtx = c.Request.Context()
 
 	// Error passthrough binding
 	if h.errorPassthroughService != nil {
@@ -173,6 +177,10 @@ func (h *GatewayHandler) Responses(c *gin.Context) {
 		}
 		selection, err := h.gatewayService.SelectAccountWithLoadAwareness(requestCtx, apiKey.GroupID, sessionHash, reqModel, fs.FailedAccountIDs, "", int64(0))
 		if err != nil {
+			if isPromptRiskRouteSelectionError(requestCtx, err) {
+				h.responsesErrorResponse(c, http.StatusServiceUnavailable, "api_error", promptRiskRouteSafeMessage)
+				return
+			}
 			if len(fs.FailedAccountIDs) == 0 {
 				cls := classifyNoAccountErrorFromGin(c, h.gatewayService, apiKey, reqModel, reqModel, effectiveAPIKeyPlatform(c, apiKey))
 				if !cls.ModelNotFound {

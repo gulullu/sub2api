@@ -4,8 +4,6 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
-	"io"
-	"net"
 	"net/http"
 	"strings"
 	"sync"
@@ -236,58 +234,25 @@ func (s *PromptService) Probe(ctx context.Context, request ProbeRequest) ProbeRe
 		return s.finishProbe(request.Endpoint.ID, started, ProbeResult{Status: "failed", ErrorCode: "endpoint_invalid", Message: "审计节点配置无效"})
 	}
 	LogInfo(EventProbeStarted, map[string]any{"guard_endpoint_id": endpoint.ID, "status": "started"})
-	client, err := NewSecureHTTPClient(endpoint)
-	if err != nil {
+	if _, err := NewSecureHTTPClient(endpoint); err != nil {
 		return s.finishProbe(endpoint.ID, started, ProbeResult{Status: "failed", ErrorCode: "endpoint_unsafe", Message: "审计节点地址不在允许范围", TokenApplied: tokenApplied})
 	}
-	modelsURL, _ := ModelsURL(endpoint.BaseURL)
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, modelsURL, nil)
-	if err != nil {
-		return s.finishProbe(endpoint.ID, started, ProbeResult{Status: "failed", ErrorCode: "probe_request_invalid", Message: "无法创建探测请求", TokenApplied: tokenApplied})
+	if s.scanner == nil {
+		return s.finishProbe(endpoint.ID, started, ProbeResult{Status: "failed", ErrorCode: ErrorCodeUnavailable, Message: "审计节点模型调用失败", TokenApplied: tokenApplied})
 	}
-	if endpoint.Token != "" {
-		req.Header.Set("Authorization", "Bearer "+endpoint.Token)
+	result, scanErr := s.scanner.Scan(ctx, endpoint, "Hello", AllScannerIDs)
+	if scanErr == nil && result != nil {
+		return s.finishProbe(endpoint.ID, started, ProbeResult{OK: true, Status: "healthy", Message: "审计节点模型调用正常", HTTPStatus: http.StatusOK, TokenApplied: tokenApplied})
 	}
-	resp, err := client.Do(req)
-	if err != nil {
-		code := "connection_failed"
-		var netErr net.Error
-		if errors.Is(err, context.DeadlineExceeded) || (errors.As(err, &netErr) && netErr.Timeout()) {
-			code = "timeout"
-		}
-		return s.finishProbe(endpoint.ID, started, ProbeResult{Status: "failed", ErrorCode: code, Message: "无法连接审计节点", Retryable: true, TokenApplied: tokenApplied})
+	code, status, retryable := guardErrorCode(scanErr), 0, false
+	var guardErr *GuardError
+	if errors.As(scanErr, &guardErr) {
+		status, retryable = guardErr.HTTPStatus, guardErr.Retryable
 	}
-	responseBody, readErr := io.ReadAll(io.LimitReader(resp.Body, maxGuardResponseBytes+1))
-	_ = resp.Body.Close()
-	if readErr != nil {
-		return s.finishProbe(endpoint.ID, started, ProbeResult{Status: "failed", ErrorCode: "response_read_failed", Message: "审计节点响应读取失败", HTTPStatus: resp.StatusCode, Retryable: true, TokenApplied: tokenApplied})
+	if code == "" {
+		code = ErrorCodeInvalidResponse
 	}
-	if int64(len(responseBody)) > maxGuardResponseBytes {
-		return s.finishProbe(endpoint.ID, started, ProbeResult{Status: "failed", ErrorCode: "response_too_large", Message: "审计节点响应无效", HTTPStatus: resp.StatusCode, TokenApplied: tokenApplied})
-	}
-	if resp.StatusCode >= 200 && resp.StatusCode < 300 && modelsResponseReady(responseBody, endpoint.Model) {
-		return s.finishProbe(endpoint.ID, started, ProbeResult{OK: true, Status: "healthy", Message: "审计节点连接正常", HTTPStatus: resp.StatusCode, TokenApplied: tokenApplied})
-	}
-	if (resp.StatusCode >= 200 && resp.StatusCode < 300) || resp.StatusCode == http.StatusNotFound || resp.StatusCode == http.StatusMethodNotAllowed {
-		result, scanErr := s.scanner.Scan(ctx, endpoint, "Hello", AllScannerIDs)
-		if scanErr == nil && result != nil {
-			return s.finishProbe(endpoint.ID, started, ProbeResult{OK: true, Status: "healthy", Message: "审计节点模型调用正常", HTTPStatus: http.StatusOK, TokenApplied: tokenApplied})
-		}
-		code, status, retryable := guardErrorCode(scanErr), 0, false
-		var guardErr *GuardError
-		if errors.As(scanErr, &guardErr) {
-			status, retryable = guardErr.HTTPStatus, guardErr.Retryable
-		}
-		if code == "" {
-			code = ErrorCodeInvalidResponse
-		}
-		return s.finishProbe(endpoint.ID, started, ProbeResult{Status: "failed", ErrorCode: code, Message: "审计节点模型调用失败", HTTPStatus: status, Retryable: retryable, TokenApplied: tokenApplied})
-	}
-	code, retryable := "probe_http_error", resp.StatusCode == 429 || resp.StatusCode >= 500
-	if resp.StatusCode == 401 || resp.StatusCode == 403 {
-		code = "authentication_failed"
-	}
-	return s.finishProbe(endpoint.ID, started, ProbeResult{Status: "failed", ErrorCode: code, Message: "审计节点探测失败", HTTPStatus: resp.StatusCode, Retryable: retryable, TokenApplied: tokenApplied})
+	return s.finishProbe(endpoint.ID, started, ProbeResult{Status: "failed", ErrorCode: code, Message: "审计节点模型调用失败", HTTPStatus: status, Retryable: retryable, TokenApplied: tokenApplied})
 }
 
 func modelsResponseReady(body []byte, model string) bool {
@@ -317,21 +282,32 @@ func (s *PromptService) resolveProbeEndpoint(input UpdateEndpoint) (ActiveEndpoi
 		return ActiveEndpoint{}, false, err
 	}
 	token := strings.TrimSpace(input.Token)
-	if token == "" {
-		if cfg, ok := s.config.Active(); ok {
-			for _, endpoint := range cfg.Endpoints {
-				if endpoint.ID != strings.TrimSpace(input.ID) {
-					continue
-				}
-				// Reuse a stored credential only when the probe targets the same
-				// normalized base URL. Otherwise an admin probe could exfiltrate
-				// the Guard token to an attacker-controlled HTTPS host.
-				if endpoint.BaseURL == baseURL {
-					token = endpoint.Token
-				}
-				break
-			}
+	adapter := strings.TrimSpace(input.Adapter)
+	template := DefaultPromptTemplate()
+	flagThreshold, blockThreshold := DefaultFlagThreshold, DefaultBlockThreshold
+	if cfg, ok := s.config.Active(); ok {
+		template = activePromptTemplate(cfg.PromptTemplates, cfg.ActivePromptTemplateID)
+		if cfg.FlagThreshold >= 0 && cfg.FlagThreshold < cfg.BlockThreshold && cfg.BlockThreshold <= 1 {
+			flagThreshold, blockThreshold = cfg.FlagThreshold, cfg.BlockThreshold
 		}
+		for _, endpoint := range cfg.Endpoints {
+			if endpoint.ID != strings.TrimSpace(input.ID) {
+				continue
+			}
+			if adapter == "" {
+				adapter = endpoint.Adapter
+			}
+			// Reuse a stored credential only when the probe targets the same
+			// normalized base URL. Otherwise an admin probe could exfiltrate
+			// the Guard token to an attacker-controlled HTTPS host.
+			if token == "" && endpoint.BaseURL == baseURL {
+				token = endpoint.Token
+			}
+			break
+		}
+	}
+	if adapter == "" {
+		adapter = AdapterQwen3Guard
 	}
 	model := strings.TrimSpace(input.Model)
 	if model == "" {
@@ -346,7 +322,9 @@ func (s *PromptService) resolveProbeEndpoint(input UpdateEndpoint) (ActiveEndpoi
 		limit = DefaultInputLimit
 	}
 	storage := storageConfig{Enabled: false, Strategy: "priority", WorkerCount: DefaultWorkerCount, QueueCapacity: DefaultQueueCapacity, Scanners: append([]string(nil), AllScannerIDs...), AllGroups: true,
-		Endpoints: []StorageEndpoint{{ID: strings.TrimSpace(input.ID), Name: strings.TrimSpace(input.Name), Protocol: "openai_compatible", BaseURL: baseURL, Model: model, TimeoutMS: timeout, InputLimit: limit}}}
+		PromptTemplates: []PromptTemplate{DefaultPromptTemplate()}, ActivePromptTemplateID: DefaultPromptTemplateID,
+		FlagThreshold: float64Pointer(flagThreshold), BlockThreshold: float64Pointer(blockThreshold), BlockHTTPStatus: DefaultBlockHTTPStatus, BlockMessage: DefaultBlockMessage,
+		Endpoints: []StorageEndpoint{{ID: strings.TrimSpace(input.ID), Name: strings.TrimSpace(input.Name), Protocol: "openai_compatible", Adapter: adapter, BaseURL: baseURL, Model: model, TimeoutMS: timeout, InputLimit: limit}}}
 	if storage.Endpoints[0].ID == "" {
 		storage.Endpoints[0].ID = "probe"
 	}
@@ -356,7 +334,9 @@ func (s *PromptService) resolveProbeEndpoint(input UpdateEndpoint) (ActiveEndpoi
 	if err := validateStorageConfig(storage); err != nil {
 		return ActiveEndpoint{}, false, err
 	}
-	return ActiveEndpoint{ID: storage.Endpoints[0].ID, Name: storage.Endpoints[0].Name, Protocol: "openai_compatible", BaseURL: baseURL, Model: model, Token: token, TimeoutMS: timeout, InputLimit: limit, Enabled: true}, token != "", nil
+	return ActiveEndpoint{ID: storage.Endpoints[0].ID, Name: storage.Endpoints[0].Name, Protocol: "openai_compatible", Adapter: adapter,
+		BaseURL: baseURL, Model: model, Token: token, TimeoutMS: timeout, InputLimit: limit, Enabled: true,
+		PromptTemplateID: template.ID, SystemPrompt: template.SystemPrompt, FlagThreshold: flagThreshold, BlockThreshold: blockThreshold}, token != "", nil
 }
 
 func (s *PromptService) finishProbe(id string, started time.Time, result ProbeResult) ProbeResult {

@@ -176,6 +176,10 @@ func (h *OpenAIGatewayHandler) Images(c *gin.Context) {
 				zap.Error(err),
 				zap.Int("excluded_account_count", len(failedAccountIDs)),
 			)
+			if isPromptRiskRouteSelectionError(requestCtx, err) {
+				h.handleStreamingAwareError(c, http.StatusServiceUnavailable, "api_error", promptRiskRouteSafeMessage, streamStarted)
+				return
+			}
 			if len(failedAccountIDs) == 0 {
 				cls := classifyNoAccountErrorFromGin(c, h.gatewayService, apiKey, clientRequestModel, routingModel, service.PlatformOpenAI)
 				if !cls.ModelNotFound {

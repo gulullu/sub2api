@@ -505,6 +505,10 @@ func (h *OpenAIGatewayHandler) Responses(c *gin.Context) {
 				zap.Error(openAICompatibleSelectionErrorForLog(err, requestPlatform)),
 				zap.Int("excluded_account_count", len(failedAccountIDs)),
 			)
+			if errors.Is(err, service.ErrPromptRiskRouteUnavailable) || errors.Is(err, service.ErrPromptRiskRouteStateConflict) {
+				h.handleStreamingAwareError(c, http.StatusServiceUnavailable, "api_error", "Service temporarily unavailable", streamStarted)
+				return
+			}
 			if len(failedAccountIDs) == 0 {
 				if legacyCompact && errors.Is(err, service.ErrNoAvailableCompactAccounts) {
 					markOpsRoutingCapacityLimitedIfNoAvailable(c, err)
@@ -1069,6 +1073,10 @@ func (h *OpenAIGatewayHandler) Messages(c *gin.Context) {
 				zap.Error(openAICompatibleSelectionErrorForLog(err, requestPlatform)),
 				zap.Int("excluded_account_count", len(failedAccountIDs)),
 			)
+			if isPromptRiskRouteSelectionError(c.Request.Context(), err) {
+				h.anthropicStreamingAwareError(c, http.StatusServiceUnavailable, "api_error", promptRiskRouteSafeMessage, streamStarted)
+				return
+			}
 			if len(failedAccountIDs) == 0 {
 				if err != nil {
 					cls := classifyOpenAICompatibleNoAccountErrorFromGin(c, h.gatewayService, apiKey, currentRoutingModel, reqModel)
@@ -1747,6 +1755,10 @@ func (h *OpenAIGatewayHandler) ResponsesWebSocket(c *gin.Context) {
 		closeOpenAIClientWS(wsConn, securityAuditWSCloseStatus(decision), securityAuditWSCloseReason(decision))
 		return
 	}
+	// A first-turn flag may install a private hard account pool. Refresh the
+	// connection context before sticky/previous-response resolution and initial
+	// account selection so the connection starts on an allowed account.
+	ctx = c.Request.Context()
 
 	imageIntent := service.IsExplicitImageGenerationIntent("/v1/responses", reqModel, firstMessage)
 	if imageIntent && !service.GroupAllowsImageGeneration(apiKey.Group) {
@@ -2059,9 +2071,21 @@ func (h *OpenAIGatewayHandler) ResponsesWebSocket(c *gin.Context) {
 				if model == "" {
 					model = reqModel
 				}
-				if decision := h.checkSecurityAuditStage(c, reqLog, apiKey, subject, service.ContentModerationProtocolOpenAIResponses, model, payload, "subsequent_turn"); decision != nil && !decision.AllowNextStage {
+				decision := h.checkSecurityAuditStage(c, reqLog, apiKey, subject, service.ContentModerationProtocolOpenAIResponses, model, payload, "subsequent_turn")
+				if decision != nil && !decision.AllowNextStage {
 					writeSecurityAuditWSError(ctx, wsConn, decision)
 					return service.NewOpenAIWSClientCloseError(securityAuditWSCloseStatus(decision), securityAuditWSCloseReason(decision), nil)
+				}
+				// A newly flagged later turn cannot safely retrofit the connection's
+				// outer failover context. Close even when the currently bound account
+				// belongs to the pool; reconnecting makes the audited hard pool part of
+				// first-turn account selection and every subsequent failover attempt.
+				if securityAuditWSRequiresRiskRouteReconnect(decision) {
+					return service.NewOpenAIWSClientCloseError(
+						coderws.StatusTryAgainLater,
+						"prompt risk routing requires reconnecting this websocket",
+						nil,
+					)
 				}
 				return nil
 			},

@@ -47,6 +47,7 @@
             <div class="min-w-0">
               <div class="flex min-w-0 items-center gap-2">
                 <p class="truncate font-semibold text-gray-950 dark:text-white">{{ endpoint.name }}</p>
+                <span class="shrink-0 rounded-md bg-primary-50 px-1.5 py-0.5 text-[10px] font-semibold text-primary-700 dark:bg-primary-950/40 dark:text-primary-300">{{ adapterLabel(endpoint.adapter) }}</span>
                 <span class="h-1.5 w-1.5 shrink-0 rounded-full" :class="endpoint.enabled ? 'bg-emerald-500' : 'bg-gray-300 dark:bg-dark-500'" aria-hidden="true" />
               </div>
               <p class="mt-0.5 truncate font-mono text-[11px] text-gray-500 dark:text-dark-400" :title="endpoint.base_url">{{ endpoint.base_url }}</p>
@@ -103,6 +104,14 @@
           <input v-model="editing.id" class="input w-full" required :disabled="editingIndex >= 0" :aria-label="t('admin.promptAudit.pool.id')" />
         </label>
         <label class="space-y-1 text-sm text-gray-700 dark:text-dark-200 sm:col-span-2">
+          <span>{{ t('admin.promptAudit.pool.adapter') }}</span>
+          <select :value="editing.adapter" class="input w-full" :aria-label="t('admin.promptAudit.pool.adapter')" @change="changeAdapter(($event.target as HTMLSelectElement).value as PromptAuditAdapter)">
+            <option value="confidence_json">{{ t('admin.promptAudit.pool.adapters.confidence_json') }}</option>
+            <option value="qwen3guard">{{ t('admin.promptAudit.pool.adapters.qwen3guard') }}</option>
+          </select>
+          <span class="block text-xs text-gray-500 dark:text-dark-400">{{ t(`admin.promptAudit.pool.adapterHints.${editing.adapter}`) }}</span>
+        </label>
+        <label class="space-y-1 text-sm text-gray-700 dark:text-dark-200 sm:col-span-2">
           <span>{{ t('admin.promptAudit.pool.baseUrl') }}</span>
           <input v-model="editing.base_url" class="input w-full" required inputmode="url" :aria-label="t('admin.promptAudit.pool.baseUrl')" />
         </label>
@@ -121,17 +130,18 @@
         </label>
         <label class="space-y-1 text-sm text-gray-700 dark:text-dark-200">
           <span>{{ t('admin.promptAudit.pool.timeout') }}</span>
-          <input v-model.number="editing.timeout_ms" class="input w-full" type="number" min="100" max="30000" required :aria-label="t('admin.promptAudit.pool.timeout')" />
+          <input v-model.number="editing.timeout_ms" class="input w-full" type="number" min="100" max="40000" required :aria-label="t('admin.promptAudit.pool.timeout')" />
         </label>
         <label class="space-y-1 text-sm text-gray-700 dark:text-dark-200">
           <span>{{ t('admin.promptAudit.pool.inputLimit') }}</span>
-          <input v-model.number="editing.input_limit" class="input w-full" type="number" min="128" max="100000" required :aria-label="t('admin.promptAudit.pool.inputLimit')" />
+          <input v-model.number="editing.input_limit" class="input w-full" type="number" min="128" max="400000" required :aria-label="t('admin.promptAudit.pool.inputLimit')" />
         </label>
+        <p class="text-xs text-gray-500 dark:text-dark-400 sm:col-span-2">{{ t('admin.promptAudit.pool.limitBounds') }}</p>
       </form>
       <template #footer>
         <div class="flex justify-end gap-3">
           <button type="button" class="btn btn-secondary" @click="closeEditor">{{ t('common.cancel') }}</button>
-          <button type="button" class="btn btn-primary" data-test="save-endpoint" @click="saveEditor">{{ t('common.save') }}</button>
+          <button type="button" class="btn btn-primary" data-test="save-endpoint" :disabled="!editorValid" @click="saveEditor">{{ t('common.save') }}</button>
         </div>
       </template>
     </BaseDialog>
@@ -139,10 +149,10 @@
 </template>
 
 <script setup lang="ts">
-import { ref } from 'vue'
+import { computed, ref } from 'vue'
 import { useI18n } from 'vue-i18n'
 import BaseDialog from '@/components/common/BaseDialog.vue'
-import type { PromptAuditEndpointDraft, PromptProbeResult } from '../types'
+import type { PromptAuditAdapter, PromptAuditEndpointDraft, PromptProbeResult } from '../types'
 import { cloneData, createDefaultEndpoint } from '../viewModel'
 
 const props = defineProps<{
@@ -157,6 +167,16 @@ const emit = defineEmits<{
 const { t } = useI18n()
 const editing = ref<PromptAuditEndpointDraft | null>(null)
 const editingIndex = ref(-1)
+const editorValid = computed(() => {
+  const endpoint = editing.value
+  if (!endpoint?.id.trim() || !endpoint.name.trim() || !endpoint.base_url.trim()) return false
+  return Number.isInteger(endpoint.timeout_ms)
+    && endpoint.timeout_ms >= 100
+    && endpoint.timeout_ms <= 40000
+    && Number.isInteger(endpoint.input_limit)
+    && endpoint.input_limit >= 128
+    && endpoint.input_limit <= 400000
+})
 
 function openCreate() {
   editingIndex.value = -1
@@ -170,8 +190,21 @@ function closeEditor() {
   editing.value = null
   editingIndex.value = -1
 }
+function changeAdapter(adapter: PromptAuditAdapter) {
+  if (!editing.value || editing.value.adapter === adapter) return
+  const previousDefaults = createDefaultEndpoint(0, editing.value.adapter)
+  const nextDefaults = createDefaultEndpoint(0, adapter)
+  editing.value = {
+    ...editing.value,
+    adapter,
+    base_url: editing.value.base_url === previousDefaults.base_url ? nextDefaults.base_url : editing.value.base_url,
+    model: editing.value.model === previousDefaults.model ? nextDefaults.model : editing.value.model,
+    timeout_ms: editing.value.timeout_ms === previousDefaults.timeout_ms ? nextDefaults.timeout_ms : editing.value.timeout_ms,
+    input_limit: editing.value.input_limit === previousDefaults.input_limit ? nextDefaults.input_limit : editing.value.input_limit,
+  }
+}
 function saveEditor() {
-  if (!editing.value?.id.trim() || !editing.value.name.trim() || !editing.value.base_url.trim()) return
+  if (!editing.value || !editorValid.value) return
   const next = props.endpoints.map((item) => cloneData(item))
   const value = cloneData(editing.value)
   if (value.token.trim()) value.clear_token = false
@@ -192,5 +225,8 @@ function hasCredential(endpoint: PromptAuditEndpointDraft): boolean {
 }
 function credentialInvalid(endpoint: PromptAuditEndpointDraft): boolean {
   return endpoint.token_status === 'invalid' && !endpoint.token.trim() && !endpoint.clear_token
+}
+function adapterLabel(adapter: PromptAuditAdapter): string {
+  return adapter === 'confidence_json' ? 'JSON confidence' : 'Qwen3Guard'
 }
 </script>

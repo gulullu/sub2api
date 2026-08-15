@@ -1,11 +1,30 @@
 export type PromptAuditMode = 'off' | 'async_audit' | 'blocking'
 export type PromptDecision = 'pass' | 'flag' | 'critical'
 export type PromptRiskLevel = 'low' | 'medium' | 'high' | 'critical'
+export type PromptAuditAdapter = 'qwen3guard' | 'confidence_json'
+
+export interface PromptAuditTemplate {
+  id: string
+  name: string
+  system_prompt: string
+  builtin: boolean
+}
+
+export interface PromptAuditAccount {
+  id: number
+  name: string
+  platform: string
+  type: string
+  status: string
+}
 
 export interface PromptAuditEndpoint {
   id: string
   name: string
   protocol: 'openai_compatible'
+  // Optional on the wire for compatibility with configs saved before adapters
+  // existed. Drafts always normalize this to qwen3guard.
+  adapter?: PromptAuditAdapter
   base_url: string
   model: string
   timeout_ms: number
@@ -15,7 +34,8 @@ export interface PromptAuditEndpoint {
   token_status: 'configured' | 'missing' | 'invalid' | string
 }
 
-export interface PromptAuditEndpointDraft extends PromptAuditEndpoint {
+export interface PromptAuditEndpointDraft extends Omit<PromptAuditEndpoint, 'adapter'> {
+  adapter: PromptAuditAdapter
   token: string
   clear_token: boolean
 }
@@ -32,6 +52,13 @@ export interface PromptAuditConfig {
   scanners: string[]
   all_groups: boolean
   group_ids: number[]
+  risk_route_account_ids?: number[]
+  prompt_templates?: PromptAuditTemplate[]
+  active_prompt_template_id?: string
+  flag_threshold?: number
+  block_threshold?: number
+  block_http_status?: number
+  block_message?: string
   endpoints: PromptAuditEndpoint[]
   config_version: number
   updated_at: string
@@ -39,8 +66,25 @@ export interface PromptAuditConfig {
   change_summary: string
 }
 
-export interface PromptAuditDraft extends Omit<PromptAuditConfig, 'endpoints'> {
+export interface PromptAuditDraft extends Omit<
+  PromptAuditConfig,
+  | 'endpoints'
+  | 'prompt_templates'
+  | 'active_prompt_template_id'
+  | 'flag_threshold'
+  | 'block_threshold'
+  | 'block_http_status'
+  | 'block_message'
+  | 'risk_route_account_ids'
+> {
   endpoints: PromptAuditEndpointDraft[]
+  prompt_templates: PromptAuditTemplate[]
+  active_prompt_template_id: string
+  flag_threshold: number
+  block_threshold: number
+  block_http_status: number
+  block_message: string
+  risk_route_account_ids: number[]
 }
 
 export interface PromptAuditUpdateRequest {
@@ -55,10 +99,18 @@ export interface PromptAuditUpdateRequest {
   scanners: string[]
   all_groups: boolean
   group_ids: number[]
+  risk_route_account_ids: number[]
+  prompt_templates: PromptAuditTemplate[]
+  active_prompt_template_id: string
+  flag_threshold: number
+  block_threshold: number
+  block_http_status: number
+  block_message: string
   endpoints: Array<{
     id: string
     name: string
     protocol: 'openai_compatible'
+    adapter: PromptAuditAdapter
     base_url: string
     model: string
     token?: string
@@ -242,5 +294,6 @@ export interface PromptLoadErrors {
   config: string
   runtime: string
   groups: string
+  accounts: string
   events: string
 }

@@ -102,13 +102,15 @@ func runSecurityAudit(c *gin.Context, reqLog *zap.Logger, coordinator *securitya
 				if entry, ok := cached.(securityAuditWSDedupeEntry); ok &&
 					entry.stage == request.Stage && entry.turn == turnNo && entry.bodyHash == bodyHash {
 					decision := entry.decision
+					applySecurityAuditDecisionContext(c, decision)
 					logSecurityAuditDone(reqLog, request, decision, true)
 					return &decision
 				}
 			}
 			logSecurityAuditStart(reqLog, request, len(body), false)
 			decision := coordinator.Check(c.Request.Context(), request)
-			if decision.Kind == securityaudit.DecisionAllow {
+			applySecurityAuditDecisionContext(c, decision)
+			if decision.AllowNextStage {
 				c.Set(securityAuditWSDedupeContextKey, securityAuditWSDedupeEntry{
 					stage: request.Stage, turn: turnNo, bodyHash: bodyHash, decision: decision,
 				})
@@ -119,11 +121,25 @@ func runSecurityAudit(c *gin.Context, reqLog *zap.Logger, coordinator *securitya
 	}
 	logSecurityAuditStart(reqLog, request, len(body), false)
 	decision := coordinator.Check(c.Request.Context(), request)
+	applySecurityAuditDecisionContext(c, decision)
 	if decision.AllowNextStage && cacheCompletion {
 		c.Set(securityAuditCompletedContextKey, true)
 	}
 	logSecurityAuditDone(reqLog, request, decision, false)
 	return &decision
+}
+
+func applySecurityAuditDecisionContext(c *gin.Context, decision securityaudit.Decision) {
+	if c == nil || c.Request == nil {
+		return
+	}
+	if decision.Kind == securityaudit.DecisionBlock && decision.Prompt != nil && decision.Prompt.Kind == securityaudit.DecisionBlock {
+		service.MarkOpsClientBusinessLimited(c, service.OpsClientBusinessLimitedReasonLocalPolicyDenied)
+	}
+	if decision.Kind != securityaudit.DecisionFlag || decision.Prompt == nil || len(decision.Prompt.RouteAccountIDs) == 0 {
+		return
+	}
+	c.Request = c.Request.WithContext(service.WithPromptRiskRouteAccounts(c.Request.Context(), decision.Prompt.RouteAccountIDs))
 }
 
 func logSecurityAuditStart(reqLog *zap.Logger, request securityaudit.Request, bodyBytes int, cached bool) {
@@ -202,6 +218,11 @@ func securityAuditMessage(decision *securityaudit.Decision) string {
 		return decision.ClientMessage
 	}
 	return "Request blocked by content policy"
+}
+
+func securityAuditWSRequiresRiskRouteReconnect(decision *securityaudit.Decision) bool {
+	return decision != nil && decision.Kind == securityaudit.DecisionFlag &&
+		decision.Prompt != nil && len(decision.Prompt.RouteAccountIDs) > 0
 }
 
 func cloneSecurityAuditGroupID(value *int64) *int64 {

@@ -917,6 +917,50 @@ func TestClassifyOpsClientBusinessLimitedMarkerExcludesCustomPolicyDenialFromSLA
 	require.Equal(t, "client_request", errorSource)
 }
 
+func TestClassifyOpsLocalModelUnsupportedMarkerExcludedFromSLAAsRequestError(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	rec := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(rec)
+	service.MarkOpsClientBusinessLimited(c, opsClientBusinessLimitedReasonLocalModelUnsupported)
+
+	errType := normalizeOpsErrorType("model_not_found", "")
+	phase, isBusinessLimited, errorOwner, errorSource := classifyOpsErrorLog(
+		c,
+		errType,
+		`Model "gpt-5.6-luna" is not supported by any configured account in this group`,
+		"",
+		http.StatusNotFound,
+	)
+
+	require.Equal(t, "api_error", errType)
+	require.Equal(t, "request", phase)
+	require.True(t, isBusinessLimited)
+	require.Equal(t, "client", errorOwner)
+	require.Equal(t, "client_request", errorSource)
+}
+
+func TestClassifyOpsUpstreamContextOverridesLocalModelUnsupportedMarker(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	rec := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(rec)
+	service.MarkOpsClientBusinessLimited(c, opsClientBusinessLimitedReasonLocalModelUnsupported)
+	service.SetOpsUpstreamError(c, http.StatusNotFound, "upstream model not found", `{}`)
+
+	errType := normalizeOpsErrorType("model_not_found", "")
+	phase, isBusinessLimited, errorOwner, errorSource := classifyOpsErrorLog(
+		c,
+		errType,
+		"upstream model not found",
+		"",
+		http.StatusNotFound,
+	)
+
+	require.Equal(t, "upstream", phase)
+	require.False(t, isBusinessLimited, "a local marker must never hide an actual upstream failure from SLA")
+	require.Equal(t, "provider", errorOwner)
+	require.Equal(t, "upstream_http", errorSource)
+}
+
 func TestClassifyOpsOtherErrorsStillCountForSLA(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 	rec := httptest.NewRecorder()

@@ -138,6 +138,9 @@ func (s *GeminiMessagesCompatService) SelectAccountForModelWithExclusions(ctx co
 	selected := s.selectBestGeminiAccount(ctx, accounts, requestedModel, excludedIDs, platform, useMixedScheduling)
 
 	if selected == nil {
+		if PromptRiskRouteEnabled(ctx) {
+			return nil, newPromptRiskRouteUnavailableError(ErrNoAvailableAccounts)
+		}
 		if requestedModel != "" {
 			return nil, fmt.Errorf("no available Gemini accounts supporting model: %s", requestedModel)
 		}
@@ -146,7 +149,7 @@ func (s *GeminiMessagesCompatService) SelectAccountForModelWithExclusions(ctx co
 
 	// 5. 设置粘性会话绑定
 	// Set sticky session binding
-	if sessionHash != "" {
+	if sessionHash != "" && !PromptRiskRouteEnabled(ctx) {
 		_ = s.cache.SetSessionAccountID(ctx, derefGroupID(groupID), cacheKey, selected.ID, geminiStickySessionTTL)
 	}
 
@@ -230,7 +233,9 @@ func (s *GeminiMessagesCompatService) tryStickySessionHit(
 
 	// 刷新会话 TTL 并返回账号
 	// Refresh session TTL and return account
-	_ = s.cache.RefreshSessionTTL(ctx, derefGroupID(groupID), cacheKey, geminiStickySessionTTL)
+	if !PromptRiskRouteEnabled(ctx) {
+		_ = s.cache.RefreshSessionTTL(ctx, derefGroupID(groupID), cacheKey, geminiStickySessionTTL)
+	}
 	return account
 }
 

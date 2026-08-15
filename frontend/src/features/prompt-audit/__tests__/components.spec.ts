@@ -2,12 +2,15 @@ import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { defineComponent } from 'vue'
 import { mount } from '@vue/test-utils'
 import EndpointPool from '../components/EndpointPool.vue'
+import PromptTemplatePanel from '../components/PromptTemplatePanel.vue'
+import DecisionPolicyPanel from '../components/DecisionPolicyPanel.vue'
+import RiskRouteAccountSelector from '../components/RiskRouteAccountSelector.vue'
 import PolicyPanel from '../components/PolicyPanel.vue'
 import EventWorkspace from '../components/EventWorkspace.vue'
 import EventDetailDialog from '../components/EventDetailDialog.vue'
 import FilterDeleteDialog from '../components/FilterDeleteDialog.vue'
 import type { PromptAuditDraft, PromptAuditEndpointDraft, PromptAuditEvent, PromptEventFilters } from '../types'
-import { emptyEventFilters, resolveDeleteRangeFilters, SCANNER_CATALOG } from '../viewModel'
+import { configToDraft, DEFAULT_BLOCK_MESSAGE, emptyEventFilters, resolveDeleteRangeFilters, SCANNER_CATALOG } from '../viewModel'
 
 vi.mock('vue-i18n', async () => {
   const actual = await vi.importActual<typeof import('vue-i18n')>('vue-i18n')
@@ -19,7 +22,7 @@ const PaginationStub = defineComponent({ props: ['total', 'page', 'pageSize'], e
 
 const endpoint = (): PromptAuditEndpointDraft => ({
   id: 'guard-1', name: 'Guard One', protocol: 'openai_compatible', base_url: 'http://127.0.0.1:8000',
-  model: 'guard-model', timeout_ms: 3000, input_limit: 4000, enabled: true,
+  adapter: 'qwen3guard', model: 'guard-model', timeout_ms: 3000, input_limit: 4000, enabled: true,
   has_token: true, token_status: 'configured', token: '', clear_token: false,
 })
 
@@ -69,6 +72,9 @@ describe('Prompt Audit components', () => {
     const draft: PromptAuditDraft = {
       enabled: true, blocking_enabled: false, blocking_latest_turn_only: false, store_pass_events: false, effective_mode: 'async_audit', strategy: 'priority',
       worker_count: 4, queue_capacity: 100, scanners: SCANNER_CATALOG.map((item) => item.id), all_groups: false, group_ids: [1, 99],
+      risk_route_account_ids: [],
+      prompt_templates: [{ id: 'builtin', name: 'Built-in', system_prompt: 'Review input', builtin: true }], active_prompt_template_id: 'builtin',
+      flag_threshold: 0.4, block_threshold: 0.7, block_http_status: 403, block_message: DEFAULT_BLOCK_MESSAGE,
       endpoints: [endpoint()], config_version: 1, updated_at: '', updated_by: 0, change_summary: '',
     }
     const wrapper = mount(PolicyPanel, {
@@ -82,6 +88,102 @@ describe('Prompt Audit components', () => {
     await wrapper.get('[aria-label="admin.promptAudit.policy.workerCount"]').setValue('6')
     const emitted = wrapper.emitted('update:draft')?.at(-1)?.[0] as PromptAuditDraft
     expect(emitted.worker_count).toBe(6)
+  })
+
+  it('creates confidence JSON nodes with DeepSeek defaults and preserves Qwen defaults when switched', async () => {
+    const wrapper = mount(EndpointPool, {
+      props: { endpoints: [], probeResults: {}, probingIds: [] },
+      global: { stubs: { BaseDialog: DialogStub } },
+    })
+    await wrapper.get('[data-test="add-endpoint"]').trigger('click')
+    const adapter = wrapper.get<HTMLSelectElement>('[aria-label="admin.promptAudit.pool.adapter"]')
+    expect(adapter.element.value).toBe('confidence_json')
+    const timeout = wrapper.get<HTMLInputElement>('[aria-label="admin.promptAudit.pool.timeout"]')
+    const inputLimit = wrapper.get<HTMLInputElement>('[aria-label="admin.promptAudit.pool.inputLimit"]')
+    expect(timeout.element.value).toBe('4000')
+    expect(timeout.attributes('max')).toBe('40000')
+    expect(inputLimit.element.value).toBe('40000')
+    expect(inputLimit.attributes('max')).toBe('400000')
+    await adapter.setValue('qwen3guard')
+    expect(wrapper.get<HTMLInputElement>('[aria-label="admin.promptAudit.pool.timeout"]').element.value).toBe('3000')
+    expect(wrapper.get<HTMLInputElement>('[aria-label="admin.promptAudit.pool.inputLimit"]').element.value).toBe('4000')
+    await timeout.setValue('40001')
+    expect(wrapper.get('[data-test="save-endpoint"]').attributes()).toHaveProperty('disabled')
+    await timeout.setValue('40000')
+    await inputLimit.setValue('400000')
+    expect(wrapper.get('[data-test="save-endpoint"]').attributes()).not.toHaveProperty('disabled')
+  })
+
+  it('switches templates, copies built-ins into editable custom templates, and protects built-ins', async () => {
+    const draft = configToDraft({
+      enabled: true, blocking_enabled: true, blocking_latest_turn_only: false, store_pass_events: false, effective_mode: 'blocking', strategy: 'priority',
+      worker_count: 4, queue_capacity: 100, scanners: ['jailbreak'], all_groups: true, group_ids: [], endpoints: [],
+      prompt_templates: [
+        { id: 'builtin', name: 'Built-in', system_prompt: 'Built-in prompt', builtin: true },
+        { id: 'custom-one', name: 'Custom', system_prompt: 'Custom prompt', builtin: false },
+      ],
+      active_prompt_template_id: 'builtin', config_version: 1, updated_at: '', updated_by: 0, change_summary: '',
+    })
+    const wrapper = mount(PromptTemplatePanel, { props: { draft }, global: { stubs: { BaseDialog: DialogStub } } })
+    expect(wrapper.get('[data-test="prompt-template-builtin"]').findAll('button').some((button) => button.text() === 'common.edit')).toBe(false)
+    await wrapper.get('[aria-label="admin.promptAudit.templates.activate"]').setValue()
+    const customRadio = wrapper.findAll('input[type="radio"]')[1]
+    await customRadio.setValue()
+    expect((wrapper.emitted('update:draft')?.at(-1)?.[0] as PromptAuditDraft).active_prompt_template_id).toBe('custom-one')
+
+    const copy = wrapper.get('[data-test="prompt-template-builtin"]').findAll('button').find((button) => button.text() === 'admin.promptAudit.templates.copy')
+    await copy!.trigger('click')
+    await wrapper.get('[data-test="save-template"]').trigger('click')
+    const copied = wrapper.emitted('update:draft')?.at(-1)?.[0] as PromptAuditDraft
+    expect(copied.prompt_templates.at(-1)).toMatchObject({ builtin: false, system_prompt: 'Built-in prompt' })
+    expect(copied.active_prompt_template_id).toBe(copied.prompt_templates.at(-1)?.id)
+  })
+
+  it('keeps confidence thresholds ordered and bounds the client block response', async () => {
+    const draft = configToDraft({
+      enabled: true, blocking_enabled: true, blocking_latest_turn_only: false, store_pass_events: false, effective_mode: 'blocking', strategy: 'priority',
+      worker_count: 4, queue_capacity: 100, scanners: ['jailbreak'], all_groups: true, group_ids: [], endpoints: [],
+      config_version: 1, updated_at: '', updated_by: 0, change_summary: '',
+    })
+    const wrapper = mount(DecisionPolicyPanel, { props: { draft } })
+    await wrapper.get('[data-test="flag-threshold"]').setValue('0.9')
+    await wrapper.get('[data-test="flag-threshold"]').trigger('change')
+    expect((wrapper.emitted('update:draft')?.at(-1)?.[0] as PromptAuditDraft).flag_threshold).toBeCloseTo(0.69)
+    await wrapper.get('[data-test="block-http-status"]').setValue('599')
+    await wrapper.get('[data-test="block-http-status"]').trigger('change')
+    expect((wrapper.emitted('update:draft')?.at(-1)?.[0] as PromptAuditDraft).block_http_status).toBe(499)
+  })
+
+  it('configures a blocking-only hard account pool while retaining removable stale IDs', async () => {
+    const draft = configToDraft({
+      enabled: true, blocking_enabled: true, blocking_latest_turn_only: false, store_pass_events: false, effective_mode: 'blocking', strategy: 'priority',
+      worker_count: 4, queue_capacity: 100, scanners: ['jailbreak'], all_groups: true, group_ids: [], risk_route_account_ids: [2, 99], endpoints: [],
+      config_version: 1, updated_at: '', updated_by: 0, change_summary: '',
+    })
+    const accounts = [
+      { id: 1, name: 'OpenAI One', platform: 'openai', type: 'oauth', status: 'active' },
+      { id: 2, name: 'Claude Two', platform: 'anthropic', type: 'setup-token', status: 'active' },
+    ]
+    const wrapper = mount(RiskRouteAccountSelector, {
+      props: { draft, accounts, loaded: true, loading: false, error: '' },
+    })
+    expect(wrapper.get('[data-test="risk-route-selected-2"]').text()).toContain('Claude Two')
+    expect(wrapper.get('[data-test="risk-route-selected-99"]').text()).toContain('admin.promptAudit.riskRoute.invalidAccount')
+    expect(wrapper.get('[data-test="risk-route-hard-warning"]').exists()).toBe(true)
+
+    await wrapper.get('[data-test="risk-route-selected-99"] button').trigger('click')
+    const afterRemove = wrapper.emitted('update:draft')?.at(-1)?.[0] as PromptAuditDraft
+    expect(afterRemove.risk_route_account_ids).toEqual([2])
+
+    const accountOne = wrapper.findAll<HTMLInputElement>('input[type="checkbox"]').find((input) => input.attributes('aria-label') === 'OpenAI One')
+    await accountOne!.setValue(true)
+    const afterAdd = wrapper.emitted('update:draft')?.at(-1)?.[0] as PromptAuditDraft
+    expect(afterAdd.risk_route_account_ids).toEqual([1, 2, 99])
+
+    await wrapper.setProps({ draft: { ...draft, blocking_enabled: false } })
+    expect(wrapper.get('[data-test="risk-route-blocking-required"]').exists()).toBe(true)
+    expect(wrapper.get<HTMLInputElement>('[aria-label="admin.promptAudit.riskRoute.search"]').attributes()).toHaveProperty('disabled')
+    expect(wrapper.findAll('input[type="checkbox"]').every((input) => input.attributes('disabled') !== undefined)).toBe(true)
   })
 
   it('keeps identity fields separate, supports selection, and opens filter deletion from the toolbar', async () => {
@@ -243,6 +345,41 @@ describe('Prompt Audit components', () => {
     expect(wrapper.get('[data-test="risk-guard-return"]').text()).toContain('"decision": "admin.promptAudit.decisions.critical"')
     expect(wrapper.get('[data-test="risk-guard-return"]').text()).toContain('admin.promptAudit.scanners.sexual_content_or_sexual_acts')
     expect(wrapper.get('[data-test="risk-issue"]').text()).toContain('admin.promptAudit.scanners.sexual_content_or_sexual_acts')
+  })
+
+  it('localizes confidence JSON risk summaries instead of showing backend labels or raw category keys', async () => {
+    const event: PromptAuditEvent = {
+      id: 3, job_id: 3, decision: 'flag', risk_level: 'medium', action: 'Warn',
+      categories: [], matched_scanners: ['confidence_json'], scanner_scores: { confidence_json: 0.55 },
+      scanner_evidence: { confidence_json: 'cyber abuse' }, scanner_backend: 'confidence-json-openai',
+      scanner_version: 'deepseek-chat', guard_endpoint_id: 'deepseek', policy_id: 'relaybases-cyber-safety-v1',
+      policy_version: 1, config_version: 2, chunk_total: 1, latency_ms: 20,
+      issue_summaries: [{
+        category: 'confidence_json', scanner_id: 'confidence_json', title: '模型置信度判定',
+        description: '通用审核模型按配置的置信度阈值标记了风险', severity: 'medium', severity_label: '中',
+        action: 'Warn', action_label: '警告', code: 'prompt_audit_confidence_json', score: 0.55,
+        evidence: 'cyber abuse', evidence_hash: 'def',
+      }],
+      created_at: '2026-07-16T00:00:00Z',
+      snapshot: {
+        request_id: 'req-confidence', user_id: 1, username: 'alice', user_email: 'alice@example.test',
+        api_key_id: 2, api_key_name: 'alice-key', group_id: 3, group_name: 'Alpha', provider: 'openai',
+        endpoint: '/v1/responses', protocol: 'openai_responses', model: 'gpt-test', prompt_hash: 'c'.repeat(64),
+        redacted_preview: 'preview', full_prompt: 'full prompt', prompt_length: 11, message_count: 1, stage: 'http',
+      },
+    }
+    const wrapper = mount(EventDetailDialog, {
+      props: { show: true, event, loading: false },
+      global: { stubs: { BaseDialog: DialogStub } },
+    })
+    const riskTab = wrapper.findAll('[role="tab"]').find((tab) => tab.text().includes('admin.promptAudit.events.tabs.risks'))
+    await riskTab!.trigger('click')
+    const issue = wrapper.get('[data-test="risk-issue"]').text()
+    expect(issue).toContain('admin.promptAudit.scanners.confidence_json')
+    expect(issue).toContain('admin.promptAudit.scannerDescriptions.confidence_json')
+    expect(issue).not.toContain('模型置信度判定')
+    expect(issue).not.toContain('通用审核模型按配置的置信度阈值标记了风险')
+    expect(wrapper.get('[data-test="risk-guard-return"]').text()).toContain('admin.promptAudit.scanners.confidence_json')
   })
 
   it('falls back to the redacted preview for events stored before full prompts were kept', async () => {

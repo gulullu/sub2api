@@ -143,10 +143,17 @@ func (h *GatewayHandler) WebSearch(c *gin.Context) {
 			c.Request.Context(), groupID, "", searchModel, failedAccounts, "", 0,
 		)
 		if selectErr != nil {
+			if isPromptRiskRouteSelectionError(c.Request.Context(), selectErr) {
+				c.JSON(http.StatusServiceUnavailable, gin.H{"error": gin.H{
+					"type":    "scheduling_error",
+					"message": promptRiskRouteSafeMessage,
+				}})
+				return
+			}
 			if attempt == 0 {
 				c.JSON(http.StatusServiceUnavailable, gin.H{"error": gin.H{
 					"type":    "scheduling_error",
-					"message": selectErr.Error(),
+					"message": webSearchSelectionErrorMessage(c.Request.Context(), selectErr),
 				}})
 				return
 			}
@@ -228,6 +235,7 @@ func (h *GatewayHandler) WebSearch(c *gin.Context) {
 			).Info("gateway.web_search.search_price_per_1k_explicit_free")
 		}
 	}
+
 	h.submitMandatoryUsageRecordTask(c.Request.Context(), func(ctx context.Context) {
 		if err := h.gatewayService.RecordUsage(ctx, &service.RecordUsageInput{
 			Result: &service.ForwardResult{
@@ -263,6 +271,16 @@ func (h *GatewayHandler) WebSearch(c *gin.Context) {
 		"provider":    providerName,
 		"max_results": maxResults,
 	})
+}
+
+func webSearchSelectionErrorMessage(ctx context.Context, err error) string {
+	if isPromptRiskRouteSelectionError(ctx, err) {
+		return promptRiskRouteSafeMessage
+	}
+	if err == nil {
+		return promptRiskRouteSafeMessage
+	}
+	return err.Error()
 }
 
 // acquireWebSearchAccountSlot resolves an immediate slot or WaitPlan wait.

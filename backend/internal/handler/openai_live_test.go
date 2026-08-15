@@ -102,6 +102,23 @@ func TestLiveAttestationErrorIsExplicit(t *testing.T) {
 	require.Contains(t, recorder.Body.String(), "Sub2API runs on macOS")
 }
 
+func TestLivePromptRiskRouteErrorsAreSafe503(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	for _, routeErr := range []error{
+		service.ErrPromptRiskRouteUnavailable,
+		service.ErrPromptRiskRouteStateConflict,
+	} {
+		recorder := httptest.NewRecorder()
+		context, _ := gin.CreateTestContext(recorder)
+
+		(&OpenAIGatewayHandler{}).writeLiveCreateError(context, routeErr)
+
+		require.Equal(t, http.StatusServiceUnavailable, recorder.Code)
+		require.Contains(t, recorder.Body.String(), "Service temporarily unavailable")
+		require.NotContains(t, recorder.Body.String(), "prompt risk route")
+	}
+}
+
 func jsonPathString(t *testing.T, raw json.RawMessage, keys ...string) string {
 	t.Helper()
 	var value any

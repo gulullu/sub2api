@@ -163,6 +163,9 @@ func (s *OpenAIGatewayService) CreateLiveCall(
 			false,
 		)
 		if selectErr != nil {
+			if errors.Is(selectErr, ErrPromptRiskRouteUnavailable) || errors.Is(selectErr, ErrPromptRiskRouteStateConflict) {
+				return nil, selectErr
+			}
 			if lastErr != nil {
 				return nil, lastErr
 			}

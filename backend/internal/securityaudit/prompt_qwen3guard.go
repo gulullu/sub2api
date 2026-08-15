@@ -8,6 +8,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"math"
 	"net"
 	"net/http"
 	"sort"
@@ -202,12 +203,35 @@ func (s *OpenAICompatibleScanner) Scan(ctx context.Context, endpoint ActiveEndpo
 	if err != nil {
 		return nil, &GuardError{Code: ErrorCodeUnavailable, Cause: err}
 	}
-	payload := map[string]any{
-		"model":       endpoint.Model,
-		"messages":    []map[string]string{{"role": "user", "content": chunk}},
-		"temperature": 0,
-		"max_tokens":  64,
-		"seed":        42,
+	adapter := strings.TrimSpace(endpoint.Adapter)
+	if adapter == "" {
+		adapter = AdapterQwen3Guard
+	}
+	var payload map[string]any
+	switch adapter {
+	case AdapterQwen3Guard:
+		payload = map[string]any{
+			"model":       endpoint.Model,
+			"messages":    []map[string]string{{"role": "user", "content": chunk}},
+			"temperature": 0,
+			"max_tokens":  64,
+			"seed":        42,
+		}
+	case AdapterConfidenceJSON:
+		systemPrompt := strings.TrimSpace(endpoint.SystemPrompt)
+		if systemPrompt == "" {
+			systemPrompt = DefaultPromptAuditSystemPrompt
+		}
+		payload = map[string]any{
+			"model": endpoint.Model,
+			"messages": []map[string]string{
+				{"role": "system", "content": systemPrompt},
+				{"role": "user", "content": WrapPromptAuditInput(chunk)},
+			},
+			"temperature": 0,
+		}
+	default:
+		return nil, &GuardError{Code: ErrorCodeInvalidResponse}
 	}
 	body, err := json.Marshal(payload)
 	if err != nil {
@@ -247,13 +271,125 @@ func (s *OpenAICompatibleScanner) Scan(ctx context.Context, endpoint ActiveEndpo
 	if err != nil {
 		return nil, &GuardError{Code: ErrorCodeInvalidResponse, Cause: err}
 	}
-	result, err := ParseQwen3Guard(content, enabledScanners)
+	var result *NormalizedResult
+	switch adapter {
+	case AdapterQwen3Guard:
+		result, err = ParseQwen3Guard(content, enabledScanners)
+	case AdapterConfidenceJSON:
+		result, err = ParseConfidenceJSON(content, endpoint)
+	}
 	if err != nil {
 		return nil, err
 	}
 	result.GuardEndpointID = endpoint.ID
 	result.ScannerVersion = endpoint.Model
 	return result, nil
+}
+
+const confidenceScoreKey = "confidence_json"
+
+// ParseConfidenceJSON accepts a plain or fenced JSON object from a generic
+// chat-completions model. confidence is authoritative when present; flagged is
+// retained only as a compatibility fallback for older audit prompts.
+func ParseConfidenceJSON(content string, endpoint ActiveEndpoint) (*NormalizedResult, error) {
+	object, err := firstJSONObject(content)
+	if err != nil {
+		return nil, &GuardError{Code: ErrorCodeInvalidResponse, Cause: err}
+	}
+	var fields map[string]json.RawMessage
+	if err := json.Unmarshal(object, &fields); err != nil {
+		return nil, &GuardError{Code: ErrorCodeInvalidResponse, Cause: err}
+	}
+	reasonRaw, hasReason := fields["reason"]
+	if !hasReason {
+		return nil, &GuardError{Code: ErrorCodeInvalidResponse, Cause: errors.New("prompt guard reason missing")}
+	}
+	var reason string
+	if err := json.Unmarshal(reasonRaw, &reason); err != nil {
+		return nil, &GuardError{Code: ErrorCodeInvalidResponse, Cause: errors.New("prompt guard reason invalid")}
+	}
+	// The selected template promises a short reason. Treat a longer model
+	// response as recoverable output, but never persist more prompt-derived
+	// text than that public contract allows.
+	reason = RedactPreview(strings.TrimSpace(reason), MaxConfidenceReasonRunes)
+	if runes := []rune(reason); len(runes) > MaxConfidenceReasonRunes {
+		reason = string(runes[:MaxConfidenceReasonRunes-1]) + "…"
+	}
+
+	confidence := 0.0
+	confidenceRaw, hasConfidence := fields["confidence"]
+	if hasConfidence && !bytes.Equal(bytes.TrimSpace(confidenceRaw), []byte("null")) {
+		if err := json.Unmarshal(confidenceRaw, &confidence); err != nil || math.IsNaN(confidence) || math.IsInf(confidence, 0) || confidence < 0 || confidence > 1 {
+			return nil, &GuardError{Code: ErrorCodeInvalidResponse, Cause: errors.New("prompt guard confidence invalid")}
+		}
+	} else {
+		flaggedRaw, hasFlagged := fields["flagged"]
+		if !hasFlagged {
+			return nil, &GuardError{Code: ErrorCodeInvalidResponse, Cause: errors.New("prompt guard confidence missing")}
+		}
+		var flagged bool
+		if err := json.Unmarshal(flaggedRaw, &flagged); err != nil {
+			return nil, &GuardError{Code: ErrorCodeInvalidResponse, Cause: errors.New("prompt guard flagged invalid")}
+		}
+		if flagged {
+			confidence = 1
+		}
+	}
+
+	flagThreshold, blockThreshold := endpoint.FlagThreshold, endpoint.BlockThreshold
+	if blockThreshold <= 0 || blockThreshold > 1 || flagThreshold < 0 || flagThreshold >= blockThreshold {
+		flagThreshold, blockThreshold = DefaultFlagThreshold, DefaultBlockThreshold
+	}
+	result := &NormalizedResult{
+		Decision: EventPass, RiskLevel: RiskLow, Action: ActionAllow, Safety: "Safe",
+		Categories: []string{}, MatchedScanners: []string{},
+		ScannerScores:   map[string]float64{confidenceScoreKey: confidence},
+		ScannerEvidence: map[string]string{confidenceScoreKey: reason},
+		ScannerBackend:  "confidence-json-openai", ScannerVersion: endpoint.Model,
+		PolicyID: endpoint.PromptTemplateID, PolicyVersion: 1,
+		Confidence: confidence, Reason: reason,
+	}
+	if result.PolicyID == "" {
+		result.PolicyID = DefaultPromptTemplateID
+	}
+	switch {
+	case confidence >= blockThreshold:
+		result.Decision, result.RiskLevel, result.Action, result.Safety = EventCritical, RiskCritical, ActionBlock, "Unsafe"
+		result.MatchedScanners = []string{confidenceScoreKey}
+	case confidence >= flagThreshold:
+		result.Decision, result.RiskLevel, result.Action, result.Safety = EventFlag, RiskMedium, ActionWarn, "Controversial"
+		result.MatchedScanners = []string{confidenceScoreKey}
+	}
+	return result, nil
+}
+
+func firstJSONObject(content string) ([]byte, error) {
+	content = strings.TrimSpace(content)
+	start := strings.IndexByte(content, '{')
+	if start < 0 {
+		return nil, errors.New("prompt guard JSON object missing")
+	}
+	depth := 0
+	inString := false
+	escaped := false
+	for index := start; index < len(content); index++ {
+		switch current := content[index]; {
+		case inString && escaped:
+			escaped = false
+		case inString && current == '\\':
+			escaped = true
+		case current == '"':
+			inString = !inString
+		case !inString && current == '{':
+			depth++
+		case !inString && current == '}':
+			depth--
+			if depth == 0 {
+				return []byte(content[start : index+1]), nil
+			}
+		}
+	}
+	return nil, errors.New("prompt guard JSON object incomplete")
 }
 
 func (s *OpenAICompatibleScanner) clientFor(endpoint ActiveEndpoint) (*http.Client, error) {

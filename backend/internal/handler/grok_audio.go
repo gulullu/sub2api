@@ -197,6 +197,10 @@ func (h *OpenAIGatewayHandler) GrokVoice(c *gin.Context, endpoint string) {
 			service.PlatformGrok,
 		)
 		if selectErr != nil || selection == nil || selection.Account == nil {
+			if isPromptRiskRouteSelectionError(c.Request.Context(), selectErr) {
+				h.errorResponse(c, http.StatusServiceUnavailable, "api_error", promptRiskRouteSafeMessage)
+				return
+			}
 			if last != nil {
 				h.handleFailoverExhausted(c, last, false)
 			} else {

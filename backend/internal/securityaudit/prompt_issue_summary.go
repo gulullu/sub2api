@@ -30,6 +30,27 @@ func BuildIssueSummaries(result NormalizedResult) []IssueSummary {
 			EvidenceHash: hex.EncodeToString(digest[:]),
 		})
 	}
+	confidenceMatched := false
+	for _, scannerID := range result.MatchedScanners {
+		if scannerID == confidenceScoreKey {
+			confidenceMatched = true
+			break
+		}
+	}
+	if score, ok := result.ScannerScores[confidenceScoreKey]; ok && confidenceMatched {
+		evidence := RedactPreview(result.ScannerEvidence[confidenceScoreKey], 160)
+		if evidence == "" {
+			evidence = "模型置信度超过配置阈值"
+		}
+		digest := sha256.Sum256([]byte(evidence))
+		summaries = append(summaries, IssueSummary{
+			Category: confidenceScoreKey, ScannerID: confidenceScoreKey, Title: "模型置信度判定",
+			Description: "通用审核模型按配置的置信度阈值标记了风险", Severity: string(result.RiskLevel),
+			SeverityLabel: riskLabelZH(result.RiskLevel), Action: string(result.Action),
+			ActionLabel: actionLabelZH(result.Action), Code: "prompt_audit_confidence_json",
+			Score: score, Evidence: evidence, EvidenceHash: hex.EncodeToString(digest[:]),
+		})
+	}
 	for _, category := range result.UnknownCategories {
 		evidence := "unknown_unsafe"
 		digest := sha256.Sum256([]byte(evidence + ":" + category))

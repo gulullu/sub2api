@@ -144,6 +144,10 @@ func (h *OpenAIGatewayHandler) Embeddings(c *gin.Context) {
 				zap.Error(err),
 				zap.Int("excluded_account_count", len(failedAccountIDs)),
 			)
+			if isPromptRiskRouteSelectionError(c.Request.Context(), err) {
+				h.errorResponse(c, http.StatusServiceUnavailable, "api_error", promptRiskRouteSafeMessage)
+				return
+			}
 			if len(failedAccountIDs) == 0 {
 				cls := classifyNoAccountErrorFromGin(c, h.gatewayService, apiKey, reqModel, reqModel, service.PlatformOpenAI)
 				if !cls.ModelNotFound {

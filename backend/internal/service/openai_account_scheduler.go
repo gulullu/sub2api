@@ -1730,6 +1730,9 @@ func (s *defaultOpenAIAccountScheduler) isAccountRequestCompatibleReason(ctx con
 	if account == nil {
 		return false, "account_nil"
 	}
+	if !PromptRiskRouteAllowsAccount(ctx, account.ID) {
+		return false, "prompt_risk_route"
+	}
 	if s != nil && s.service != nil && s.service.isOpenAIAccountRequestRuntimeBlocked(account, req.RequestedModel) {
 		return false, "runtime_blocked"
 	}
@@ -2119,21 +2122,22 @@ func (s *OpenAIGatewayService) selectAccountWithScheduler(
 ) (*AccountSelectionResult, OpenAIAccountScheduleDecision, error) {
 	selection, decision, err := s.selectAccountWithSchedulerOnce(ctx, groupID, previousResponseID, sessionHash, requestedModel, excludedIDs, requiredTransport, requiredCapability, requiredImageCapability, requireCompact, platform, previousResponseCanMove, useUpstreamTokenCost)
 	if err == nil || openAIProxyStreamQuarantineBypassed(ctx) {
-		return selection, decision, err
+		return selection, decision, normalizePromptRiskRouteSelectionError(ctx, err)
 	}
 	if !errors.Is(err, ErrNoAvailableAccounts) && !errors.Is(err, ErrNoAvailableCompactAccounts) {
 		return selection, decision, err
 	}
 	// The circuit only ever quarantines PlatformOpenAI accounts.
 	if normalizeOpenAICompatiblePlatform(platform) != PlatformOpenAI {
-		return selection, decision, err
+		return selection, decision, normalizePromptRiskRouteSelectionError(ctx, err)
 	}
 	blocked := s.getOpenAIProxyStreamCircuit().activeBlockCount(time.Now())
 	if blocked == 0 {
-		return selection, decision, err
+		return selection, decision, normalizePromptRiskRouteSelectionError(ctx, err)
 	}
 	s.logOpenAIProxyStreamQuarantineFailOpen(requestedModel, blocked)
-	return s.selectAccountWithSchedulerOnce(withOpenAIProxyStreamQuarantineBypass(ctx), groupID, previousResponseID, sessionHash, requestedModel, excludedIDs, requiredTransport, requiredCapability, requiredImageCapability, requireCompact, platform, previousResponseCanMove, useUpstreamTokenCost)
+	selection, decision, err = s.selectAccountWithSchedulerOnce(withOpenAIProxyStreamQuarantineBypass(ctx), groupID, previousResponseID, sessionHash, requestedModel, excludedIDs, requiredTransport, requiredCapability, requiredImageCapability, requireCompact, platform, previousResponseCanMove, useUpstreamTokenCost)
+	return selection, decision, normalizePromptRiskRouteSelectionError(ctx, err)
 }
 
 func (s *OpenAIGatewayService) selectAccountWithSchedulerOnce(
@@ -2163,6 +2167,27 @@ func (s *OpenAIGatewayService) selectAccountWithSchedulerOnce(
 	}
 	platform = normalizeOpenAICompatiblePlatform(platform)
 	decision := OpenAIAccountScheduleDecision{}
+	if PromptRiskRouteEnabled(ctx) && !previousResponseCanMove && strings.TrimSpace(previousResponseID) != "" {
+		selection, err := s.selectAccountByPreviousResponseIDForCapability(
+			ctx, groupID, previousResponseID, requestedModel, excludedIDs, requiredCapability, requireCompact,
+		)
+		if err != nil {
+			return nil, decision, err
+		}
+		if selection == nil || selection.Account == nil ||
+			!s.isOpenAIAccountTransportCompatible(selection.Account, requiredTransport) ||
+			!accountSupportsOpenAICapabilities(selection.Account, requiredCapability, requiredImageCapability) {
+			if selection != nil && selection.ReleaseFunc != nil {
+				selection.ReleaseFunc()
+			}
+			return nil, decision, newPromptRiskRouteStateConflictError()
+		}
+		decision.Layer = openAIAccountScheduleLayerPreviousResponse
+		decision.StickyPreviousHit = true
+		decision.SelectedAccountID = selection.Account.ID
+		decision.SelectedAccountType = selection.Account.Type
+		return selection, decision, nil
+	}
 	scheduler := s.getOpenAIAccountScheduler(ctx)
 	if scheduler == nil {
 		decision.Layer = openAIAccountScheduleLayerLoadBalance

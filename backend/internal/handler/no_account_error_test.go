@@ -4,6 +4,7 @@ package handler
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"net/http"
 	"net/http/httptest"
@@ -106,13 +107,45 @@ func TestClassifyNoAccountError_ModelNotSupported_Returns404(t *testing.T) {
 	require.Equal(t, http.StatusNotFound, cls.Status)
 	require.Equal(t, "model_not_found", cls.ErrType)
 	require.True(t, cls.ModelNotFound)
-	require.Contains(t, cls.Message, "gpt-5.1-codex-mini", "message must surface the requested model")
+	require.Equal(t, `Model "gpt-5.1-codex-mini" is not supported by any configured account in this group`, cls.Message)
+	require.True(t, service.HasOpsClientBusinessLimited(c))
+	require.Equal(t, opsClientBusinessLimitedReasonLocalModelUnsupported, c.GetString(service.OpsClientBusinessLimitedReasonKey))
 
 	require.Len(t, fd.calls, 1)
 	require.Equal(t, "gpt-5.1-codex-mini", fd.calls[0].Model)
 	require.Equal(t, service.PlatformOpenAI, fd.calls[0].Platform)
 	require.NotNil(t, fd.calls[0].GroupID)
 	require.Equal(t, int64(42), *fd.calls[0].GroupID)
+}
+
+func TestClassifyNoAccountError_PromptRiskPoolExhaustionAlwaysReturns503(t *testing.T) {
+	c := newTestGinContextWithRequest()
+	c.Request = c.Request.WithContext(service.WithPromptRiskRouteAccounts(c.Request.Context(), []int64{99}))
+	fd := &fakeDiagnoser{resp: service.ModelAvailabilityDiagnosis{HasAccountsInPool: true, HasModelSupport: false}}
+	apiKey := &service.APIKey{GroupID: ptrInt64(42)}
+
+	cls := classifyNoAccountErrorFromGin(c, fd, apiKey, "gpt-unsupported", "gpt-unsupported", service.PlatformOpenAI)
+
+	require.Equal(t, http.StatusServiceUnavailable, cls.Status)
+	require.Equal(t, "api_error", cls.ErrType)
+	require.False(t, cls.ModelNotFound)
+	require.Empty(t, fd.calls, "hard risk-pool exhaustion must not be reclassified from the ordinary group")
+	require.False(t, service.HasOpsClientBusinessLimited(c))
+}
+
+func TestWebSearchSelectionErrorMessageHidesPromptRiskRouteDetails(t *testing.T) {
+	ctx := service.WithPromptRiskRouteAccounts(context.Background(), []int64{99})
+	message := webSearchSelectionErrorMessage(ctx, fmt.Errorf("wrapped: %w", service.ErrPromptRiskRouteUnavailable))
+	require.Equal(t, "Service temporarily unavailable", message)
+	require.NotContains(t, message, "prompt risk route")
+}
+
+func TestPromptRiskRouteSelectionErrorIsSafeAcrossInitialAndFailoverAttempts(t *testing.T) {
+	ctx := service.WithPromptRiskRouteAccounts(context.Background(), []int64{99})
+	require.True(t, isPromptRiskRouteSelectionError(ctx, errors.New("database detail")))
+	require.True(t, isPromptRiskRouteSelectionError(context.Background(), service.ErrPromptRiskRouteUnavailable))
+	require.True(t, isPromptRiskRouteSelectionError(context.Background(), service.ErrPromptRiskRouteStateConflict))
+	require.False(t, isPromptRiskRouteSelectionError(context.Background(), errors.New("ordinary error")))
 }
 
 func TestClassifyOpenAICompatibleNoAccountError_GrokUsesGrokPlatform(t *testing.T) {
@@ -166,6 +199,7 @@ func TestClassifyNoAccountError_ModelSupportedOnlyByRateLimitedAccount_Returns50
 	require.Equal(t, http.StatusServiceUnavailable, cls.Status)
 	require.Equal(t, "api_error", cls.ErrType)
 	require.False(t, cls.ModelNotFound, "temporary account cooldown must remain retryable")
+	require.False(t, service.HasOpsClientBusinessLimited(c), "temporary capacity must continue counting toward Ops SLA")
 }
 
 func TestClassifyNoAccountError_NoAccountsInPool_Stays503(t *testing.T) {

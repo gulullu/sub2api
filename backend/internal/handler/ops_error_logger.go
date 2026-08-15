@@ -1555,6 +1555,11 @@ func classifyOpsErrorLog(c *gin.Context, errType, message, code string, status i
 	}
 	if clientBusinessLimited && !upstreamError && !routingCapacityLimited {
 		phase = "auth"
+		if opsClientBusinessLimitedReason(c) == opsClientBusinessLimitedReasonLocalModelUnsupported {
+			// A locally diagnosed unsupported model is a request/configuration
+			// problem, not an authentication failure.
+			phase = "request"
+		}
 	}
 	if routingCapacityLimited {
 		phase = "routing"
@@ -1566,6 +1571,15 @@ func classifyOpsErrorLog(c *gin.Context, errType, message, code string, status i
 	errorOwner = classifyOpsErrorOwner(phase, message)
 	errorSource = classifyOpsErrorSource(phase, message)
 	return phase, isBusinessLimited, errorOwner, errorSource
+}
+
+func opsClientBusinessLimitedReason(c *gin.Context) string {
+	if c == nil {
+		return ""
+	}
+	reason, _ := c.Get(service.OpsClientBusinessLimitedReasonKey)
+	value, _ := reason.(string)
+	return strings.TrimSpace(value)
 }
 
 func classifyOpsIsBusinessLimited(errType, phase, code string, status int, message string, localClientAuthError ...bool) bool {

@@ -9,6 +9,7 @@ import (
 
 	"github.com/Wei-Shaw/sub2api/internal/securityaudit"
 	middleware2 "github.com/Wei-Shaw/sub2api/internal/server/middleware"
+	"github.com/Wei-Shaw/sub2api/internal/service"
 	"github.com/gin-gonic/gin"
 	"github.com/stretchr/testify/require"
 	"go.uber.org/zap"
@@ -106,12 +107,12 @@ func TestRunSecurityAuditDoesNotCacheFailedWebSocketDecision(t *testing.T) {
 	require.Equal(t, int64(2), engine.evaluates.Load())
 }
 
-func TestRunSecurityAuditDoesNotCacheFlaggedWebSocketDecision(t *testing.T) {
+func TestRunSecurityAuditCachesFlaggedWebSocketDecisionAndInstallsHardPool(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 	engine := &turnCountingEngine{
 		mode: securityaudit.ModeBlocking,
 		decisions: []*securityaudit.PromptDecision{
-			{Kind: securityaudit.DecisionFlag, AllowNextStage: true},
+			{Kind: securityaudit.DecisionFlag, AllowNextStage: true, RouteAccountIDs: []int64{11, 22}},
 			{Kind: securityaudit.DecisionAllow, AllowNextStage: true},
 		},
 	}
@@ -128,9 +129,59 @@ func TestRunSecurityAuditDoesNotCacheFlaggedWebSocketDecision(t *testing.T) {
 
 	require.Equal(t, securityaudit.DecisionFlag, first.Kind)
 	require.True(t, first.AllowNextStage)
-	require.False(t, cachedAfterFlag)
-	require.Equal(t, securityaudit.DecisionAllow, second.Kind)
-	require.Equal(t, int64(2), engine.evaluates.Load())
+	require.True(t, cachedAfterFlag)
+	require.Equal(t, securityaudit.DecisionFlag, second.Kind)
+	require.Equal(t, int64(1), engine.evaluates.Load())
+	require.True(t, service.PromptRiskRouteAllowsAccount(c.Request.Context(), 11))
+	require.False(t, service.PromptRiskRouteAllowsAccount(c.Request.Context(), 33))
+}
+
+func TestRunSecurityAuditMarksOnlyPromptPolicyBlocksAsClientBusinessLimited(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	engine := &turnCountingEngine{mode: securityaudit.ModeBlocking, decisions: []*securityaudit.PromptDecision{{Kind: securityaudit.DecisionBlock}}}
+	coordinator := securityaudit.NewCoordinator(nil, engine)
+	recorder := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(recorder)
+	c.Request = httptest.NewRequest(http.MethodPost, "/v1/responses", nil)
+
+	decision := runSecurityAudit(c, nil, coordinator, nil, nil, middleware2.AuthSubject{UserID: 7}, "openai_responses", "gpt-test", []byte(`{"input":"blocked"}`), "http")
+
+	require.NotNil(t, decision)
+	require.Equal(t, securityaudit.DecisionBlock, decision.Kind)
+	require.Equal(t, service.OpsClientBusinessLimitedReasonLocalPolicyDenied, c.GetString(service.OpsClientBusinessLimitedReasonKey))
+}
+
+func TestRunSecurityAuditUnavailableDoesNotMarkClientBusinessLimited(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	engine := &turnCountingEngine{mode: securityaudit.ModeBlocking, decisions: []*securityaudit.PromptDecision{{Kind: securityaudit.DecisionUnavailable}}}
+	coordinator := securityaudit.NewCoordinator(nil, engine)
+	recorder := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(recorder)
+	c.Request = httptest.NewRequest(http.MethodPost, "/v1/responses", nil)
+
+	decision := runSecurityAudit(c, nil, coordinator, nil, nil, middleware2.AuthSubject{UserID: 7}, "openai_responses", "gpt-test", []byte(`{"input":"retry"}`), "http")
+
+	require.NotNil(t, decision)
+	require.Equal(t, securityaudit.DecisionUnavailable, decision.Kind)
+	_, marked := c.Get(service.OpsClientBusinessLimitedReasonKey)
+	require.False(t, marked)
+}
+
+func TestSecurityAuditWSRequiresRiskRouteReconnect(t *testing.T) {
+	require.False(t, securityAuditWSRequiresRiskRouteReconnect(nil))
+	require.False(t, securityAuditWSRequiresRiskRouteReconnect(&securityaudit.Decision{
+		Kind: securityaudit.DecisionFlag,
+		Prompt: &securityaudit.PromptDecision{
+			Kind: securityaudit.DecisionFlag,
+		},
+	}))
+	require.True(t, securityAuditWSRequiresRiskRouteReconnect(&securityaudit.Decision{
+		Kind: securityaudit.DecisionFlag,
+		Prompt: &securityaudit.PromptDecision{
+			Kind:            securityaudit.DecisionFlag,
+			RouteAccountIDs: []int64{11},
+		},
+	}))
 }
 
 func TestRunSecurityAuditLogsWebSocketChecksAndCacheHits(t *testing.T) {

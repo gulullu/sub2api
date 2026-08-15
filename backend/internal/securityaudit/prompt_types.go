@@ -137,13 +137,21 @@ type NormalizedResult struct {
 	ChunkTotal        int                `json:"chunk_total"`
 	LatencyMS         int                `json:"latency_ms"`
 	UnknownCategories []string           `json:"unknown_categories,omitempty"`
+	Confidence        float64            `json:"confidence,omitempty"`
+	Reason            string             `json:"reason,omitempty"`
 }
 
 type PromptDecision struct {
-	Kind           DecisionKind      `json:"kind"`
-	ErrorCode      string            `json:"error_code,omitempty"`
-	Result         *NormalizedResult `json:"result,omitempty"`
-	AllowNextStage bool              `json:"allow_next_stage"`
+	Kind            DecisionKind      `json:"kind"`
+	ErrorCode       string            `json:"error_code,omitempty"`
+	Result          *NormalizedResult `json:"result,omitempty"`
+	AllowNextStage  bool              `json:"allow_next_stage"`
+	BlockHTTPStatus int               `json:"block_http_status,omitempty"`
+	BlockMessage    string            `json:"block_message,omitempty"`
+	// RouteAccountIDs is a server-only hard routing pool captured from the same
+	// config snapshot that produced a flag decision. It is never serialized to
+	// clients or accepted from request payloads.
+	RouteAccountIDs []int64 `json:"-"`
 }
 
 type LegacyDecision struct {
