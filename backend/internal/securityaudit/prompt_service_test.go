@@ -87,6 +87,191 @@ func TestPromptServiceBlockingLatestTurnOnlyUsesNarrowSnapshot(t *testing.T) {
 	require.Equal(t, []string{"latest user input", "previous output"}, seen)
 }
 
+func TestPromptServiceUnavailableAuditFallsBackToHardRiskRoute(t *testing.T) {
+	now := time.Unix(2_000, 0).UTC()
+	cfg := ActiveConfig{
+		RiskControlEnabled: true, Enabled: true, BlockingEnabled: true, AllGroups: true, ConfigVersion: 7,
+		Scanners: AllScannerIDs, RiskRouteAccountIDs: []int64{21, 22},
+		Endpoints: []ActiveEndpoint{{ID: "guard-1", Priority: 1, Enabled: true, TimeoutMS: 1000, InputLimit: 4096}},
+	}
+	repo := &fakeJobRepository{}
+	metrics := NewAtomicMetrics()
+	scannerCalls := 0
+	evaluator := newGuardEvaluator(PromptScannerFunc(func(context.Context, ActiveEndpoint, string, []string) (*NormalizedResult, error) {
+		scannerCalls++
+		return nil, &GuardError{Code: ErrorCodeUnavailable, HTTPStatus: 503, Retryable: true}
+	}), repo, metrics, 2, 2)
+	evaluator.clock = fixedClock{now: now}
+	service := &PromptService{config: &fakeConfigStore{active: true, cfg: cfg}, evaluator: evaluator, metrics: metrics, clock: fixedClock{now: now}}
+	request := Request{RequestID: "fallback-request", Protocol: "openai_chat_completions", Body: []byte(`{"messages":[{"role":"user","content":"review me"}]}`)}
+
+	decision, err := service.Evaluate(context.Background(), request)
+
+	require.NoError(t, err)
+	require.Equal(t, 1, scannerCalls)
+	require.Equal(t, DecisionFlag, decision.Kind)
+	require.Equal(t, ErrorCodeUnavailable, decision.ErrorCode)
+	require.True(t, decision.AllowNextStage)
+	require.Equal(t, []int64{21, 22}, decision.RouteAccountIDs)
+	cfg.RiskRouteAccountIDs[0] = 999
+	require.Equal(t, []int64{21, 22}, decision.RouteAccountIDs, "the decision must own an immutable copy of the hard route pool")
+	require.NotNil(t, decision.Result)
+	require.Equal(t, EventFlag, decision.Result.Decision)
+	require.Equal(t, RiskHigh, decision.Result.RiskLevel)
+	require.Equal(t, ActionWarn, decision.Result.Action)
+	require.Equal(t, "local-failover", decision.Result.ScannerBackend)
+	require.Equal(t, []string{auditUnavailableScannerID}, decision.Result.MatchedScanners)
+	require.Equal(t, 1, repo.recordBlockingCalls)
+	require.Empty(t, repo.recordBlockingSnapshot.ScanText)
+	require.Same(t, decision.Result, repo.recordBlockingResult)
+	require.Len(t, BuildIssueSummaries(*decision.Result), 1)
+	_, cached := evaluator.cache.get(promptDecisionCacheKey(cfg, "review me"), now)
+	require.False(t, cached, "operational fallback decisions must never enter the content decision cache")
+	snapshot := metrics.Snapshot()
+	require.Equal(t, int64(1), snapshot.Total)
+	require.Equal(t, int64(1), snapshot.Unavailable)
+	require.Zero(t, snapshot.Flagged, "the evaluator already recorded the dependency failure; fallback must not double count")
+
+	coordinated := prioritize(nil, decision)
+	require.Equal(t, DecisionFlag, coordinated.Kind)
+	require.Equal(t, ErrorCodeUnavailable, coordinated.ErrorCode)
+	require.True(t, coordinated.AllowNextStage)
+}
+
+func TestPromptServiceUnavailableAuditFallbackRequiresLiveContextAndRiskPool(t *testing.T) {
+	baseConfig := ActiveConfig{
+		RiskControlEnabled: true, Enabled: true, BlockingEnabled: true, AllGroups: true, ConfigVersion: 8,
+		Scanners:  AllScannerIDs,
+		Endpoints: []ActiveEndpoint{{ID: "guard-1", Priority: 1, Enabled: true, TimeoutMS: 1000, InputLimit: 4096}},
+	}
+	request := Request{Protocol: "openai_chat_completions", Body: []byte(`{"messages":[{"role":"user","content":"review me"}]}`)}
+
+	t.Run("no configured risk pool keeps 503 semantics", func(t *testing.T) {
+		evaluator := newGuardEvaluator(PromptScannerFunc(func(context.Context, ActiveEndpoint, string, []string) (*NormalizedResult, error) {
+			return nil, &GuardError{Code: ErrorCodeUnavailable, HTTPStatus: 503, Retryable: true}
+		}), nil, NewAtomicMetrics(), 2, 2)
+		service := &PromptService{config: &fakeConfigStore{active: true, cfg: baseConfig}, evaluator: evaluator}
+		decision, err := service.Evaluate(context.Background(), request)
+		require.Nil(t, decision)
+		var guardErr *GuardError
+		require.ErrorAs(t, err, &guardErr)
+		require.Equal(t, ErrorCodeUnavailable, guardErr.Code)
+	})
+
+	t.Run("caller cancellation never becomes routing", func(t *testing.T) {
+		cfg := cloneActiveConfig(baseConfig)
+		cfg.RiskRouteAccountIDs = []int64{21}
+		calls := 0
+		evaluator := newGuardEvaluator(PromptScannerFunc(func(context.Context, ActiveEndpoint, string, []string) (*NormalizedResult, error) {
+			calls++
+			return nil, &GuardError{Code: ErrorCodeUnavailable}
+		}), nil, NewAtomicMetrics(), 2, 2)
+		service := &PromptService{config: &fakeConfigStore{active: true, cfg: cfg}, evaluator: evaluator}
+		ctx, cancel := context.WithCancel(context.Background())
+		cancel()
+		decision, err := service.Evaluate(ctx, request)
+		require.Nil(t, decision)
+		require.ErrorIs(t, err, context.Canceled)
+		require.Zero(t, calls)
+	})
+
+	t.Run("cancellation while fallback event is persisted never becomes routing", func(t *testing.T) {
+		cfg := cloneActiveConfig(baseConfig)
+		cfg.RiskRouteAccountIDs = []int64{21}
+		entered := make(chan struct{}, 1)
+		repo := &fakeJobRepository{recordBlockingEntered: entered, recordBlockingWait: true}
+		metrics := NewAtomicMetrics()
+		evaluator := newGuardEvaluator(PromptScannerFunc(func(context.Context, ActiveEndpoint, string, []string) (*NormalizedResult, error) {
+			return nil, &GuardError{Code: ErrorCodeUnavailable, HTTPStatus: 503, Retryable: true}
+		}), repo, metrics, 2, 2)
+		service := &PromptService{config: &fakeConfigStore{active: true, cfg: cfg}, evaluator: evaluator}
+		ctx, cancel := context.WithCancel(context.Background())
+		type outcome struct {
+			decision *PromptDecision
+			err      error
+		}
+		done := make(chan outcome, 1)
+		go func() {
+			decision, err := service.Evaluate(ctx, request)
+			done <- outcome{decision: decision, err: err}
+		}()
+		select {
+		case <-entered:
+		case <-time.After(time.Second):
+			t.Fatal("fallback persistence was not reached")
+		}
+		cancel()
+		result := <-done
+		require.Nil(t, result.decision)
+		require.ErrorIs(t, result.err, context.Canceled)
+		require.Zero(t, metrics.Snapshot().RecordFailed, "caller cancellation is not a repository health failure")
+	})
+
+	t.Run("invalid endpoint output preserves invalid error code on fallback", func(t *testing.T) {
+		cfg := cloneActiveConfig(baseConfig)
+		cfg.RiskRouteAccountIDs = []int64{21}
+		evaluator := newGuardEvaluator(PromptScannerFunc(func(context.Context, ActiveEndpoint, string, []string) (*NormalizedResult, error) {
+			return nil, &GuardError{Code: ErrorCodeInvalidResponse}
+		}), nil, NewAtomicMetrics(), 2, 2)
+		service := &PromptService{config: &fakeConfigStore{active: true, cfg: cfg}, evaluator: evaluator}
+		decision, err := service.Evaluate(context.Background(), request)
+		require.NoError(t, err)
+		require.Equal(t, DecisionFlag, decision.Kind)
+		require.Equal(t, ErrorCodeInvalidResponse, decision.ErrorCode)
+		require.Equal(t, []int64{21}, decision.RouteAccountIDs)
+	})
+
+	t.Run("valid block remains terminal", func(t *testing.T) {
+		cfg := cloneActiveConfig(baseConfig)
+		cfg.RiskRouteAccountIDs = []int64{21}
+		evaluator := newGuardEvaluator(PromptScannerFunc(func(context.Context, ActiveEndpoint, string, []string) (*NormalizedResult, error) {
+			return &NormalizedResult{Decision: EventCritical, RiskLevel: RiskCritical, Action: ActionBlock, Safety: "Unsafe"}, nil
+		}), nil, NewAtomicMetrics(), 2, 2)
+		service := &PromptService{config: &fakeConfigStore{active: true, cfg: cfg}, evaluator: evaluator}
+		decision, err := service.Evaluate(context.Background(), request)
+		require.NoError(t, err)
+		require.Equal(t, DecisionBlock, decision.Kind)
+		require.False(t, decision.AllowNextStage)
+		require.Empty(t, decision.RouteAccountIDs)
+	})
+}
+
+func TestPromptServiceUnavailableRiskRouteCoversNoEndpointAndGlobalBulkhead(t *testing.T) {
+	request := Request{Protocol: "openai_chat_completions", Body: []byte(`{"messages":[{"role":"user","content":"review me"}]}`)}
+	baseConfig := ActiveConfig{
+		RiskControlEnabled: true, Enabled: true, BlockingEnabled: true, AllGroups: true, ConfigVersion: 9,
+		Scanners: AllScannerIDs, RiskRouteAccountIDs: []int64{31},
+	}
+
+	t.Run("no usable endpoint", func(t *testing.T) {
+		evaluator := newGuardEvaluator(PromptScannerFunc(func(context.Context, ActiveEndpoint, string, []string) (*NormalizedResult, error) {
+			t.Fatal("scanner must not run without an enabled endpoint")
+			return nil, nil
+		}), nil, NewAtomicMetrics(), 1, 1)
+		service := &PromptService{config: &fakeConfigStore{active: true, cfg: baseConfig}, evaluator: evaluator}
+		decision, err := service.Evaluate(context.Background(), request)
+		require.NoError(t, err)
+		require.Equal(t, DecisionFlag, decision.Kind)
+		require.Equal(t, []int64{31}, decision.RouteAccountIDs)
+	})
+
+	t.Run("global evaluator bulkhead", func(t *testing.T) {
+		cfg := cloneActiveConfig(baseConfig)
+		cfg.Endpoints = []ActiveEndpoint{{ID: "guard-1", Priority: 1, Enabled: true, TimeoutMS: 1000, InputLimit: 4096}}
+		evaluator := newGuardEvaluator(PromptScannerFunc(func(context.Context, ActiveEndpoint, string, []string) (*NormalizedResult, error) {
+			t.Fatal("scanner must not run when the global evaluator bulkhead is full")
+			return nil, nil
+		}), nil, NewAtomicMetrics(), 1, 1)
+		evaluator.global <- struct{}{}
+		defer func() { <-evaluator.global }()
+		service := &PromptService{config: &fakeConfigStore{active: true, cfg: cfg}, evaluator: evaluator}
+		decision, err := service.Evaluate(context.Background(), request)
+		require.NoError(t, err)
+		require.Equal(t, DecisionFlag, decision.Kind)
+		require.Equal(t, []int64{31}, decision.RouteAccountIDs)
+	})
+}
+
 func TestPromptServiceRejectsInvalidDeleteConfirmationClaims(t *testing.T) {
 	now := time.Date(2026, 7, 16, 10, 0, 0, 0, time.UTC)
 	start, end := now.Add(-time.Hour), now.Add(time.Hour)

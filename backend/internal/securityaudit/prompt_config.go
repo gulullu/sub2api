@@ -21,6 +21,8 @@ const (
 	DefaultTimeoutMS          = 3000
 	MinTimeoutMS              = 100
 	MaxTimeoutMS              = 40000
+	MinEndpointPriority       = 1
+	MaxEndpointPriority       = 1000
 	DefaultInputLimit         = 4000
 	MinInputLimit             = 128
 	MaxInputLimit             = 400000
@@ -57,6 +59,7 @@ type ConfigStore interface {
 type StorageEndpoint struct {
 	ID              string `json:"id"`
 	Name            string `json:"name"`
+	Priority        int    `json:"priority"`
 	Protocol        string `json:"protocol"`
 	Adapter         string `json:"adapter"`
 	BaseURL         string `json:"base_url"`
@@ -96,6 +99,7 @@ type storageConfig struct {
 type ActiveEndpoint struct {
 	ID               string
 	Name             string
+	Priority         int
 	Protocol         string
 	Adapter          string
 	BaseURL          string
@@ -145,6 +149,7 @@ type ActiveConfig struct {
 type PublicEndpoint struct {
 	ID          string `json:"id"`
 	Name        string `json:"name"`
+	Priority    int    `json:"priority"`
 	Protocol    string `json:"protocol"`
 	Adapter     string `json:"adapter"`
 	BaseURL     string `json:"base_url"`
@@ -186,6 +191,7 @@ type PublicConfig struct {
 type UpdateEndpoint struct {
 	ID         string `json:"id" binding:"required"`
 	Name       string `json:"name" binding:"required"`
+	Priority   int    `json:"priority"`
 	Protocol   string `json:"protocol"`
 	Adapter    string `json:"adapter"`
 	BaseURL    string `json:"base_url" binding:"required"`
@@ -313,6 +319,12 @@ func normalizeStorageConfig(cfg *storageConfig) {
 	// reject it instead of silently changing administrator intent.
 	for i := range cfg.Endpoints {
 		ep := &cfg.Endpoints[i]
+		// Legacy persisted configurations had no explicit priority. Preserve
+		// their existing array order by deriving a one-based priority in memory;
+		// the value is persisted on the next ordinary admin save.
+		if ep.Priority == 0 {
+			ep.Priority = i + 1
+		}
 		ep.ID = strings.TrimSpace(ep.ID)
 		ep.Name = strings.TrimSpace(ep.Name)
 		ep.Protocol = strings.TrimSpace(ep.Protocol)
@@ -377,6 +389,9 @@ func validateStorageConfig(cfg storageConfig) error {
 		seen[ep.ID] = struct{}{}
 		if ep.Protocol != "openai_compatible" {
 			return infraerrors.BadRequest("prompt_audit_invalid_endpoint_protocol", "审计节点仅支持 OpenAI 兼容协议")
+		}
+		if ep.Priority < MinEndpointPriority || ep.Priority > MaxEndpointPriority {
+			return infraerrors.BadRequest("prompt_audit_invalid_endpoint_priority", "审计节点优先级必须在 1 到 1000 之间")
 		}
 		if !validPromptAdapter(ep.Adapter) {
 			return infraerrors.BadRequest("prompt_audit_invalid_endpoint_adapter", "审计节点适配器无效")
@@ -455,6 +470,11 @@ func validateUpdateConfigRequest(req UpdateConfigRequest) error {
 		}
 	}
 	for _, endpoint := range req.Endpoints {
+		// Zero means an older client omitted the newly introduced field. The
+		// storage builder derives/preserves a valid value before final validation.
+		if endpoint.Priority < 0 || endpoint.Priority > MaxEndpointPriority {
+			return infraerrors.BadRequest("prompt_audit_invalid_endpoint_priority", "审计节点优先级必须在 1 到 1000 之间")
+		}
 		if strings.TrimSpace(endpoint.Adapter) != "" && !validPromptAdapter(strings.TrimSpace(endpoint.Adapter)) {
 			return infraerrors.BadRequest("prompt_audit_invalid_endpoint_adapter", "审计节点适配器无效")
 		}
@@ -491,11 +511,17 @@ func (cfg ActiveConfig) IncludesGroup(groupID *int64) bool {
 
 func (cfg ActiveConfig) EnabledEndpoints() []ActiveEndpoint {
 	result := make([]ActiveEndpoint, 0, len(cfg.Endpoints))
-	for _, ep := range cfg.Endpoints {
+	for index, ep := range cfg.Endpoints {
 		if ep.Enabled {
+			if ep.Priority == 0 {
+				ep.Priority = index + 1
+			}
 			result = append(result, ep)
 		}
 	}
+	sort.SliceStable(result, func(i, j int) bool {
+		return result[i].Priority < result[j].Priority
+	})
 	return result
 }
 
@@ -530,7 +556,7 @@ func PublicFromStorage(cfg storageConfig, riskControlEnabled bool, invalidTokenE
 			}
 		}
 		endpoints = append(endpoints, PublicEndpoint{
-			ID: ep.ID, Name: ep.Name, Protocol: ep.Protocol, Adapter: ep.Adapter, BaseURL: ep.BaseURL,
+			ID: ep.ID, Name: ep.Name, Priority: ep.Priority, Protocol: ep.Protocol, Adapter: ep.Adapter, BaseURL: ep.BaseURL,
 			Model: ep.Model, TimeoutMS: ep.TimeoutMS, InputLimit: ep.InputLimit,
 			Enabled: ep.Enabled, HasToken: hasToken, TokenStatus: status,
 		})
@@ -584,7 +610,7 @@ func ActiveFromStorage(cfg storageConfig, riskControlEnabled bool, encryptor Sec
 			}
 		}
 		active.Endpoints = append(active.Endpoints, ActiveEndpoint{
-			ID: ep.ID, Name: ep.Name, Protocol: ep.Protocol, Adapter: ep.Adapter, BaseURL: ep.BaseURL, Model: ep.Model,
+			ID: ep.ID, Name: ep.Name, Priority: ep.Priority, Protocol: ep.Protocol, Adapter: ep.Adapter, BaseURL: ep.BaseURL, Model: ep.Model,
 			Token: token, TimeoutMS: ep.TimeoutMS, InputLimit: ep.InputLimit,
 			PromptTemplateID: template.ID, SystemPrompt: template.SystemPrompt,
 			FlagThreshold: active.FlagThreshold, BlockThreshold: active.BlockThreshold,

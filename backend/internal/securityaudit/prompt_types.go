@@ -21,8 +21,9 @@ const (
 	ErrorCodeEncryptionKeyRequired = "prompt_audit_encryption_key_required"
 	ErrorCodeRequiresEnabled       = "prompt_guard_requires_audit_enabled"
 
-	DefaultGuardModel      = "sileader/qwen3guard:0.6b"
-	inputTooLargeScannerID = "input_too_large"
+	DefaultGuardModel         = "sileader/qwen3guard:0.6b"
+	inputTooLargeScannerID    = "input_too_large"
+	auditUnavailableScannerID = "audit_unavailable"
 )
 
 type Mode string
@@ -215,6 +216,9 @@ type GuardMetricsSnapshot struct {
 	Timeouts     int64 `json:"timeouts"`
 	Failovers    int64 `json:"failovers"`
 	BulkheadFull int64 `json:"bulkhead_full"`
+	CircuitOpen  int64 `json:"circuit_open"`
+	CircuitSkip  int64 `json:"circuit_skip"`
+	CircuitReset int64 `json:"circuit_reset"`
 	RecordFailed int64 `json:"record_failed"`
 	LatencyCount int64 `json:"latency_count"`
 	LatencyAvgMS int64 `json:"latency_avg_ms"`
@@ -281,6 +285,9 @@ type Metrics interface {
 	IncTimeout()
 	IncFailover()
 	IncBulkheadFull()
+	IncCircuitOpen()
+	IncCircuitSkip()
+	IncCircuitReset()
 	IncRecordFailed()
 }
 

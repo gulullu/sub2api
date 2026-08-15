@@ -132,7 +132,7 @@ func prioritize(legacy *LegacyDecision, prompt *PromptDecision) Decision {
 		return Decision{Kind: DecisionUnavailable, HTTPStatus: http.StatusServiceUnavailable, ErrorCode: ErrorCodeUnavailable,
 			ClientMessage: "提示词安全审计暂时不可用，请稍后重试", Legacy: legacy, Prompt: prompt}
 	case DecisionFlag:
-		return Decision{Kind: DecisionFlag, HTTPStatus: http.StatusOK, Legacy: legacy, Prompt: prompt, AllowNextStage: true}
+		return Decision{Kind: DecisionFlag, HTTPStatus: http.StatusOK, ErrorCode: prompt.ErrorCode, Legacy: legacy, Prompt: prompt, AllowNextStage: true}
 	default:
 		return allowDecision(legacy, prompt)
 	}

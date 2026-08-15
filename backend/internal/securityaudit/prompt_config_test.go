@@ -58,6 +58,54 @@ func TestLegacyConfigDefaultsToQwenAdapterAndBuiltInPolicy(t *testing.T) {
 	require.Equal(t, DefaultPromptTemplateID, storage.ActivePromptTemplateID)
 	require.Equal(t, DefaultFlagThreshold, thresholdValue(storage.FlagThreshold, -1))
 	require.Equal(t, DefaultBlockThreshold, thresholdValue(storage.BlockThreshold, -1))
+	require.Equal(t, 1, storage.Endpoints[0].Priority)
+}
+
+func TestEndpointPriorityBackwardCompatibilityRoundTripAndStableOrdering(t *testing.T) {
+	legacy, err := ParseStorageConfig(`{"enabled":false,"strategy":"priority","worker_count":1,"queue_capacity":10,"scanners":["pii"],"all_groups":true,"endpoints":[{"id":"old-a","name":"Old A","protocol":"openai_compatible","base_url":"http://127.0.0.1:8080","model":"guard","timeout_ms":1000,"input_limit":1000},{"id":"old-b","name":"Old B","protocol":"openai_compatible","base_url":"http://127.0.0.1:8081","model":"guard","timeout_ms":1000,"input_limit":1000}]}`)
+	require.NoError(t, err)
+	require.Equal(t, []int{1, 2}, []int{legacy.Endpoints[0].Priority, legacy.Endpoints[1].Priority})
+
+	public := PublicFromStorage(legacy, true, nil)
+	require.Equal(t, []int{1, 2}, []int{public.Endpoints[0].Priority, public.Endpoints[1].Priority})
+	raw, err := json.Marshal(public)
+	require.NoError(t, err)
+	require.Contains(t, string(raw), `"priority":1`)
+
+	cfg := ActiveConfig{Endpoints: []ActiveEndpoint{
+		{ID: "later", Priority: 20, Enabled: true},
+		{ID: "first-tie", Priority: 10, Enabled: true},
+		{ID: "second-tie", Priority: 10, Enabled: true},
+	}}
+	ordered := cfg.EnabledEndpoints()
+	require.Equal(t, []string{"first-tie", "second-tie", "later"}, []string{ordered[0].ID, ordered[1].ID, ordered[2].ID})
+}
+
+func TestEndpointPriorityUpdatePreservesOmittedAndRejectsOutOfRange(t *testing.T) {
+	manager := &ConfigManager{encryptor: prefixEncryptor{}, encryptionKeyConfigured: true}
+	current := DefaultStorageConfig()
+	current.Endpoints = []StorageEndpoint{{
+		ID: "one", Name: "One", Priority: 7, Protocol: "openai_compatible", BaseURL: "http://127.0.0.1:8080",
+		Model: DefaultGuardModel, TimeoutMS: 1000, InputLimit: 1000,
+	}}
+	req := UpdateConfigRequest{
+		ExpectedConfigVersion: 1, Strategy: "priority", WorkerCount: 1, QueueCapacity: 10,
+		Scanners: []string{"pii"}, AllGroups: true,
+		Endpoints: []UpdateEndpoint{{
+			ID: "one", Name: "One", Protocol: "openai_compatible", BaseURL: "http://127.0.0.1:8080",
+			Model: DefaultGuardModel, TimeoutMS: 1000, InputLimit: 1000,
+		}},
+	}
+	next, err := manager.buildNextStorage(current, req, 1)
+	require.NoError(t, err)
+	require.Equal(t, 7, next.Endpoints[0].Priority, "older PUT clients must not erase an existing priority")
+
+	req.Endpoints[0].Priority = MaxEndpointPriority + 1
+	_, err = manager.buildNextStorage(current, req, 1)
+	require.Error(t, err)
+	req.Endpoints[0].Priority = -1
+	_, err = manager.buildNextStorage(current, req, 1)
+	require.Error(t, err)
 }
 
 func TestOldUpdatePreservesNewPromptPolicyFields(t *testing.T) {

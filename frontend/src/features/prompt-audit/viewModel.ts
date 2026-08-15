@@ -16,6 +16,9 @@ export const DEFAULT_BLOCK_THRESHOLD = 0.7
 export const DEFAULT_BLOCK_HTTP_STATUS = 403
 export const DEFAULT_BLOCK_MESSAGE = 'Please modify your input and try again as it violates our content safety policy.'
 export const DEFAULT_MAX_TOTAL_INPUT_CHARS = 40000
+export const MIN_ENDPOINT_PRIORITY = 1
+export const MAX_ENDPOINT_PRIORITY = 1000
+export const RECOMMENDED_FAILOVER_TIMEOUT_MS = 40000
 
 export const DEFAULT_AUDIT_SYSTEM_PROMPT = `[SYSTEM — IMMUTABLE]
 
@@ -76,6 +79,7 @@ export const LOCALIZED_SCANNER_IDS = new Set<string>([
   ...SCANNER_CATALOG.map((scanner) => scanner.id),
   'confidence_json',
   'input_too_large',
+  'audit_unavailable',
 ])
 
 // Vue props/refs are proxies and cannot be passed to structuredClone in every
@@ -88,6 +92,35 @@ export function cloneData<T>(value: T): T {
 function normalizedPositiveIDs(values: number[] | null | undefined): number[] {
   return Array.from(new Set((values ?? []).filter((value) => Number.isSafeInteger(value) && value > 0)))
     .sort((left, right) => left - right)
+}
+
+function normalizedEndpointPriority(priority: number | null | undefined, fallback: number): number {
+  return Number.isInteger(priority) && Number(priority) >= MIN_ENDPOINT_PRIORITY && Number(priority) <= MAX_ENDPOINT_PRIORITY
+    ? Number(priority)
+    : Math.min(MAX_ENDPOINT_PRIORITY, Math.max(MIN_ENDPOINT_PRIORITY, fallback))
+}
+
+export function orderedPromptAuditEndpoints<T extends { priority: number }>(endpoints: T[]): T[] {
+  return endpoints
+    .map((endpoint, index) => ({ endpoint, index }))
+    .sort((left, right) => left.endpoint.priority - right.endpoint.priority || left.index - right.index)
+    .map(({ endpoint }) => endpoint)
+}
+
+export function nextEndpointPriority(endpoints: Array<{ priority: number }>): number {
+  const maxPriority = endpoints.reduce(
+    (maximum, endpoint) => Math.max(maximum, normalizedEndpointPriority(endpoint.priority, MIN_ENDPOINT_PRIORITY)),
+    0,
+  )
+  return Math.min(MAX_ENDPOINT_PRIORITY, Math.max(MIN_ENDPOINT_PRIORITY, maxPriority + 1))
+}
+
+export function enabledFailoverTimeoutMS(endpoints: Array<{ enabled: boolean, timeout_ms: number }>): number {
+  return endpoints.reduce((total, endpoint) => (
+    endpoint.enabled && Number.isFinite(endpoint.timeout_ms) && endpoint.timeout_ms > 0
+      ? total + endpoint.timeout_ms
+      : total
+  ), 0)
 }
 
 export function configToDraft(config: PromptAuditConfig): PromptAuditDraft {
@@ -113,16 +146,21 @@ export function configToDraft(config: PromptAuditConfig): PromptAuditDraft {
     max_total_input_chars: Number.isInteger(config.max_total_input_chars)
       ? Math.min(400000, Math.max(128, Number(config.max_total_input_chars)))
       : DEFAULT_MAX_TOTAL_INPUT_CHARS,
-    endpoints: (config.endpoints ?? []).map((endpoint) => ({
+    endpoints: (config.endpoints ?? []).map((endpoint, index) => ({
       ...endpoint,
       adapter: endpoint.adapter === 'confidence_json' ? 'confidence_json' : 'qwen3guard',
+      priority: normalizedEndpointPriority(endpoint.priority, index + 1),
       token: '',
       clear_token: false,
     })),
   }
 }
 
-export function createDefaultEndpoint(index = 1, adapter: PromptAuditAdapter = 'confidence_json'): PromptAuditEndpointDraft {
+export function createDefaultEndpoint(
+  index = 1,
+  adapter: PromptAuditAdapter = 'confidence_json',
+  priority = index,
+): PromptAuditEndpointDraft {
   const confidenceJSON = adapter === 'confidence_json'
   return {
     id: `guard-${Date.now()}-${index}`,
@@ -131,6 +169,7 @@ export function createDefaultEndpoint(index = 1, adapter: PromptAuditAdapter = '
     adapter,
     base_url: confidenceJSON ? 'https://api.deepseek.com' : 'http://127.0.0.1:8000',
     model: confidenceJSON ? DEFAULT_CONFIDENCE_MODEL : DEFAULT_GUARD_MODEL,
+    priority: normalizedEndpointPriority(priority, index),
     timeout_ms: confidenceJSON ? 4000 : 3000,
     input_limit: confidenceJSON ? 40000 : 4000,
     enabled: true,
@@ -167,13 +206,14 @@ export function buildUpdateRequest(draft: PromptAuditDraft): PromptAuditUpdateRe
     block_http_status: Number(draft.block_http_status),
     block_message: draft.block_message.trim() || DEFAULT_BLOCK_MESSAGE,
     max_total_input_chars: Math.min(400000, Math.max(128, Math.round(Number(draft.max_total_input_chars)))),
-    endpoints: draft.endpoints.map((endpoint) => ({
+    endpoints: draft.endpoints.map((endpoint, index) => ({
       id: endpoint.id.trim(),
       name: endpoint.name.trim(),
       protocol: 'openai_compatible',
       adapter: endpoint.adapter,
       base_url: endpoint.base_url.trim(),
       model: endpoint.model.trim() || (endpoint.adapter === 'confidence_json' ? DEFAULT_CONFIDENCE_MODEL : DEFAULT_GUARD_MODEL),
+      priority: normalizedEndpointPriority(endpoint.priority, index + 1),
       token: endpoint.token.trim() || undefined,
       clear_token: endpoint.clear_token,
       timeout_ms: Number(endpoint.timeout_ms),

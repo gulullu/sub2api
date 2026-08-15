@@ -7,9 +7,13 @@ import {
   DEFAULT_BLOCK_MESSAGE,
   DEFAULT_PROMPT_TEMPLATE_ID,
   draftFingerprint,
+  enabledFailoverTimeoutMS,
   emptyEventFilters,
   eventFilterPayload,
   hasExplicitDeleteRange,
+  LOCALIZED_SCANNER_IDS,
+  nextEndpointPriority,
+  orderedPromptAuditEndpoints,
   SCANNER_CATALOG,
 } from '../viewModel'
 
@@ -37,6 +41,10 @@ const config = (): PromptAuditConfig => ({
 })
 
 describe('Prompt Audit view model', () => {
+  it('localizes the operational audit-unavailable fallback marker', () => {
+    expect(LOCALIZED_SCANNER_IDS.has('audit_unavailable')).toBe(true)
+  })
+
   it('normalizes legacy null collections from the public config', () => {
     const legacy = { ...config(), group_ids: null, scanners: null, endpoints: null } as unknown as PromptAuditConfig
     expect(configToDraft(legacy)).toMatchObject({
@@ -47,10 +55,41 @@ describe('Prompt Audit view model', () => {
   })
 
   it('normalizes legacy endpoints and creates confidence nodes with DeepSeek limits', () => {
-    expect(configToDraft(config()).endpoints[0].adapter).toBe('qwen3guard')
+    expect(configToDraft(config()).endpoints[0]).toMatchObject({ adapter: 'qwen3guard', priority: 1 })
     expect(createDefaultEndpoint(1)).toMatchObject({
-      adapter: 'confidence_json', model: 'deepseek-chat', timeout_ms: 4000, input_limit: 40000,
+      adapter: 'confidence_json', model: 'deepseek-chat', priority: 1, timeout_ms: 4000, input_limit: 40000,
     })
+  })
+
+  it('derives legacy priorities, persists them, and keeps equal priorities stable', () => {
+    const legacy = {
+      ...config(),
+      endpoints: [
+        { ...config().endpoints[0], id: 'legacy-first', priority: undefined },
+        { ...config().endpoints[0], id: 'priority-five-a', priority: 5 },
+        { ...config().endpoints[0], id: 'priority-five-b', priority: 5 },
+      ],
+    }
+    const draft = configToDraft(legacy)
+    expect(draft.endpoints.map((endpoint) => endpoint.priority)).toEqual([1, 5, 5])
+    expect(orderedPromptAuditEndpoints(draft.endpoints).map((endpoint) => endpoint.id)).toEqual([
+      'legacy-first', 'priority-five-a', 'priority-five-b',
+    ])
+    expect(buildUpdateRequest(draft).endpoints.map((endpoint) => endpoint.priority)).toEqual([1, 5, 5])
+  })
+
+  it('assigns new nodes after the current maximum priority and caps at 1,000', () => {
+    expect(nextEndpointPriority([{ priority: 2 }, { priority: 8 }, { priority: 8 }])).toBe(9)
+    expect(nextEndpointPriority([{ priority: 1000 }])).toBe(1000)
+    expect(createDefaultEndpoint(3, 'confidence_json', 9).priority).toBe(9)
+  })
+
+  it('sums only enabled node timeouts for the worst-case failover wait', () => {
+    expect(enabledFailoverTimeoutMS([
+      { enabled: true, timeout_ms: 10000 },
+      { enabled: false, timeout_ms: 40000 },
+      { enabled: true, timeout_ms: 30000 },
+    ])).toBe(40000)
   })
 
   it('includes templates, thresholds, block response, and endpoint adapter in updates', () => {
@@ -62,7 +101,7 @@ describe('Prompt Audit view model', () => {
       block_http_status: 403,
       block_message: DEFAULT_BLOCK_MESSAGE,
       max_total_input_chars: 40000,
-      endpoints: [expect.objectContaining({ adapter: 'qwen3guard' })],
+      endpoints: [expect.objectContaining({ adapter: 'qwen3guard', priority: 1 })],
     })
     expect(payload.prompt_templates).toHaveLength(1)
   })

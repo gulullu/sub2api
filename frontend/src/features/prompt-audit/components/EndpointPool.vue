@@ -13,8 +13,29 @@
     <div v-if="endpoints.length === 0" class="mt-5 rounded-xl border border-dashed border-gray-300 px-5 py-10 text-center text-sm text-gray-500 dark:border-dark-600 dark:bg-dark-900/20 dark:text-dark-300">
       {{ t('admin.promptAudit.pool.empty') }}
     </div>
-    <div v-else class="mt-5 overflow-hidden rounded-xl border border-gray-200 bg-white dark:border-dark-700/60 dark:bg-dark-900/20">
-      <div class="hidden grid-cols-[minmax(260px,1.45fr)_minmax(210px,1fr)_minmax(190px,.8fr)_minmax(230px,1.15fr)_auto] gap-5 border-b border-l-[3px] border-b-gray-200 border-l-transparent bg-gray-50/80 px-5 py-2.5 text-[11px] font-semibold uppercase tracking-[0.08em] text-gray-500 dark:border-b-dark-700/60 dark:bg-dark-900/70 dark:text-dark-400 xl:grid">
+    <div
+      v-else
+      data-test="failover-summary"
+      :data-enabled-count="enabledEndpointCount"
+      :data-timeout-ms="enabledTimeoutMS"
+      class="mt-5 rounded-xl border px-4 py-3 text-sm"
+      :class="timeoutWarning
+        ? 'border-amber-300 bg-amber-50 text-amber-900 dark:border-amber-700/60 dark:bg-amber-950/25 dark:text-amber-200'
+        : 'border-gray-200 bg-gray-50 text-gray-700 dark:border-dark-700/60 dark:bg-dark-900/40 dark:text-dark-200'"
+    >
+      <p class="font-medium">
+        {{ t('admin.promptAudit.pool.failoverSummary', { count: enabledEndpointCount, timeout: enabledTimeoutMS }) }}
+      </p>
+      <p v-if="timeoutWarning" data-test="failover-timeout-warning" class="mt-1 text-xs leading-5">
+        {{ t('admin.promptAudit.pool.timeoutWarning', { timeout: enabledTimeoutMS, recommended: RECOMMENDED_FAILOVER_TIMEOUT_MS }) }}
+      </p>
+      <p v-else class="mt-1 text-xs leading-5 text-gray-500 dark:text-dark-400">
+        {{ t('admin.promptAudit.pool.failoverHint', { recommended: RECOMMENDED_FAILOVER_TIMEOUT_MS }) }}
+      </p>
+    </div>
+    <div v-if="endpoints.length > 0" class="mt-3 overflow-hidden rounded-xl border border-gray-200 bg-white dark:border-dark-700/60 dark:bg-dark-900/20">
+      <div class="hidden grid-cols-[minmax(118px,.55fr)_minmax(240px,1.35fr)_minmax(180px,1fr)_minmax(180px,.8fr)_minmax(210px,1.1fr)_auto] gap-4 border-b border-l-[3px] border-b-gray-200 border-l-transparent bg-gray-50/80 px-5 py-2.5 text-[11px] font-semibold uppercase tracking-[0.08em] text-gray-500 dark:border-b-dark-700/60 dark:bg-dark-900/70 dark:text-dark-400 xl:grid">
+        <span>{{ t('admin.promptAudit.pool.failoverOrder') }}</span>
         <span>{{ t('admin.promptAudit.pool.node') }}</span>
         <span>{{ t('admin.promptAudit.pool.model') }}</span>
         <span>{{ t('admin.promptAudit.pool.limits') }}</span>
@@ -24,11 +45,31 @@
 
       <div class="divide-y divide-gray-100 dark:divide-dark-800">
         <article
-          v-for="endpoint in endpoints"
+          v-for="endpoint in orderedEndpoints"
           :key="endpoint.id"
           :data-test="`endpoint-${endpoint.id}`"
-          class="group grid gap-4 border-l-[3px] border-l-transparent px-4 py-4 transition-[background-color,border-color] duration-200 hover:border-l-primary-500 hover:bg-gray-50/80 dark:hover:bg-dark-800/55 sm:px-5 xl:grid-cols-[minmax(260px,1.45fr)_minmax(210px,1fr)_minmax(190px,.8fr)_minmax(230px,1.15fr)_auto] xl:items-center xl:gap-5"
+          class="group grid gap-4 border-l-[3px] border-l-transparent px-4 py-4 transition-[background-color,border-color] duration-200 hover:border-l-primary-500 hover:bg-gray-50/80 dark:hover:bg-dark-800/55 sm:px-5 xl:grid-cols-[minmax(118px,.55fr)_minmax(240px,1.35fr)_minmax(180px,1fr)_minmax(180px,.8fr)_minmax(210px,1.1fr)_auto] xl:items-center xl:gap-4"
         >
+          <div>
+            <p class="mb-1 text-[10px] font-semibold uppercase tracking-wider text-gray-400 xl:hidden">{{ t('admin.promptAudit.pool.failoverOrder') }}</p>
+            <div class="flex flex-wrap items-center gap-1.5">
+              <span
+                v-if="endpoint.enabled"
+                :data-test="`failover-position-${endpoint.id}`"
+                :data-position="failoverPosition(endpoint.id)"
+                class="rounded-md bg-primary-50 px-2 py-1 text-xs font-semibold text-primary-700 dark:bg-primary-950/40 dark:text-primary-300"
+              >
+                {{ t('admin.promptAudit.pool.failoverPosition', { position: failoverPosition(endpoint.id) }) }}
+              </span>
+              <span v-else class="rounded-md bg-gray-100 px-2 py-1 text-xs text-gray-500 dark:bg-dark-800 dark:text-dark-400">
+                {{ t('admin.promptAudit.status.disabled') }}
+              </span>
+              <span class="text-[11px] tabular-nums text-gray-500 dark:text-dark-400">
+                {{ t('admin.promptAudit.pool.priorityValue', { priority: endpoint.priority }) }}
+              </span>
+            </div>
+          </div>
+
           <div class="flex min-w-0 items-center gap-3">
             <button
               type="button"
@@ -104,6 +145,20 @@
           <input v-model="editing.id" class="input w-full" required :disabled="editingIndex >= 0" :aria-label="t('admin.promptAudit.pool.id')" />
         </label>
         <label class="space-y-1 text-sm text-gray-700 dark:text-dark-200 sm:col-span-2">
+          <span>{{ t('admin.promptAudit.pool.priority') }}</span>
+          <input
+            v-model.number="editing.priority"
+            data-test="endpoint-priority"
+            class="input w-full"
+            type="number"
+            :min="MIN_ENDPOINT_PRIORITY"
+            :max="MAX_ENDPOINT_PRIORITY"
+            required
+            :aria-label="t('admin.promptAudit.pool.priority')"
+          />
+          <span class="block text-xs text-gray-500 dark:text-dark-400">{{ t('admin.promptAudit.pool.priorityHint') }}</span>
+        </label>
+        <label class="space-y-1 text-sm text-gray-700 dark:text-dark-200 sm:col-span-2">
           <span>{{ t('admin.promptAudit.pool.adapter') }}</span>
           <select :value="editing.adapter" class="input w-full" :aria-label="t('admin.promptAudit.pool.adapter')" @change="changeAdapter(($event.target as HTMLSelectElement).value as PromptAuditAdapter)">
             <option value="confidence_json">{{ t('admin.promptAudit.pool.adapters.confidence_json') }}</option>
@@ -153,7 +208,16 @@ import { computed, ref } from 'vue'
 import { useI18n } from 'vue-i18n'
 import BaseDialog from '@/components/common/BaseDialog.vue'
 import type { PromptAuditAdapter, PromptAuditEndpointDraft, PromptProbeResult } from '../types'
-import { cloneData, createDefaultEndpoint } from '../viewModel'
+import {
+  cloneData,
+  createDefaultEndpoint,
+  enabledFailoverTimeoutMS,
+  MAX_ENDPOINT_PRIORITY,
+  MIN_ENDPOINT_PRIORITY,
+  nextEndpointPriority,
+  orderedPromptAuditEndpoints,
+  RECOMMENDED_FAILOVER_TIMEOUT_MS,
+} from '../viewModel'
 
 const props = defineProps<{
   endpoints: PromptAuditEndpointDraft[]
@@ -167,10 +231,21 @@ const emit = defineEmits<{
 const { t } = useI18n()
 const editing = ref<PromptAuditEndpointDraft | null>(null)
 const editingIndex = ref(-1)
+const orderedEndpoints = computed(() => orderedPromptAuditEndpoints(props.endpoints))
+const enabledEndpoints = computed(() => orderedEndpoints.value.filter((endpoint) => endpoint.enabled))
+const enabledEndpointCount = computed(() => enabledEndpoints.value.length)
+const enabledTimeoutMS = computed(() => enabledFailoverTimeoutMS(props.endpoints))
+const timeoutWarning = computed(() => enabledTimeoutMS.value > RECOMMENDED_FAILOVER_TIMEOUT_MS)
+const failoverPositions = computed(() => new Map(
+  enabledEndpoints.value.map((endpoint, index) => [endpoint.id, index + 1]),
+))
 const editorValid = computed(() => {
   const endpoint = editing.value
   if (!endpoint?.id.trim() || !endpoint.name.trim() || !endpoint.base_url.trim()) return false
-  return Number.isInteger(endpoint.timeout_ms)
+  return Number.isInteger(endpoint.priority)
+    && endpoint.priority >= MIN_ENDPOINT_PRIORITY
+    && endpoint.priority <= MAX_ENDPOINT_PRIORITY
+    && Number.isInteger(endpoint.timeout_ms)
     && endpoint.timeout_ms >= 100
     && endpoint.timeout_ms <= 40000
     && Number.isInteger(endpoint.input_limit)
@@ -180,7 +255,11 @@ const editorValid = computed(() => {
 
 function openCreate() {
   editingIndex.value = -1
-  editing.value = createDefaultEndpoint(props.endpoints.length + 1)
+  editing.value = createDefaultEndpoint(
+    props.endpoints.length + 1,
+    'confidence_json',
+    nextEndpointPriority(props.endpoints),
+  )
 }
 function openEdit(endpoint: PromptAuditEndpointDraft) {
   editingIndex.value = props.endpoints.findIndex((item) => item.id === endpoint.id)
@@ -228,5 +307,8 @@ function credentialInvalid(endpoint: PromptAuditEndpointDraft): boolean {
 }
 function adapterLabel(adapter: PromptAuditAdapter): string {
   return adapter === 'confidence_json' ? 'JSON confidence' : 'Qwen3Guard'
+}
+function failoverPosition(id: string): number {
+  return failoverPositions.value.get(id) ?? 0
 }
 </script>

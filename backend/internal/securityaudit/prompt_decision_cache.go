@@ -96,6 +96,7 @@ func (c *promptDecisionCache) remove(element *list.Element) {
 func promptDecisionCacheKey(cfg ActiveConfig, scanText string) string {
 	type cacheEndpoint struct {
 		ID               string  `json:"id"`
+		Priority         int     `json:"priority"`
 		Adapter          string  `json:"adapter"`
 		BaseURL          string  `json:"base_url"`
 		Model            string  `json:"model"`
@@ -122,7 +123,7 @@ func promptDecisionCacheKey(cfg ActiveConfig, scanText string) string {
 	}
 	for _, endpoint := range cfg.EnabledEndpoints() {
 		policy.Endpoints = append(policy.Endpoints, cacheEndpoint{
-			ID: endpoint.ID, Adapter: endpoint.Adapter, BaseURL: endpoint.BaseURL, Model: endpoint.Model,
+			ID: endpoint.ID, Priority: endpoint.Priority, Adapter: endpoint.Adapter, BaseURL: endpoint.BaseURL, Model: endpoint.Model,
 			TimeoutMS: endpoint.TimeoutMS, InputLimit: endpoint.InputLimit,
 			PromptTemplateID: endpoint.PromptTemplateID, SystemPrompt: endpoint.SystemPrompt,
 			FlagThreshold: endpoint.FlagThreshold, BlockThreshold: endpoint.BlockThreshold,

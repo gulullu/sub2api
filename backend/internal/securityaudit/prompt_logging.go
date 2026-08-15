@@ -30,6 +30,10 @@ const (
 	EventGuardAllowed         = "prompt_guard.allowed"
 	EventGuardBlocked         = "prompt_guard.blocked"
 	EventGuardFailed          = "prompt_guard.failed"
+	EventEndpointFailed       = "prompt_guard.endpoint_failed"
+	EventEndpointFailover     = "prompt_guard.endpoint_failover"
+	EventEndpointCircuitSkip  = "prompt_guard.endpoint_circuit_skip"
+	EventEndpointRecovered    = "prompt_guard.endpoint_recovered"
 	EventResultRecordFailed   = "prompt_guard.result_record_failed"
 	EventEventDeleted         = "prompt_audit.event_deleted"
 	EventEventsDeleted        = "prompt_audit.events_deleted"
@@ -43,7 +47,8 @@ var knownLogEvents = map[string]struct{}{
 	EventJobEnqueued: {}, EventEnqueueSkipped: {}, EventEnqueueDropped: {},
 	EventAuditStarted: {}, EventProcessingReclaimed: {}, EventProcessed: {}, EventProcessFailed: {}, EventFindingRecorded: {},
 	EventChunkStarted: {}, EventChunkCompleted: {}, EventChunkFailed: {}, EventChunksAggregated: {},
-	EventEvaluationStarted: {}, EventGuardAllowed: {}, EventGuardBlocked: {}, EventGuardFailed: {}, EventResultRecordFailed: {},
+	EventEvaluationStarted: {}, EventGuardAllowed: {}, EventGuardBlocked: {}, EventGuardFailed: {},
+	EventEndpointFailed: {}, EventEndpointFailover: {}, EventEndpointCircuitSkip: {}, EventEndpointRecovered: {}, EventResultRecordFailed: {},
 	EventEventDeleted: {}, EventEventsDeleted: {}, EventDeletePreviewed: {}, EventEventsFilterDeleted: {},
 }
 
@@ -57,6 +62,8 @@ var allowedLogFields = map[string]struct{}{
 	"billing_preconsumed": {}, "worker_id": {}, "reclaimed_total": {}, "attempts": {},
 	"max_attempts": {}, "claim_version": {}, "http_status": {}, "retryable": {},
 	"max_total_input_chars": {}, "cache_hit": {},
+	"endpoint_priority": {}, "next_guard_endpoint_id": {}, "next_endpoint_priority": {},
+	"failure_class": {}, "circuit_state": {}, "circuit_cooldown_ms": {},
 }
 
 func LogInfo(event string, fields map[string]any) {

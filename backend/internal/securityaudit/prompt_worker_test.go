@@ -78,8 +78,10 @@ type fakeJobRepository struct {
 	eventCount      int
 	retryAt         time.Time
 	retryCode       string
+	retryContextErr error
 	retried         int
 	failedCode      string
+	failContextErr  error
 	failed          int
 	refreshes       int
 
@@ -89,6 +91,8 @@ type fakeJobRepository struct {
 	recordBlockingSnapshot PromptSnapshot
 	recordBlockingResult   *NormalizedResult
 	recordBlockingErr      error
+	recordBlockingEntered  chan<- struct{}
+	recordBlockingWait     bool
 }
 
 func (r *fakeJobRepository) record(value string) {
@@ -153,29 +157,39 @@ func (r *fakeJobRepository) Complete(_ context.Context, _ *Job, result *Normaliz
 	r.eventCount++
 	return &Event{ID: 99, Decision: result.Decision}, nil
 }
-func (r *fakeJobRepository) Retry(_ context.Context, _, _ int64, next time.Time, code, _ string) error {
+func (r *fakeJobRepository) Retry(ctx context.Context, _, _ int64, next time.Time, code, _ string) error {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	r.retried++
-	r.retryAt, r.retryCode = next, code
+	r.retryAt, r.retryCode, r.retryContextErr = next, code, ctx.Err()
 	return r.retryErr
 }
-func (r *fakeJobRepository) Fail(_ context.Context, _, _ int64, code, _ string) error {
+func (r *fakeJobRepository) Fail(ctx context.Context, _, _ int64, code, _ string) error {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	r.failed++
-	r.failedCode = code
+	r.failedCode, r.failContextErr = code, ctx.Err()
 	return r.failErr
 }
 func (r *fakeJobRepository) ReclaimStale(context.Context, time.Time, time.Time, int) (int64, error) {
 	return 0, nil
 }
 func (r *fakeJobRepository) QueueStats(context.Context) (QueueStats, error) { return QueueStats{}, nil }
-func (r *fakeJobRepository) RecordBlocking(_ context.Context, snapshot PromptSnapshot, _ int64, result *NormalizedResult, _ bool) (*Event, error) {
+func (r *fakeJobRepository) RecordBlocking(ctx context.Context, snapshot PromptSnapshot, _ int64, result *NormalizedResult, _ bool) (*Event, error) {
 	r.mu.Lock()
-	defer r.mu.Unlock()
 	r.recordBlockingCalls++
 	r.recordBlockingSnapshot, r.recordBlockingResult = snapshot, result
+	r.mu.Unlock()
+	if r.recordBlockingEntered != nil {
+		select {
+		case r.recordBlockingEntered <- struct{}{}:
+		default:
+		}
+	}
+	if r.recordBlockingWait {
+		<-ctx.Done()
+		return nil, ctx.Err()
+	}
 	return nil, r.recordBlockingErr
 }
 
@@ -186,6 +200,7 @@ type fakePayloadStore struct {
 	values    map[int64]string
 	setErr    error
 	getErr    error
+	getPanic  any
 	deleteErr error
 	pingErr   error
 	setTTL    time.Duration
@@ -210,6 +225,9 @@ func (s *fakePayloadStore) Set(_ context.Context, jobID int64, value string, ttl
 func (s *fakePayloadStore) Get(_ context.Context, jobID int64) (string, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	if s.getPanic != nil {
+		panic(s.getPanic)
+	}
 	if s.getErr != nil {
 		return "", s.getErr
 	}
@@ -487,23 +505,238 @@ func TestWorkerRetryBackoffTerminalFailureAndFailover(t *testing.T) {
 	metrics := NewAtomicMetrics()
 	scanner := PromptScannerFunc(func(_ context.Context, endpoint ActiveEndpoint, _ string, _ []string) (*NormalizedResult, error) {
 		if endpoint.ID == "first" {
-			return nil, &GuardError{Code: ErrorCodeUnavailable, Retryable: true}
+			return nil, &GuardError{Code: ErrorCodeUnavailable, HTTPStatus: 402, Retryable: false}
 		}
 		return integrationResult(EventPass), nil
 	})
 	cfg := asyncConfig()
-	cfg.Endpoints = []ActiveEndpoint{{ID: "first", Enabled: true, InputLimit: 10}, {ID: "second", Enabled: true, InputLimit: 10}}
+	cfg.Endpoints = []ActiveEndpoint{
+		{ID: "second", Priority: 2, Enabled: true, TimeoutMS: 1000, InputLimit: 10},
+		{ID: "first", Priority: 1, Enabled: true, TimeoutMS: 1000, InputLimit: 10},
+	}
 	runner := NewRunner(&fakeConfigStore{cfg: cfg, active: true}, repo, payload, scanner, metrics)
 	require.NoError(t, runner.processJob(context.Background(), 0, cfg, workerJob(1, 3)))
 	require.Equal(t, int64(1), metrics.Snapshot().Failovers)
 }
 
-func TestWorkerPanicLeaseLossAndLifecycleAreContained(t *testing.T) {
-	t.Run("panic", func(t *testing.T) {
+func TestWorkerUsesIndependentTimeoutAndMultiChunkFailoverAffinity(t *testing.T) {
+	t.Run("independent timeout", func(t *testing.T) {
 		repo := &fakeJobRepository{}
 		payload := &fakePayloadStore{values: map[int64]string{51: "abc"}}
+		calls := []string{}
+		scanner := PromptScannerFunc(func(ctx context.Context, endpoint ActiveEndpoint, _ string, _ []string) (*NormalizedResult, error) {
+			calls = append(calls, endpoint.ID)
+			if endpoint.ID == "primary" {
+				<-ctx.Done()
+				return nil, &GuardError{Code: ErrorCodeUnavailable, Retryable: true, Timeout: true, Cause: ctx.Err()}
+			}
+			select {
+			case <-time.After(50 * time.Millisecond):
+				return integrationResult(EventPass), nil
+			case <-ctx.Done():
+				return nil, &GuardError{Code: ErrorCodeUnavailable, Retryable: true, Timeout: true, Cause: ctx.Err()}
+			}
+		})
+		cfg := asyncConfig()
+		cfg.Endpoints = []ActiveEndpoint{
+			{ID: "primary", Priority: 1, Enabled: true, TimeoutMS: 30, InputLimit: 10},
+			{ID: "backup", Priority: 2, Enabled: true, TimeoutMS: 150, InputLimit: 10},
+		}
+		metrics := NewAtomicMetrics()
+		runner := NewRunner(&fakeConfigStore{cfg: cfg, active: true}, repo, payload, scanner, metrics)
+		require.NoError(t, runner.processJob(context.Background(), 0, cfg, workerJob(1, 3)))
+		require.Equal(t, []string{"primary", "backup"}, calls)
+		require.Equal(t, int64(1), metrics.Snapshot().Timeouts)
+	})
+
+	t.Run("failed primary is not retried on later chunks", func(t *testing.T) {
+		repo := &fakeJobRepository{}
+		payload := &fakePayloadStore{values: map[int64]string{51: "abcdef"}}
+		calls := []string{}
+		scanner := PromptScannerFunc(func(_ context.Context, endpoint ActiveEndpoint, _ string, _ []string) (*NormalizedResult, error) {
+			calls = append(calls, endpoint.ID)
+			if endpoint.ID == "primary" {
+				return nil, &GuardError{Code: ErrorCodeUnavailable, HTTPStatus: 401, Retryable: false}
+			}
+			return integrationResult(EventPass), nil
+		})
+		cfg := asyncConfig()
+		cfg.Endpoints = []ActiveEndpoint{
+			{ID: "primary", Priority: 1, Enabled: true, TimeoutMS: 1000, InputLimit: 3},
+			{ID: "backup", Priority: 2, Enabled: true, TimeoutMS: 1000, InputLimit: 3},
+		}
+		runner := NewRunner(&fakeConfigStore{cfg: cfg, active: true}, repo, payload, scanner, NewAtomicMetrics())
+		require.NoError(t, runner.processJob(context.Background(), 0, cfg, workerJob(1, 3)))
+		require.Equal(t, []string{"primary", "backup", "backup"}, calls)
+	})
+
+	t.Run("failure summary spans chunks and drives retry", func(t *testing.T) {
+		repo := &fakeJobRepository{}
+		payload := &fakePayloadStore{values: map[int64]string{51: "abcdef"}}
+		calls := []string{}
+		scanner := PromptScannerFunc(func(_ context.Context, endpoint ActiveEndpoint, chunk string, _ []string) (*NormalizedResult, error) {
+			calls = append(calls, endpoint.ID)
+			switch {
+			case endpoint.ID == "primary":
+				return nil, &GuardError{Code: ErrorCodeUnavailable, HTTPStatus: 503, Retryable: true}
+			case chunk == "abc":
+				return integrationResult(EventPass), nil
+			default:
+				return nil, &GuardError{Code: ErrorCodeUnavailable, HTTPStatus: 401, Retryable: false}
+			}
+		})
+		cfg := asyncConfig()
+		cfg.Endpoints = []ActiveEndpoint{
+			{ID: "primary", Priority: 1, Enabled: true, TimeoutMS: 1000, InputLimit: 3},
+			{ID: "backup", Priority: 2, Enabled: true, TimeoutMS: 1000, InputLimit: 3},
+		}
+		runner := NewRunner(&fakeConfigStore{cfg: cfg, active: true}, repo, payload, scanner, NewAtomicMetrics())
+		err := runner.processJob(context.Background(), 0, cfg, workerJob(1, 3))
+		require.Error(t, err)
+		var guardErr *GuardError
+		require.ErrorAs(t, err, &guardErr)
+		require.True(t, guardErr.Retryable)
+		require.Equal(t, []string{"primary", "backup", "backup"}, calls)
+		require.Equal(t, 1, repo.retried)
+		require.NoError(t, repo.retryContextErr)
+	})
+
+	t.Run("total endpoint budget spans chunks but failure persistence uses worker context", func(t *testing.T) {
+		repo := &fakeJobRepository{}
+		payload := &fakePayloadStore{values: map[int64]string{51: "abcdef", 52: "ghijkl"}}
+		var allowances []time.Duration
+		calls := 0
+		scanner := PromptScannerFunc(func(ctx context.Context, _ ActiveEndpoint, _ string, _ []string) (*NormalizedResult, error) {
+			calls++
+			deadline, ok := ctx.Deadline()
+			require.True(t, ok)
+			allowances = append(allowances, time.Until(deadline))
+			if calls == 1 {
+				select {
+				case <-time.After(100 * time.Millisecond):
+					return integrationResult(EventPass), nil
+				case <-ctx.Done():
+					return nil, ctx.Err()
+				}
+			}
+			if calls == 2 {
+				<-ctx.Done()
+				return nil, ctx.Err()
+			}
+			return integrationResult(EventPass), nil
+		})
+		cfg := asyncConfig()
+		cfg.Endpoints = []ActiveEndpoint{{ID: "only", Priority: 1, Enabled: true, TimeoutMS: 250, InputLimit: 3}}
+		metrics := NewAtomicMetrics()
+		runner := NewRunner(&fakeConfigStore{cfg: cfg, active: true}, repo, payload, scanner, metrics)
+		err := runner.processJob(context.Background(), 0, cfg, workerJob(1, 1))
+		require.Error(t, err)
+		require.Equal(t, 2, calls)
+		require.Len(t, allowances, 2)
+		require.Greater(t, allowances[0], 220*time.Millisecond)
+		require.Greater(t, allowances[1], 100*time.Millisecond)
+		require.Less(t, allowances[1], 200*time.Millisecond)
+		require.Equal(t, 1, repo.failed)
+		require.NoError(t, repo.failContextErr, "expired scan budget must not be reused for terminal persistence")
+		require.Zero(t, metrics.Snapshot().CircuitOpen)
+
+		second := workerJob(1, 1)
+		second.ID = 52
+		second.Snapshot.RequestID = "worker-budget-second"
+		require.NoError(t, runner.processJob(context.Background(), 0, cfg, second))
+		require.Equal(t, 4, calls)
+		require.Zero(t, metrics.Snapshot().CircuitSkip)
+	})
+
+	t.Run("endpoint timeout at budget boundary opens circuit", func(t *testing.T) {
+		repo := &fakeJobRepository{}
+		payload := &fakePayloadStore{values: map[int64]string{51: "first", 52: "second"}}
+		calls := 0
+		metrics := NewAtomicMetrics()
+		scanner := PromptScannerFunc(func(ctx context.Context, _ ActiveEndpoint, _ string, _ []string) (*NormalizedResult, error) {
+			calls++
+			<-ctx.Done()
+			return nil, ctx.Err()
+		})
+		cfg := asyncConfig()
+		cfg.Endpoints = []ActiveEndpoint{{ID: "only", Priority: 1, Enabled: true, TimeoutMS: 100, InputLimit: 100}}
+		runner := NewRunner(&fakeConfigStore{cfg: cfg, active: true}, repo, payload, scanner, metrics)
+		first := workerJob(1, 1)
+		first.Snapshot.PromptLength = 5
+		require.Error(t, runner.processJob(context.Background(), 0, cfg, first))
+		second := workerJob(1, 1)
+		second.ID = 52
+		second.Snapshot.RequestID = "worker-request-second"
+		require.Error(t, runner.processJob(context.Background(), 0, cfg, second))
+		require.Equal(t, 1, calls)
+		snapshot := metrics.Snapshot()
+		require.Equal(t, int64(1), snapshot.Timeouts)
+		require.Equal(t, int64(1), snapshot.CircuitOpen)
+		require.Equal(t, int64(1), snapshot.CircuitSkip)
+	})
+
+	t.Run("all hanging endpoints each receive full timeout then open", func(t *testing.T) {
+		repo := &fakeJobRepository{}
+		payload := &fakePayloadStore{values: map[int64]string{51: "first", 52: "second"}}
+		calls := 0
+		metrics := NewAtomicMetrics()
+		scanner := PromptScannerFunc(func(ctx context.Context, _ ActiveEndpoint, _ string, _ []string) (*NormalizedResult, error) {
+			calls++
+			<-ctx.Done()
+			return nil, ctx.Err()
+		})
+		cfg := asyncConfig()
+		cfg.Endpoints = []ActiveEndpoint{
+			{ID: "first", Priority: 1, Enabled: true, TimeoutMS: 100, InputLimit: 100},
+			{ID: "second", Priority: 2, Enabled: true, TimeoutMS: 100, InputLimit: 100},
+		}
+		runner := NewRunner(&fakeConfigStore{cfg: cfg, active: true}, repo, payload, scanner, metrics)
+		require.Error(t, runner.processJob(context.Background(), 0, cfg, workerJob(1, 1)))
+		require.Equal(t, 2, calls)
+		require.Equal(t, int64(2), metrics.Snapshot().CircuitOpen)
+		second := workerJob(1, 1)
+		second.ID = 52
+		second.Snapshot.RequestID = "worker-all-hanging-second"
+		require.Error(t, runner.processJob(context.Background(), 0, cfg, second))
+		require.Equal(t, 2, calls)
+		require.Equal(t, int64(2), metrics.Snapshot().CircuitSkip)
+	})
+}
+
+func TestWorkerPanicLeaseLossAndLifecycleAreContained(t *testing.T) {
+	t.Run("scanner panic fails over like blocking evaluation", func(t *testing.T) {
+		repo := &fakeJobRepository{}
+		payload := &fakePayloadStore{values: map[int64]string{51: "abc"}}
+		cfg := asyncConfig()
+		cfg.Endpoints = []ActiveEndpoint{
+			{ID: "primary", Priority: 1, Enabled: true, TimeoutMS: 1000, InputLimit: 10},
+			{ID: "backup", Priority: 2, Enabled: true, TimeoutMS: 1000, InputLimit: 10},
+		}
+		calls := []string{}
+		metrics := NewAtomicMetrics()
+		runner := NewRunner(&fakeConfigStore{cfg: cfg, active: true}, repo, payload, PromptScannerFunc(func(_ context.Context, endpoint ActiveEndpoint, _ string, _ []string) (*NormalizedResult, error) {
+			calls = append(calls, endpoint.ID)
+			if endpoint.ID == "primary" {
+				panic("scanner panic canary")
+			}
+			return integrationResult(EventPass), nil
+		}), metrics)
+		require.NotPanics(t, func() { runner.processSafely(context.Background(), 0, cfg, workerJob(1, 3)) })
+		_, processed, failed, _, _, code, _ := runner.Snapshot()
+		require.Equal(t, int64(1), processed)
+		require.Zero(t, failed)
+		require.Empty(t, code)
+		require.Equal(t, []string{"primary", "backup"}, calls)
+		require.Equal(t, 1, repo.completeCount)
+		require.Zero(t, repo.failed)
+		require.Equal(t, int64(1), metrics.Snapshot().Failovers)
+	})
+
+	t.Run("non-scanner panic remains contained", func(t *testing.T) {
+		repo := &fakeJobRepository{}
+		payload := &fakePayloadStore{values: map[int64]string{51: "abc"}, getPanic: "payload panic canary"}
 		runner := NewRunner(&fakeConfigStore{cfg: asyncConfig(), active: true}, repo, payload, PromptScannerFunc(func(context.Context, ActiveEndpoint, string, []string) (*NormalizedResult, error) {
-			panic("scanner panic canary")
+			return integrationResult(EventPass), nil
 		}), NewAtomicMetrics())
 		require.NotPanics(t, func() { runner.processSafely(context.Background(), 0, asyncConfig(), workerJob(1, 3)) })
 		_, _, failed, _, _, code, message := runner.Snapshot()
@@ -624,6 +857,8 @@ func TestPromptAuditSyntheticAsyncBaseline(t *testing.T) {
 	require.Equal(t, int64(1), snapshot.Invalid)
 	require.Equal(t, int64(1), snapshot.Unavailable)
 	require.Equal(t, int64(1), snapshot.Timeouts)
+	require.Equal(t, int64(1), snapshot.CircuitOpen)
+	require.Zero(t, snapshot.CircuitSkip)
 	require.Zero(t, knownBenignFindings)
 	require.Equal(t, 3, knownMaliciousBlocked)
 	require.Equal(t, 98, repo.completeCount)

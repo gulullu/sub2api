@@ -19,6 +19,7 @@ type PromptService struct {
 	evaluator *GuardEvaluator
 	scanner   *OpenAICompatibleScanner
 	metrics   *AtomicMetrics
+	circuit   *endpointCircuitBreaker
 	clock     Clock
 
 	lifecycleMu  sync.Mutex
@@ -40,9 +41,14 @@ func NewPromptService(
 	enqueuer := NewEnqueuer(config, repo, payload, metrics)
 	evaluator := NewGuardEvaluator(scanner, repo, metrics)
 	runner := NewRunner(config, repo, payload, scanner, metrics)
+	// Blocking and async audit paths share endpoint health so one known-bad
+	// dependency is skipped consistently throughout this process.
+	sharedCircuit := newEndpointCircuitBreaker(defaultEndpointCircuitCapacity)
+	evaluator.failover.circuit = sharedCircuit
+	runner.failover.circuit = sharedCircuit
 	return &PromptService{
 		config: config, repo: repo, payload: payload, scanner: scanner, metrics: metrics,
-		enqueuer: enqueuer, evaluator: evaluator, runner: runner, clock: realClock{},
+		enqueuer: enqueuer, evaluator: evaluator, runner: runner, circuit: sharedCircuit, clock: realClock{},
 		enqueueSlots: make(chan struct{}, 128), probes: map[string]ProbeResult{},
 	}
 }
@@ -161,7 +167,68 @@ func (s *PromptService) Evaluate(ctx context.Context, req Request) (*PromptDecis
 	if err != nil {
 		return nil, &GuardError{Code: ErrorCodeInvalidResponse, Cause: err}
 	}
-	return s.evaluator.Evaluate(ctx, cfg, snapshot)
+	started := s.now()
+	decision, evaluateErr := s.evaluator.Evaluate(ctx, cfg, snapshot)
+	if evaluateErr == nil {
+		return decision, nil
+	}
+	if fallback, ok := s.unavailableRiskRouteFallback(ctx, cfg, snapshot, evaluateErr, started); ok {
+		return fallback, nil
+	}
+	if ctxErr := ctx.Err(); ctxErr != nil {
+		return nil, parentGuardContextError(ctxErr)
+	}
+	return nil, evaluateErr
+}
+
+func (s *PromptService) unavailableRiskRouteFallback(ctx context.Context, cfg ActiveConfig, snapshot PromptSnapshot, evaluateErr error, started time.Time) (*PromptDecision, bool) {
+	if s == nil || ctx.Err() != nil || len(cfg.RiskRouteAccountIDs) == 0 {
+		return nil, false
+	}
+	latency := s.now().Sub(started)
+	result := &NormalizedResult{
+		Decision: EventFlag, RiskLevel: RiskHigh, Action: ActionWarn, Safety: "Unreviewed",
+		Categories: []string{auditUnavailableScannerID}, MatchedScanners: []string{auditUnavailableScannerID},
+		ScannerScores:   map[string]float64{auditUnavailableScannerID: 1},
+		ScannerEvidence: map[string]string{auditUnavailableScannerID: "prompt audit dependency unavailable"},
+		ScannerBackend:  "local-failover", ScannerVersion: "1", LatencyMS: int(latency.Milliseconds()),
+		Reason: "prompt audit dependency unavailable; routed to configured risk accounts",
+	}
+	code := guardErrorCode(evaluateErr)
+	decision := &PromptDecision{
+		Kind: DecisionFlag, ErrorCode: code, Result: result, AllowNextStage: true,
+		RouteAccountIDs: append([]int64(nil), cfg.RiskRouteAccountIDs...),
+	}
+	baseFields := snapshotLogFields(snapshot)
+	baseFields["config_version"] = cfg.ConfigVersion
+	if s.evaluator != nil && s.evaluator.repo != nil {
+		if _, recordErr := s.evaluator.repo.RecordBlocking(ctx, snapshot.Redacted(), cfg.ConfigVersion, result, cfg.StorePassEvents); recordErr != nil {
+			if ctx.Err() == nil {
+				if s.evaluator.metrics != nil {
+					s.evaluator.metrics.IncRecordFailed()
+				}
+				LogWarn(EventResultRecordFailed, mergeLogFields(baseFields, map[string]any{
+					"decision": DecisionFlag, "error_code": "result_record_failed", "stage": snapshot.Stage, "status": "failed",
+				}))
+			}
+		}
+	}
+	if ctx.Err() != nil {
+		return nil, false
+	}
+	LogWarn(EventGuardAllowed, mergeLogFields(baseFields, map[string]any{
+		"decision": DecisionFlag, "risk_level": RiskHigh, "action": ActionWarn,
+		"guard_endpoint_id": "", "chunk_total": 0, "latency_ms": result.LatencyMS,
+		"stage": snapshot.Stage, "status": "fallback_routed", "error_code": code,
+	}))
+	return decision, true
+}
+
+func (s *PromptService) now() time.Time {
+	if s != nil && s.clock != nil {
+		return s.clock.Now()
+	}
+	return time.Now().UTC()
 }
 
 func (s *PromptService) GetConfig() (PublicConfig, error) { return s.config.Public() }
@@ -242,6 +309,7 @@ func (s *PromptService) Probe(ctx context.Context, request ProbeRequest) ProbeRe
 	}
 	result, scanErr := s.scanner.Scan(ctx, endpoint, "Hello", AllScannerIDs)
 	if scanErr == nil && result != nil {
+		s.resetCircuitAfterExactProbe(endpoint)
 		return s.finishProbe(endpoint.ID, started, ProbeResult{OK: true, Status: "healthy", Message: "审计节点模型调用正常", HTTPStatus: http.StatusOK, TokenApplied: tokenApplied})
 	}
 	code, status, retryable := guardErrorCode(scanErr), 0, false
@@ -253,6 +321,39 @@ func (s *PromptService) Probe(ctx context.Context, request ProbeRequest) ProbeRe
 		code = ErrorCodeInvalidResponse
 	}
 	return s.finishProbe(endpoint.ID, started, ProbeResult{Status: "failed", ErrorCode: code, Message: "审计节点模型调用失败", HTTPStatus: status, Retryable: retryable, TokenApplied: tokenApplied})
+}
+
+func (s *PromptService) resetCircuitAfterExactProbe(probed ActiveEndpoint) {
+	if s == nil || s.circuit == nil || s.config == nil {
+		return
+	}
+	cfg, ok := s.config.Active()
+	if !ok {
+		return
+	}
+	for _, configured := range cfg.Endpoints {
+		if !sameEndpointProbeIdentity(configured, probed) {
+			continue
+		}
+		if s.circuit.reset(endpointCircuitKey(cfg.ConfigVersion, configured), s.clock.Now()) {
+			if s.metrics != nil {
+				s.metrics.IncCircuitReset()
+			}
+			LogInfo(EventEndpointRecovered, map[string]any{
+				"config_version": cfg.ConfigVersion, "guard_endpoint_id": configured.ID,
+				"endpoint_priority": configured.Priority, "circuit_state": "closed", "status": "probe_recovered",
+			})
+		}
+		return
+	}
+}
+
+func sameEndpointProbeIdentity(configured, probed ActiveEndpoint) bool {
+	return configured.ID == probed.ID && configured.Protocol == probed.Protocol && configured.Adapter == probed.Adapter &&
+		configured.BaseURL == probed.BaseURL && configured.Model == probed.Model && configured.Token == probed.Token &&
+		configured.TimeoutMS == probed.TimeoutMS && configured.InputLimit == probed.InputLimit &&
+		configured.PromptTemplateID == probed.PromptTemplateID && configured.SystemPrompt == probed.SystemPrompt &&
+		configured.FlagThreshold == probed.FlagThreshold && configured.BlockThreshold == probed.BlockThreshold
 }
 
 func modelsResponseReady(body []byte, model string) bool {
@@ -325,7 +426,7 @@ func (s *PromptService) resolveProbeEndpoint(input UpdateEndpoint) (ActiveEndpoi
 		MaxTotalInputChars: DefaultMaxTotalInputChars,
 		PromptTemplates:    []PromptTemplate{DefaultPromptTemplate()}, ActivePromptTemplateID: DefaultPromptTemplateID,
 		FlagThreshold: float64Pointer(flagThreshold), BlockThreshold: float64Pointer(blockThreshold), BlockHTTPStatus: DefaultBlockHTTPStatus, BlockMessage: DefaultBlockMessage,
-		Endpoints: []StorageEndpoint{{ID: strings.TrimSpace(input.ID), Name: strings.TrimSpace(input.Name), Protocol: "openai_compatible", Adapter: adapter, BaseURL: baseURL, Model: model, TimeoutMS: timeout, InputLimit: limit}}}
+		Endpoints: []StorageEndpoint{{ID: strings.TrimSpace(input.ID), Name: strings.TrimSpace(input.Name), Priority: MinEndpointPriority, Protocol: "openai_compatible", Adapter: adapter, BaseURL: baseURL, Model: model, TimeoutMS: timeout, InputLimit: limit}}}
 	if storage.Endpoints[0].ID == "" {
 		storage.Endpoints[0].ID = "probe"
 	}
@@ -335,7 +436,7 @@ func (s *PromptService) resolveProbeEndpoint(input UpdateEndpoint) (ActiveEndpoi
 	if err := validateStorageConfig(storage); err != nil {
 		return ActiveEndpoint{}, false, err
 	}
-	return ActiveEndpoint{ID: storage.Endpoints[0].ID, Name: storage.Endpoints[0].Name, Protocol: "openai_compatible", Adapter: adapter,
+	return ActiveEndpoint{ID: storage.Endpoints[0].ID, Name: storage.Endpoints[0].Name, Priority: MinEndpointPriority, Protocol: "openai_compatible", Adapter: adapter,
 		BaseURL: baseURL, Model: model, Token: token, TimeoutMS: timeout, InputLimit: limit, Enabled: true,
 		PromptTemplateID: template.ID, SystemPrompt: template.SystemPrompt, FlagThreshold: flagThreshold, BlockThreshold: blockThreshold}, token != "", nil
 }

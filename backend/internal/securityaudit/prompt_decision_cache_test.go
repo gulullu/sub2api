@@ -74,7 +74,11 @@ func TestPromptDecisionCacheKeyCoversInputAndPolicy(t *testing.T) {
 		MaxTotalInputChars: 40000, BlockHTTPStatus: 403, BlockMessage: "blocked",
 		Endpoints: []ActiveEndpoint{{
 			ID: "deepseek", Adapter: AdapterConfidenceJSON, BaseURL: "https://api.deepseek.com/v1",
-			Model: "deepseek-chat", TimeoutMS: 40000, InputLimit: 40000, Enabled: true,
+			Model: "deepseek-chat", Priority: 1, TimeoutMS: 40000, InputLimit: 40000, Enabled: true,
+			PromptTemplateID: "default", SystemPrompt: "audit", FlagThreshold: .4, BlockThreshold: .7,
+		}, {
+			ID: "backup", Adapter: AdapterConfidenceJSON, BaseURL: "https://backup.example.test/v1",
+			Model: "backup-chat", Priority: 1, TimeoutMS: 10000, InputLimit: 40000, Enabled: true,
 			PromptTemplateID: "default", SystemPrompt: "audit", FlagThreshold: .4, BlockThreshold: .7,
 		}},
 	}
@@ -91,6 +95,8 @@ func TestPromptDecisionCacheKeyCoversInputAndPolicy(t *testing.T) {
 		func(cfg *ActiveConfig) { cfg.Endpoints[0].Model = "deepseek-v4" },
 		func(cfg *ActiveConfig) { cfg.Endpoints[0].SystemPrompt = "different audit policy" },
 		func(cfg *ActiveConfig) { cfg.Endpoints[0].FlagThreshold = .3 },
+		func(cfg *ActiveConfig) { cfg.Endpoints[0].Priority = 2 },
+		func(cfg *ActiveConfig) { cfg.Endpoints[0], cfg.Endpoints[1] = cfg.Endpoints[1], cfg.Endpoints[0] },
 	}
 	for index, mutate := range mutations {
 		cfg := cloneActiveConfig(base)

@@ -372,7 +372,7 @@ func (m *ConfigManager) buildNextStorage(current storageConfig, req UpdateConfig
 	if req.BlockMessage != nil {
 		next.BlockMessage = strings.TrimSpace(*req.BlockMessage)
 	}
-	for _, endpoint := range req.Endpoints {
+	for endpointIndex, endpoint := range req.Endpoints {
 		baseURL, err := NormalizeBaseURL(endpoint.BaseURL)
 		if err != nil {
 			return storageConfig{}, err
@@ -382,8 +382,15 @@ func (m *ConfigManager) buildNextStorage(current storageConfig, req UpdateConfig
 		if adapter == "" && hadOld {
 			adapter = old.Adapter
 		}
+		priority := endpoint.Priority
+		if priority == 0 && hadOld {
+			priority = old.Priority
+		}
+		if priority == 0 {
+			priority = endpointIndex + 1
+		}
 		stored := StorageEndpoint{
-			ID: strings.TrimSpace(endpoint.ID), Name: strings.TrimSpace(endpoint.Name),
+			ID: strings.TrimSpace(endpoint.ID), Name: strings.TrimSpace(endpoint.Name), Priority: priority,
 			Protocol: strings.TrimSpace(endpoint.Protocol), Adapter: adapter, BaseURL: baseURL, Model: strings.TrimSpace(endpoint.Model),
 			TimeoutMS: endpoint.TimeoutMS, InputLimit: endpoint.InputLimit, Enabled: endpoint.Enabled,
 		}

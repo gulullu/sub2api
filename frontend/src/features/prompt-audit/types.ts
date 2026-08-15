@@ -31,6 +31,9 @@ export interface PromptAuditEndpoint {
   adapter?: PromptAuditAdapter
   base_url: string
   model: string
+  // Optional on the wire for configs saved before explicit failover priority.
+  // Drafts always normalize this to a positive integer.
+  priority?: number
   timeout_ms: number
   input_limit: number
   enabled: boolean
@@ -38,8 +41,9 @@ export interface PromptAuditEndpoint {
   token_status: 'configured' | 'missing' | 'invalid' | string
 }
 
-export interface PromptAuditEndpointDraft extends Omit<PromptAuditEndpoint, 'adapter'> {
+export interface PromptAuditEndpointDraft extends Omit<PromptAuditEndpoint, 'adapter' | 'priority'> {
   adapter: PromptAuditAdapter
+  priority: number
   token: string
   clear_token: boolean
 }
@@ -121,6 +125,7 @@ export interface PromptAuditUpdateRequest {
     adapter: PromptAuditAdapter
     base_url: string
     model: string
+    priority: number
     token?: string
     clear_token: boolean
     timeout_ms: number
@@ -161,6 +166,9 @@ export interface PromptGuardMetrics {
   timeouts: number
   failovers: number
   bulkhead_full: number
+  circuit_open?: number
+  circuit_skip?: number
+  circuit_reset?: number
   record_failed: number
   latency_avg_ms?: number
   latency_p50_ms?: number

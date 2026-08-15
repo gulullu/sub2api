@@ -20,14 +20,15 @@ type WorkerRuntime struct {
 }
 
 type Runner struct {
-	config  ConfigStore
-	repo    JobRepository
-	payload PayloadStore
-	scanner PromptScanner
-	metrics Metrics
-	clock   Clock
-	cache   *promptDecisionCache
-	runtime WorkerRuntime
+	config   ConfigStore
+	repo     JobRepository
+	payload  PayloadStore
+	scanner  PromptScanner
+	metrics  Metrics
+	clock    Clock
+	cache    *promptDecisionCache
+	failover *endpointFailoverExecutor
+	runtime  WorkerRuntime
 
 	mu     sync.Mutex
 	cancel context.CancelFunc
@@ -35,10 +36,12 @@ type Runner struct {
 }
 
 func NewRunner(config ConfigStore, repo JobRepository, payload PayloadStore, scanner PromptScanner, metrics Metrics) *Runner {
-	return &Runner{
+	runner := &Runner{
 		config: config, repo: repo, payload: payload, scanner: scanner, metrics: metrics, clock: realClock{},
 		cache: newPromptDecisionCache(defaultPromptDecisionCacheSize, defaultPromptDecisionCacheTTL),
 	}
+	runner.failover = newEndpointFailoverExecutor(scanner, metrics, nil, func() time.Time { return runner.clock.Now() }, nil)
+	return runner
 }
 
 func (r *Runner) Start(ctx context.Context) error {
@@ -166,13 +169,14 @@ func (r *Runner) processJob(ctx context.Context, workerID int, cfg ActiveConfig,
 	}
 	chunks := SplitRunes(scanText, minimumInputLimit(endpoints))
 	results := make([]*NormalizedResult, 0, len(chunks))
+	failoverState := newEndpointFailoverState()
 	for index, chunk := range chunks {
 		if err := r.repo.RefreshLease(ctx, job.ID, job.ClaimVersion, r.clock.Now()); err != nil {
 			return err
 		}
 		chunkStarted := r.clock.Now()
 		LogInfo(EventChunkStarted, mergeLogFields(baseFields, map[string]any{"worker_id": workerID, "chunk_index": index + 1, "chunk_total": len(chunks), "chunk_chars": len([]rune(chunk)), "input_chars": job.Snapshot.PromptLength, "input_limit": minimumInputLimit(endpoints), "status": "started"}))
-		result, scanErr := scanWithFailover(ctx, r.scanner, cfg.Scanners, endpoints, chunk, r.metrics)
+		result, scanErr := r.failover.scanChunk(ctx, cfg, endpoints, chunk, failoverState, baseFields)
 		if scanErr != nil {
 			LogWarn(EventChunkFailed, mergeLogFields(baseFields, map[string]any{
 				"worker_id": workerID, "chunk_index": index + 1, "chunk_total": len(chunks),
@@ -247,10 +251,6 @@ func (r *Runner) observeAsyncFailure(err error, latency time.Duration) {
 		kind = DecisionInvalid
 	}
 	r.metrics.Observe(kind, latency)
-	var guardErr *GuardError
-	if errors.As(err, &guardErr) && guardErr.Timeout {
-		r.metrics.IncTimeout()
-	}
 }
 
 func decisionKindForResult(result *NormalizedResult) DecisionKind {
@@ -339,31 +339,6 @@ func (r *Runner) setLastError(code, _ string) {
 	r.runtime.lastErrorCode = code
 	r.runtime.lastErrorMessage = message
 	r.runtime.lastErrorMu.Unlock()
-}
-
-func scanWithFailover(ctx context.Context, scanner PromptScanner, scanners []string, endpoints []ActiveEndpoint, chunk string, metrics Metrics) (*NormalizedResult, error) {
-	var lastErr error
-	for index, endpoint := range endpoints {
-		result, err := scanner.Scan(ctx, endpoint, chunk, scanners)
-		if err == nil && result != nil {
-			return result, nil
-		}
-		if err == nil {
-			err = &GuardError{Code: ErrorCodeInvalidResponse, Retryable: false}
-		}
-		lastErr = err
-		var guardErr *GuardError
-		if !errors.As(err, &guardErr) || !guardErr.Retryable {
-			return nil, err
-		}
-		if index < len(endpoints)-1 && metrics != nil {
-			metrics.IncFailover()
-		}
-	}
-	if lastErr == nil {
-		lastErr = &GuardError{Code: ErrorCodeUnavailable}
-	}
-	return nil, lastErr
 }
 
 func retryBackoff(attempt int) time.Duration {

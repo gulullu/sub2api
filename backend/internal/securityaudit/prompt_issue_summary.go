@@ -12,6 +12,21 @@ func BuildIssueSummaries(result NormalizedResult) []IssueSummary {
 	}
 	summaries := make([]IssueSummary, 0, len(resultCategories)+len(result.UnknownCategories))
 	for _, category := range resultCategories {
+		if category == auditUnavailableScannerID {
+			evidence := result.ScannerEvidence[category]
+			if evidence == "" {
+				evidence = "prompt audit dependency unavailable"
+			}
+			digest := sha256.Sum256([]byte(evidence))
+			summaries = append(summaries, IssueSummary{
+				Category: category, ScannerID: category, Title: "审计节点暂不可用",
+				Description: "远程审计节点全部不可用；请求已限制到配置的高风险账号池", Severity: string(result.RiskLevel),
+				SeverityLabel: riskLabelZH(result.RiskLevel), Action: string(result.Action),
+				ActionLabel: actionLabelZH(result.Action), Code: "prompt_audit_unavailable",
+				Score: result.ScannerScores[category], Evidence: evidence, EvidenceHash: hex.EncodeToString(digest[:]),
+			})
+			continue
+		}
 		if category == inputTooLargeScannerID {
 			evidence := RedactPreview(result.ScannerEvidence[category], 160)
 			if evidence == "" {

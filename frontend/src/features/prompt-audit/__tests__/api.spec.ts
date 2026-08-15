@@ -23,9 +23,10 @@ describe('Prompt Audit API', () => {
     client.post.mockResolvedValue({ data: { ok: true, token_applied: true } })
     const result = await promptAuditAPI.probeEndpoint({
       id: 'guard-1', name: 'Guard', protocol: 'openai_compatible', adapter: 'confidence_json', base_url: 'http://127.0.0.1:8000', model: 'guard',
-      token: 'api-canary-secret', clear_token: false, timeout_ms: 1000, input_limit: 1000, enabled: true, has_token: false, token_status: 'missing',
+      priority: 7, token: 'api-canary-secret', clear_token: false, timeout_ms: 1000, input_limit: 1000, enabled: true, has_token: false, token_status: 'missing',
     })
     expect(client.post).toHaveBeenCalledWith('/admin/prompt-audit/endpoints/probe', expect.objectContaining({ endpoint: expect.objectContaining({ token: 'api-canary-secret', adapter: 'confidence_json' }) }))
+    expect(client.post.mock.calls[0][1].endpoint).not.toHaveProperty('priority')
     expect(JSON.stringify(result)).not.toContain('api-canary-secret')
   })
 

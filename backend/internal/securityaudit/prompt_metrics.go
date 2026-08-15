@@ -19,6 +19,9 @@ type AtomicMetrics struct {
 	timeouts     atomic.Int64
 	failovers    atomic.Int64
 	bulkheadFull atomic.Int64
+	circuitOpen  atomic.Int64
+	circuitSkip  atomic.Int64
+	circuitReset atomic.Int64
 	recordFailed atomic.Int64
 	latencyTotal atomic.Int64
 	latencyMax   atomic.Int64
@@ -39,6 +42,7 @@ func (m *AtomicMetrics) Snapshot() GuardMetricsSnapshot {
 		Total: m.total.Load(), Allowed: m.allowed.Load(), Flagged: m.flagged.Load(),
 		Blocked: m.blocked.Load(), Unavailable: m.unavailable.Load(), Invalid: m.invalid.Load(),
 		Timeouts: m.timeouts.Load(), Failovers: m.failovers.Load(), BulkheadFull: m.bulkheadFull.Load(),
+		CircuitOpen: m.circuitOpen.Load(), CircuitSkip: m.circuitSkip.Load(), CircuitReset: m.circuitReset.Load(),
 		RecordFailed: m.recordFailed.Load(), LatencyCount: m.total.Load(), LatencyMaxMS: m.latencyMax.Load(),
 	}
 	if snapshot.LatencyCount > 0 {
@@ -136,6 +140,21 @@ func (m *AtomicMetrics) IncFailover() {
 func (m *AtomicMetrics) IncBulkheadFull() {
 	if m != nil {
 		m.bulkheadFull.Add(1)
+	}
+}
+func (m *AtomicMetrics) IncCircuitOpen() {
+	if m != nil {
+		m.circuitOpen.Add(1)
+	}
+}
+func (m *AtomicMetrics) IncCircuitSkip() {
+	if m != nil {
+		m.circuitSkip.Add(1)
+	}
+}
+func (m *AtomicMetrics) IncCircuitReset() {
+	if m != nil {
+		m.circuitReset.Add(1)
 	}
 }
 func (m *AtomicMetrics) IncRecordFailed() {

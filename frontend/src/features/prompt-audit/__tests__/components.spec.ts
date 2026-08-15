@@ -22,7 +22,7 @@ const PaginationStub = defineComponent({ props: ['total', 'page', 'pageSize'], e
 
 const endpoint = (): PromptAuditEndpointDraft => ({
   id: 'guard-1', name: 'Guard One', protocol: 'openai_compatible', base_url: 'http://127.0.0.1:8000',
-  adapter: 'qwen3guard', model: 'guard-model', timeout_ms: 3000, input_limit: 4000, enabled: true,
+  adapter: 'qwen3guard', model: 'guard-model', priority: 1, timeout_ms: 3000, input_limit: 4000, enabled: true,
   has_token: true, token_status: 'configured', token: '', clear_token: false,
 })
 
@@ -113,6 +113,49 @@ describe('Prompt Audit components', () => {
     await timeout.setValue('40000')
     await inputLimit.setValue('400000')
     expect(wrapper.get('[data-test="save-endpoint"]').attributes()).not.toHaveProperty('disabled')
+  })
+
+  it('shows stable failover order, accepts explicit priority, and warns without changing timeouts', async () => {
+    const endpoints = [
+      { ...endpoint(), id: 'priority-two-a', name: 'Priority Two A', priority: 2, timeout_ms: 25000 },
+      { ...endpoint(), id: 'priority-one', name: 'Priority One', priority: 1, timeout_ms: 20000 },
+      { ...endpoint(), id: 'priority-two-b', name: 'Priority Two B', priority: 2, timeout_ms: 5000 },
+      { ...endpoint(), id: 'disabled', name: 'Disabled', priority: 1, timeout_ms: 40000, enabled: false },
+    ]
+    const wrapper = mount(EndpointPool, {
+      props: { endpoints, probeResults: {}, probingIds: [] },
+      global: { stubs: { BaseDialog: DialogStub } },
+    })
+
+    expect(wrapper.findAll('article').map((item) => item.attributes('data-test'))).toEqual([
+      'endpoint-priority-one', 'endpoint-disabled', 'endpoint-priority-two-a', 'endpoint-priority-two-b',
+    ])
+    expect(wrapper.get('[data-test="failover-position-priority-one"]').attributes('data-position')).toBe('1')
+    expect(wrapper.get('[data-test="failover-position-priority-two-a"]').attributes('data-position')).toBe('2')
+    expect(wrapper.get('[data-test="failover-position-priority-two-b"]').attributes('data-position')).toBe('3')
+    expect(wrapper.get('[data-test="failover-summary"]').attributes('data-timeout-ms')).toBe('50000')
+    expect(wrapper.get('[data-test="failover-timeout-warning"]').exists()).toBe(true)
+    expect((wrapper.props('endpoints') as PromptAuditEndpointDraft[]).map((item) => item.timeout_ms)).toEqual([25000, 20000, 5000, 40000])
+
+    const edit = wrapper.get('[data-test="endpoint-priority-two-a"]').findAll('button').find((button) => button.text().includes('common.edit'))
+    await edit!.trigger('click')
+    const priority = wrapper.get<HTMLInputElement>('[data-test="endpoint-priority"]')
+    expect(priority.attributes('min')).toBe('1')
+    expect(priority.attributes('max')).toBe('1000')
+    await priority.setValue('1')
+    await wrapper.get('[data-test="save-endpoint"]').trigger('click')
+    const updated = wrapper.emitted('update:endpoints')?.at(-1)?.[0] as PromptAuditEndpointDraft[]
+    expect(updated[0].priority).toBe(1)
+    expect(updated.map((item) => item.id)).toEqual(endpoints.map((item) => item.id))
+  })
+
+  it('gives a new node the next available priority, capped at 1,000', async () => {
+    const wrapper = mount(EndpointPool, {
+      props: { endpoints: [{ ...endpoint(), priority: 1000 }], probeResults: {}, probingIds: [] },
+      global: { stubs: { BaseDialog: DialogStub } },
+    })
+    await wrapper.get('[data-test="add-endpoint"]').trigger('click')
+    expect(wrapper.get<HTMLInputElement>('[data-test="endpoint-priority"]').element.value).toBe('1000')
   })
 
   it('switches templates, copies built-ins into editable custom templates, and protects built-ins', async () => {
