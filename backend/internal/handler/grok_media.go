@@ -119,6 +119,12 @@ func (h *OpenAIGatewayHandler) handleGrokMedia(c *gin.Context, endpoint service.
 			h.errorResponse(c, http.StatusForbidden, "permission_error", service.ImageGenerationPermissionMessage())
 			return
 		}
+		if classification, reject := preflightModelAvailabilityFromGin(
+			c, h.gatewayService, apiKey.GroupID, routingModel, clientRequestedModel(c, requestModel), service.PlatformGrok,
+		); reject {
+			h.errorResponse(c, classification.Status, classification.ErrType, classification.Message)
+			return
+		}
 		if moderationBody := requestInfo.ModerationBody(); len(moderationBody) > 0 {
 			decision := h.checkSecurityAudit(c, reqLog, apiKey, subject, service.ContentModerationProtocolOpenAIImages, requestModel, moderationBody)
 			if decision != nil && !decision.AllowNextStage {
@@ -237,7 +243,7 @@ func (h *OpenAIGatewayHandler) handleGrokMedia(c *gin.Context, endpoint service.
 				return
 			}
 			if len(failedAccountIDs) == 0 {
-				cls := classifyNoAccountErrorFromGin(c, h.gatewayService, apiKey, requestModel, routingModel, service.PlatformGrok)
+				cls := classifyNoAccountErrorFromGin(c, h.gatewayService, apiKey, routingModel, clientRequestedModel(c, requestModel), service.PlatformGrok)
 				if !cls.ModelNotFound {
 					markOpsRoutingCapacityLimitedIfNoAvailable(c, err)
 				}
@@ -257,7 +263,7 @@ func (h *OpenAIGatewayHandler) handleGrokMedia(c *gin.Context, endpoint service.
 				h.errorResponse(c, http.StatusServiceUnavailable, "grok_media_no_eligible_account", "No eligible Grok media accounts")
 				return
 			}
-			cls := classifyNoAccountErrorFromGin(c, h.gatewayService, apiKey, requestModel, routingModel, service.PlatformGrok)
+			cls := classifyNoAccountErrorFromGin(c, h.gatewayService, apiKey, routingModel, clientRequestedModel(c, requestModel), service.PlatformGrok)
 			if !cls.ModelNotFound {
 				markOpsRoutingCapacityLimited(c)
 			}

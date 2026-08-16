@@ -10,6 +10,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/Wei-Shaw/sub2api/internal/config"
 	"github.com/Wei-Shaw/sub2api/internal/securityaudit"
 	middleware2 "github.com/Wei-Shaw/sub2api/internal/server/middleware"
 	"github.com/Wei-Shaw/sub2api/internal/service"
@@ -68,6 +69,24 @@ func blockingHandlerPromptEngine() *handlerPromptEngine {
 	}}
 }
 
+type batchImageModelPreflightRepo struct {
+	service.AccountRepository
+	accounts []service.Account
+}
+
+type batchImageNoopPublicRepo struct {
+	service.BatchImageRepository
+}
+
+func (r *batchImageModelPreflightRepo) ListModelAvailabilityCandidates(
+	context.Context,
+	*int64,
+	[]string,
+	bool,
+) ([]service.Account, error) {
+	return append([]service.Account(nil), r.accounts...), nil
+}
+
 func TestAsyncImagePromptGuardRunsBeforeTaskCreation(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 	store := &asyncImageMemoryStore{tasks: map[string]*service.ImageTaskRecord{}}
@@ -94,6 +113,32 @@ func TestAsyncImagePromptGuardRunsBeforeTaskCreation(t *testing.T) {
 	require.Equal(t, 1, evaluated)
 	require.Len(t, requests, 1)
 	require.Contains(t, string(requests[0].Body), "blocked async prompt")
+}
+
+func TestAsyncImageUnsupportedModelSkipsPromptAuditAndTaskCreation(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	store := &asyncImageMemoryStore{tasks: map[string]*service.ImageTaskRecord{}}
+	tasks := service.NewImageTaskServiceWithUploader(store, nil, time.Hour, time.Minute)
+	engine := blockingHandlerPromptEngine()
+	openAI := newResponsesModelPreflightHandler(t, []service.Account{{
+		ID: 1, Platform: service.PlatformOpenAI, Status: service.StatusActive, Schedulable: true,
+		Credentials: map[string]any{"model_mapping": map[string]any{"gpt-image-supported": "gpt-image-supported"}},
+	}}, engine)
+	h := &AsyncImageHandler{tasks: tasks, openAI: openAI}
+	h.execute = func(string, *gin.Context) { t.Error("unsupported request must not start detached execution") }
+
+	router := gin.New()
+	router.Use(securityAuditMediaTestMiddleware)
+	router.POST("/v1/images/generations/async", h.Submit)
+	request := httptest.NewRequest(http.MethodPost, "/v1/images/generations/async", strings.NewReader(`{"model":"gpt-image-unsupported","prompt":"must not be audited"}`))
+	request.Header.Set("Content-Type", "application/json")
+	recorder := httptest.NewRecorder()
+	router.ServeHTTP(recorder, request)
+
+	require.Equal(t, http.StatusNotFound, recorder.Code)
+	require.Empty(t, store.tasks)
+	evaluated, _, _ := engine.snapshot()
+	require.Zero(t, evaluated)
 }
 
 func TestAsyncImageSuccessfulPrecheckIsNotRepeatedByDetachedExecution(t *testing.T) {
@@ -168,6 +213,200 @@ func TestBatchImagePromptGuardRunsBeforePersistenceOrBilling(t *testing.T) {
 	require.Contains(t, string(requests[0].Body), "blocked batch prompt")
 	require.NotContains(t, string(requests[0].Body), "BINARY_CANARY")
 	require.NotContains(t, string(requests[0].Body), "QklOQVJZX0NBTkFSWQ==")
+}
+
+func TestBatchImageUnsupportedModelSkipsPromptAudit(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	engine := blockingHandlerPromptEngine()
+	openAI := &OpenAIGatewayHandler{securityAuditCoordinator: securityaudit.NewCoordinator(nil, engine)}
+	batchService := &service.BatchImagePublicService{
+		Repo: &batchImageNoopPublicRepo{},
+		AccountRepo: &batchImageModelPreflightRepo{accounts: []service.Account{{
+			ID: 1, Platform: service.PlatformGemini, Status: service.StatusActive, Schedulable: true,
+			Credentials: map[string]any{"model_mapping": map[string]any{"gemini-supported": "gemini-supported"}},
+		}}},
+		Config: &config.Config{BatchImage: config.BatchImageConfig{Enabled: true}},
+	}
+	h := &BatchImageHandler{service: batchService, openAI: openAI}
+	router := gin.New()
+	router.Use(func(c *gin.Context) {
+		groupID := int64(3)
+		user := &service.User{ID: 7}
+		c.Set(string(middleware2.ContextKeyAPIKey), &service.APIKey{
+			ID: 9, UserID: user.ID, User: user, GroupID: &groupID,
+			Group: &service.Group{ID: groupID, Platform: service.PlatformGemini, AllowBatchImageGeneration: true},
+		})
+		c.Set(string(middleware2.ContextKeyUser), middleware2.AuthSubject{UserID: user.ID, Concurrency: 1})
+		c.Next()
+	})
+	router.POST("/v1/images/batches", h.Submit)
+	request := httptest.NewRequest(http.MethodPost, "/v1/images/batches", strings.NewReader(`{
+		"model":"gemini-unsupported",
+		"items":[{"custom_id":"one","prompt":"must not be audited"}]
+	}`))
+	request.Header.Set("Content-Type", "application/json")
+	recorder := httptest.NewRecorder()
+	router.ServeHTTP(recorder, request)
+
+	require.Equal(t, http.StatusNotFound, recorder.Code)
+	require.Contains(t, recorder.Body.String(), "MODEL_NOT_FOUND")
+	evaluated, _, _ := engine.snapshot()
+	require.Zero(t, evaluated)
+}
+
+func TestBatchImageEmptyPersistentPoolSkipsPromptAuditWithCapacityError(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	engine := blockingHandlerPromptEngine()
+	openAI := &OpenAIGatewayHandler{securityAuditCoordinator: securityaudit.NewCoordinator(nil, engine)}
+	batchService := &service.BatchImagePublicService{
+		Repo:        &batchImageNoopPublicRepo{},
+		AccountRepo: &batchImageModelPreflightRepo{},
+		Config:      &config.Config{BatchImage: config.BatchImageConfig{Enabled: true}},
+	}
+	h := &BatchImageHandler{service: batchService, openAI: openAI}
+	router := gin.New()
+	router.Use(func(c *gin.Context) {
+		groupID := int64(3)
+		user := &service.User{ID: 7}
+		c.Set(string(middleware2.ContextKeyAPIKey), &service.APIKey{
+			ID: 9, UserID: user.ID, User: user, GroupID: &groupID,
+			Group: &service.Group{ID: groupID, Platform: service.PlatformGemini, AllowBatchImageGeneration: true},
+		})
+		c.Set(string(middleware2.ContextKeyUser), middleware2.AuthSubject{UserID: user.ID, Concurrency: 1})
+		c.Next()
+	})
+	router.POST("/v1/images/batches", h.Submit)
+	request := httptest.NewRequest(http.MethodPost, "/v1/images/batches", strings.NewReader(`{
+		"model":"gemini-any",
+		"items":[{"custom_id":"one","prompt":"must not be audited"}]
+	}`))
+	request.Header.Set("Content-Type", "application/json")
+	recorder := httptest.NewRecorder()
+	router.ServeHTTP(recorder, request)
+
+	require.Equal(t, http.StatusServiceUnavailable, recorder.Code)
+	require.Contains(t, recorder.Body.String(), "BATCH_IMAGE_NO_ACCOUNT_AVAILABLE")
+	evaluated, _, _ := engine.snapshot()
+	require.Zero(t, evaluated)
+}
+
+func TestBatchImageGroupGatePrecedesModelPreflight(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	for _, group := range []*service.Group{
+		{ID: 3, Platform: service.PlatformGemini, AllowBatchImageGeneration: false},
+		{ID: 3, Platform: service.PlatformOpenAI, AllowBatchImageGeneration: true},
+	} {
+		t.Run(group.Platform, func(t *testing.T) {
+			engine := blockingHandlerPromptEngine()
+			openAI := &OpenAIGatewayHandler{securityAuditCoordinator: securityaudit.NewCoordinator(nil, engine)}
+			batchService := &service.BatchImagePublicService{
+				Repo:        &batchImageNoopPublicRepo{},
+				AccountRepo: &batchImageModelPreflightRepo{},
+				Config:      &config.Config{BatchImage: config.BatchImageConfig{Enabled: true}},
+			}
+			h := &BatchImageHandler{service: batchService, openAI: openAI}
+			router := gin.New()
+			router.Use(func(c *gin.Context) {
+				user := &service.User{ID: 7}
+				c.Set(string(middleware2.ContextKeyAPIKey), &service.APIKey{
+					ID: 9, UserID: user.ID, User: user, GroupID: &group.ID, Group: group,
+				})
+				c.Set(string(middleware2.ContextKeyUser), middleware2.AuthSubject{UserID: user.ID, Concurrency: 1})
+				c.Next()
+			})
+			router.POST("/v1/images/batches", h.Submit)
+			request := httptest.NewRequest(http.MethodPost, "/v1/images/batches", strings.NewReader(`{
+				"model":"gemini-any",
+				"items":[{"custom_id":"one","prompt":"must not be audited"}]
+			}`))
+			request.Header.Set("Content-Type", "application/json")
+			recorder := httptest.NewRecorder()
+
+			router.ServeHTTP(recorder, request)
+
+			require.Equal(t, http.StatusForbidden, recorder.Code)
+			require.Contains(t, recorder.Body.String(), "BATCH_IMAGE_GROUP_DISABLED")
+			evaluated, _, _ := engine.snapshot()
+			require.Zero(t, evaluated)
+		})
+	}
+}
+
+func TestBatchImageDisabledFeaturePrecedesModelPreflight(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	engine := &handlerPromptEngine{mode: securityaudit.ModeBlocking, decision: &securityaudit.PromptDecision{
+		Kind: securityaudit.DecisionAllow, AllowNextStage: true,
+	}}
+	openAI := &OpenAIGatewayHandler{securityAuditCoordinator: securityaudit.NewCoordinator(nil, engine)}
+	batchService := &service.BatchImagePublicService{
+		Repo:        &batchImageNoopPublicRepo{},
+		AccountRepo: &batchImageModelPreflightRepo{},
+		Config:      &config.Config{BatchImage: config.BatchImageConfig{Enabled: false}},
+	}
+	h := &BatchImageHandler{service: batchService, openAI: openAI}
+	router := gin.New()
+	router.Use(func(c *gin.Context) {
+		groupID := int64(3)
+		user := &service.User{ID: 7}
+		c.Set(string(middleware2.ContextKeyAPIKey), &service.APIKey{
+			ID: 9, UserID: user.ID, User: user, GroupID: &groupID,
+			Group: &service.Group{ID: groupID, Platform: service.PlatformGemini, AllowBatchImageGeneration: true},
+		})
+		c.Set(string(middleware2.ContextKeyUser), middleware2.AuthSubject{UserID: user.ID, Concurrency: 1})
+		c.Next()
+	})
+	router.POST("/v1/images/batches", h.Submit)
+	request := httptest.NewRequest(http.MethodPost, "/v1/images/batches", strings.NewReader(`{
+		"model":"gemini-any",
+		"items":[{"custom_id":"one","prompt":"allowed audit"}]
+	}`))
+	request.Header.Set("Content-Type", "application/json")
+	recorder := httptest.NewRecorder()
+
+	router.ServeHTTP(recorder, request)
+
+	require.Equal(t, http.StatusNotFound, recorder.Code)
+	require.Contains(t, recorder.Body.String(), "BATCH_IMAGE_DISABLED")
+	require.NotContains(t, recorder.Body.String(), "MODEL_NOT_FOUND")
+	require.NotContains(t, recorder.Body.String(), "BATCH_IMAGE_NO_ACCOUNT_AVAILABLE")
+	evaluated, _, _ := engine.snapshot()
+	require.Zero(t, evaluated)
+}
+
+func TestBatchImageEmptyPromptValidationPrecedesModelPreflight(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	engine := blockingHandlerPromptEngine()
+	openAI := &OpenAIGatewayHandler{securityAuditCoordinator: securityaudit.NewCoordinator(nil, engine)}
+	batchService := &service.BatchImagePublicService{
+		Repo:        &batchImageNoopPublicRepo{},
+		AccountRepo: &batchImageModelPreflightRepo{},
+		Config:      &config.Config{BatchImage: config.BatchImageConfig{Enabled: true}},
+	}
+	h := &BatchImageHandler{service: batchService, openAI: openAI}
+	router := gin.New()
+	router.Use(func(c *gin.Context) {
+		groupID := int64(3)
+		user := &service.User{ID: 7}
+		c.Set(string(middleware2.ContextKeyAPIKey), &service.APIKey{
+			ID: 9, UserID: user.ID, User: user, GroupID: &groupID,
+			Group: &service.Group{ID: groupID, Platform: service.PlatformGemini, AllowBatchImageGeneration: true},
+		})
+		c.Set(string(middleware2.ContextKeyUser), middleware2.AuthSubject{UserID: user.ID, Concurrency: 1})
+		c.Next()
+	})
+	router.POST("/v1/images/batches", h.Submit)
+	request := httptest.NewRequest(http.MethodPost, "/v1/images/batches", strings.NewReader(`{
+		"model":"gemini-any",
+		"items":[{"custom_id":"one","prompt":"   "}]
+	}`))
+	request.Header.Set("Content-Type", "application/json")
+	recorder := httptest.NewRecorder()
+	router.ServeHTTP(recorder, request)
+
+	require.Equal(t, http.StatusBadRequest, recorder.Code)
+	require.Contains(t, recorder.Body.String(), "BATCH_IMAGE_INVALID_ITEMS")
+	evaluated, _, _ := engine.snapshot()
+	require.Zero(t, evaluated)
 }
 
 func TestSecurityAuditBlockingFailuresLeaveAllDownstreamCountersAtZero(t *testing.T) {

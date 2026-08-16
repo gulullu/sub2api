@@ -76,6 +76,27 @@ func (h *BatchImageHandler) checkSecurityAuditBeforeSubmit(c *gin.Context, req *
 	if len(items) == 0 {
 		return true
 	}
+	if h.service != nil {
+		preflightAllowed, err := h.service.ModelAvailabilityPreflightAllowedForSubmit(apiKey.GroupID, apiKey.Group)
+		if err != nil {
+			batchImageError(c, err)
+			return false
+		}
+		if !preflightAllowed {
+			return true
+		}
+	}
+	routingModel := strings.TrimSpace(req.Model)
+	if classification, reject := preflightModelAvailabilityFromGin(
+		c, h.service, apiKey.GroupID, routingModel, routingModel, service.PlatformGemini,
+	); reject {
+		code := "BATCH_IMAGE_NO_ACCOUNT_AVAILABLE"
+		if classification.ModelNotFound {
+			code = "MODEL_NOT_FOUND"
+		}
+		batchImageError(c, infraerrors.New(classification.Status, code, classification.Message))
+		return false
+	}
 	body, err := json.Marshal(map[string]any{"request": map[string]any{"items": items}})
 	if err != nil {
 		batchImageError(c, infraerrors.New(http.StatusBadRequest, "INVALID_BATCH_PROMPT", "batch prompts are invalid"))

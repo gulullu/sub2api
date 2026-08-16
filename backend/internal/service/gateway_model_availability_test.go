@@ -7,8 +7,33 @@ import (
 	"testing"
 	"time"
 
+	"github.com/Wei-Shaw/sub2api/internal/pkg/ctxkey"
 	"github.com/stretchr/testify/require"
 )
+
+type deadlineCapturingGroupRepo struct {
+	GroupRepository
+	group    *Group
+	deadline time.Time
+	block    bool
+}
+
+type panickingModelScopeGroupRepo struct {
+	GroupRepository
+}
+
+func (r *panickingModelScopeGroupRepo) GetByIDLite(context.Context, int64) (*Group, error) {
+	panic("model scope group lookup panic")
+}
+
+func (r *deadlineCapturingGroupRepo) GetByIDLite(ctx context.Context, _ int64) (*Group, error) {
+	r.deadline, _ = ctx.Deadline()
+	if r.block {
+		<-ctx.Done()
+		return nil, ctx.Err()
+	}
+	return r.group, nil
+}
 
 func TestDiagnoseModelAvailabilityForPlatform_NoModel_AlwaysAvailable(t *testing.T) {
 	repo := &mockAccountRepoForPlatform{accounts: nil, accountsByID: map[int64]*Account{}}
@@ -248,4 +273,240 @@ func TestDiagnoseModelAvailabilityForPlatform_WrongPlatformFiltersOut(t *testing
 
 	require.False(t, diag.HasAccountsInPool, "OpenAI route must not see Anthropic accounts in pool")
 	require.False(t, diag.HasModelSupport)
+}
+
+func TestGatewayModelAvailabilityPreflightSeparatesThinkingVariant(t *testing.T) {
+	groupID := int64(42)
+	repo := &mockAccountRepoForPlatform{
+		accounts: []Account{{
+			ID:            1,
+			Platform:      PlatformAntigravity,
+			Status:        StatusActive,
+			Schedulable:   true,
+			AccountGroups: []AccountGroup{{GroupID: groupID}},
+			Extra:         map[string]any{"mixed_scheduling": true},
+			Credentials: map[string]any{
+				"model_mapping": map[string]any{"claude-sonnet-4-5": "claude-sonnet-4-5"},
+			},
+		}},
+		accountsByID: map[int64]*Account{},
+	}
+	svc := &GatewayService{accountRepo: repo, cfg: testConfig()}
+
+	withoutThinking := context.WithValue(context.Background(), ctxkey.ThinkingEnabled, false)
+	withThinking := context.WithValue(context.Background(), ctxkey.ThinkingEnabled, true)
+	plain := svc.PreflightModelAvailabilityForPlatform(withoutThinking, &groupID, "claude-sonnet-4-5", PlatformAnthropic)
+	thinking := svc.PreflightModelAvailabilityForPlatform(withThinking, &groupID, "claude-sonnet-4-5", PlatformAnthropic)
+
+	require.True(t, plain.HasModelSupport)
+	require.False(t, thinking.HasModelSupport, "thinking mode changes the actual Antigravity scheduler model and must not reuse the plain cache entry")
+}
+
+func TestResolveModelAvailabilityScopeUsesClaudeCodeFallbackGroup(t *testing.T) {
+	primaryID, fallbackID := int64(10), int64(11)
+	svc := &GatewayService{groupRepo: &mockGroupRepoForGateway{groups: map[int64]*Group{
+		primaryID: &Group{
+			ID: primaryID, Platform: PlatformAnthropic, Status: StatusActive,
+			ClaudeCodeOnly: true, FallbackGroupID: &fallbackID,
+		},
+		fallbackID: &Group{
+			ID: fallbackID, Platform: PlatformGemini, Status: StatusActive,
+		},
+	}}}
+
+	scope, err := svc.ResolveModelAvailabilityScope(context.Background(), &primaryID, "gemini-3.1-pro")
+	require.NoError(t, err)
+	require.NotNil(t, scope.GroupID)
+	require.Equal(t, fallbackID, *scope.GroupID)
+	require.Equal(t, PlatformGemini, scope.Platform)
+	require.Equal(t, "gemini-3.1-pro", scope.RoutingModel)
+}
+
+func TestResolveModelAvailabilityScopeFallbackCompositeMirrorsSchedulerContext(t *testing.T) {
+	primaryID, fallbackID := int64(20), int64(21)
+	resolver := NewCompositeRouteResolver(compositeRouteRepoStub{routes: []CompositeModelRoute{{
+		ID: 1, GroupID: fallbackID, PublicModel: "public-alias", MatchType: CompositeRouteMatchExact,
+		TargetPlatform: PlatformGemini, UpstreamModel: "fallback-internal", Endpoint: CompositeRouteEndpointAny, Enabled: true,
+	}}})
+	svc := &GatewayService{
+		groupRepo: &mockGroupRepoForGateway{groups: map[int64]*Group{
+			primaryID: &Group{
+				ID: primaryID, Platform: PlatformComposite, Status: StatusActive,
+				ClaudeCodeOnly: true, FallbackGroupID: &fallbackID,
+			},
+			fallbackID: &Group{ID: fallbackID, Platform: PlatformComposite, Status: StatusActive},
+		}},
+		compositeResolver: resolver,
+	}
+	ctx := WithCompositeRouteDecision(context.Background(), CompositeRouteDecision{
+		Matched: true, GroupID: primaryID, PublicModel: "public-alias",
+		TargetPlatform: PlatformOpenAI, UpstreamModel: "original-internal",
+	})
+
+	scope, err := svc.ResolveModelAvailabilityScope(ctx, &primaryID, "original-internal")
+	require.NoError(t, err)
+	require.NotNil(t, scope.GroupID)
+	require.Equal(t, fallbackID, *scope.GroupID)
+	require.Equal(t, PlatformOpenAI, scope.Platform)
+	require.Equal(t, "original-internal", scope.RoutingModel)
+}
+
+func TestResolveModelAvailabilityScopeFallbackOrdinaryMirrorsLegacyScheduler(t *testing.T) {
+	primaryID, fallbackID := int64(30), int64(31)
+	svc := &GatewayService{groupRepo: &mockGroupRepoForGateway{groups: map[int64]*Group{
+		primaryID: &Group{
+			ID: primaryID, Platform: PlatformComposite, Status: StatusActive,
+			ClaudeCodeOnly: true, FallbackGroupID: &fallbackID,
+		},
+		fallbackID: &Group{ID: fallbackID, Platform: PlatformAnthropic, Status: StatusActive},
+	}}}
+	ctx := WithCompositeRouteDecision(context.Background(), CompositeRouteDecision{
+		Matched: true, GroupID: primaryID, PublicModel: "public-alias",
+		TargetPlatform: PlatformOpenAI, UpstreamModel: "original-internal",
+	})
+
+	scope, err := svc.ResolveModelAvailabilityScope(ctx, &primaryID, "original-internal")
+	require.NoError(t, err)
+	require.Equal(t, fallbackID, *scope.GroupID)
+	require.Equal(t, PlatformAnthropic, scope.Platform)
+	require.Equal(t, "original-internal", scope.RoutingModel)
+}
+
+func TestResolveModelAvailabilityScopeFallbackOrdinaryMirrorsLoadAwareScheduler(t *testing.T) {
+	primaryID, fallbackID := int64(40), int64(41)
+	svc := &GatewayService{
+		groupRepo: &mockGroupRepoForGateway{groups: map[int64]*Group{
+			primaryID: &Group{
+				ID: primaryID, Platform: PlatformComposite, Status: StatusActive,
+				ClaudeCodeOnly: true, FallbackGroupID: &fallbackID,
+			},
+			fallbackID: &Group{ID: fallbackID, Platform: PlatformAnthropic, Status: StatusActive},
+		}},
+		concurrencyService: NewConcurrencyService(nil),
+	}
+	ctx := WithCompositeRouteDecision(context.Background(), CompositeRouteDecision{
+		Matched: true, GroupID: primaryID, PublicModel: "public-alias",
+		TargetPlatform: PlatformOpenAI, UpstreamModel: "original-internal",
+	})
+
+	scope, err := svc.ResolveModelAvailabilityScope(ctx, &primaryID, "original-internal")
+	require.NoError(t, err)
+	require.Equal(t, fallbackID, *scope.GroupID)
+	require.Equal(t, PlatformOpenAI, scope.Platform)
+	require.Equal(t, "original-internal", scope.RoutingModel)
+}
+
+func TestResolveModelAvailabilityScopeFallbackCompositeMirrorsLegacySchedulerModel(t *testing.T) {
+	primaryID, fallbackID := int64(50), int64(51)
+	resolver := NewCompositeRouteResolver(compositeRouteRepoStub{routes: []CompositeModelRoute{{
+		ID: 1, GroupID: fallbackID, PublicModel: "public-alias", MatchType: CompositeRouteMatchExact,
+		TargetPlatform: PlatformGemini, UpstreamModel: "fallback-internal", Endpoint: CompositeRouteEndpointAny, Enabled: true,
+	}}})
+	svc := &GatewayService{
+		groupRepo: &mockGroupRepoForGateway{groups: map[int64]*Group{
+			primaryID: {
+				ID: primaryID, Platform: PlatformAnthropic, Status: StatusActive,
+				ClaudeCodeOnly: true, FallbackGroupID: &fallbackID,
+			},
+			fallbackID: {ID: fallbackID, Platform: PlatformComposite, Status: StatusActive},
+		}},
+		compositeResolver: resolver,
+	}
+
+	scope, err := svc.ResolveModelAvailabilityScope(context.Background(), &primaryID, "public-alias")
+	require.NoError(t, err)
+	require.Equal(t, fallbackID, *scope.GroupID)
+	require.Equal(t, PlatformGemini, scope.Platform)
+	require.Equal(t, "fallback-internal", scope.RoutingModel)
+}
+
+func TestResolveModelAvailabilityScopeFallbackCompositeMirrorsLoadAwareSchedulerModel(t *testing.T) {
+	primaryID, fallbackID := int64(60), int64(61)
+	resolver := NewCompositeRouteResolver(compositeRouteRepoStub{routes: []CompositeModelRoute{{
+		ID: 1, GroupID: fallbackID, PublicModel: "public-alias", MatchType: CompositeRouteMatchExact,
+		TargetPlatform: PlatformGemini, UpstreamModel: "fallback-internal", Endpoint: CompositeRouteEndpointAny, Enabled: true,
+	}}})
+	svc := &GatewayService{
+		groupRepo: &mockGroupRepoForGateway{groups: map[int64]*Group{
+			primaryID: {
+				ID: primaryID, Platform: PlatformAnthropic, Status: StatusActive,
+				ClaudeCodeOnly: true, FallbackGroupID: &fallbackID,
+			},
+			fallbackID: {ID: fallbackID, Platform: PlatformComposite, Status: StatusActive},
+		}},
+		compositeResolver:  resolver,
+		concurrencyService: NewConcurrencyService(nil),
+	}
+
+	scope, err := svc.ResolveModelAvailabilityScope(context.Background(), &primaryID, "public-alias")
+	require.NoError(t, err)
+	require.Equal(t, fallbackID, *scope.GroupID)
+	require.Equal(t, PlatformGemini, scope.Platform)
+	require.Equal(t, "public-alias", scope.RoutingModel)
+}
+
+func TestResolveModelAvailabilityScopeBoundsGroupLookup(t *testing.T) {
+	groupID := int64(70)
+	repo := &deadlineCapturingGroupRepo{group: &Group{ID: groupID, Platform: PlatformAnthropic, Status: StatusActive}}
+	svc := &GatewayService{groupRepo: repo}
+	started := time.Now()
+
+	_, err := svc.ResolveModelAvailabilityScope(context.Background(), &groupID, "claude-test")
+
+	require.NoError(t, err)
+	require.False(t, repo.deadline.IsZero())
+	remaining := repo.deadline.Sub(started)
+	require.Greater(t, remaining, 350*time.Millisecond)
+	require.LessOrEqual(t, remaining, modelAvailabilityPreflightLoadTimeout+50*time.Millisecond)
+}
+
+func TestResolveModelAvailabilityScopePreservesShorterCallerDeadline(t *testing.T) {
+	groupID := int64(71)
+	repo := &deadlineCapturingGroupRepo{group: &Group{ID: groupID, Platform: PlatformAnthropic, Status: StatusActive}}
+	svc := &GatewayService{groupRepo: repo}
+	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Millisecond)
+	defer cancel()
+	started := time.Now()
+
+	_, err := svc.ResolveModelAvailabilityScope(ctx, &groupID, "claude-test")
+
+	require.NoError(t, err)
+	require.False(t, repo.deadline.IsZero())
+	require.LessOrEqual(t, repo.deadline.Sub(started), 50*time.Millisecond)
+}
+
+func TestResolveModelAvailabilityScopeTimeoutFailsPromptly(t *testing.T) {
+	groupID := int64(72)
+	repo := &deadlineCapturingGroupRepo{block: true}
+	svc := &GatewayService{groupRepo: repo}
+	started := time.Now()
+
+	_, err := svc.ResolveModelAvailabilityScope(context.Background(), &groupID, "claude-test")
+
+	require.ErrorIs(t, err, context.DeadlineExceeded)
+	require.Less(t, time.Since(started), 750*time.Millisecond)
+}
+
+func TestResolveModelAvailabilityScopePanicBecomesFailOpenError(t *testing.T) {
+	groupID := int64(73)
+	svc := &GatewayService{groupRepo: &panickingModelScopeGroupRepo{}}
+
+	require.NotPanics(t, func() {
+		_, err := svc.ResolveModelAvailabilityScope(context.Background(), &groupID, "claude-test")
+		require.Error(t, err)
+		require.Contains(t, err.Error(), "resolve model availability scope")
+	})
+}
+
+func TestResolveModelAvailabilityScopeMissingCompositeResolverBecomesFailOpenError(t *testing.T) {
+	groupID := int64(74)
+	svc := &GatewayService{groupRepo: &deadlineCapturingGroupRepo{
+		group: &Group{ID: groupID, Platform: PlatformComposite, Status: StatusActive},
+	}}
+
+	require.NotPanics(t, func() {
+		_, err := svc.ResolveModelAvailabilityScope(context.Background(), &groupID, "unknown-public-model")
+		require.Error(t, err)
+		require.Contains(t, err.Error(), "composite target platform unknown")
+	})
 }

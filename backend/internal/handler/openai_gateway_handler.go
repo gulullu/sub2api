@@ -364,6 +364,14 @@ func (h *OpenAIGatewayHandler) Responses(c *gin.Context) {
 
 	setOpsRequestContext(c, reqModel, reqStream)
 	setOpsEndpointContext(c, "", int16(service.RequestTypeFromLegacy(reqStream, false)))
+	requestPlatform := openAICompatibleRequestPlatform(c.Request.Context(), apiKey)
+
+	if classification, reject := preflightModelAvailabilityFromGin(
+		c, h.gatewayService, apiKey.GroupID, reqModel, clientRequestedModel(c, reqModel), requestPlatform,
+	); reject {
+		h.errorResponse(c, classification.Status, classification.ErrType, classification.Message)
+		return
+	}
 
 	if decision := h.checkSecurityAudit(c, reqLog, apiKey, subject, service.ContentModerationProtocolOpenAIResponses, reqModel, body); decision != nil && !decision.AllowNextStage {
 		h.openAISecurityAuditError(c, decision)
@@ -416,7 +424,6 @@ func (h *OpenAIGatewayHandler) Responses(c *gin.Context) {
 
 	// Get subscription info (may be nil)
 	subscription, _ := middleware2.GetSubscriptionFromContext(c)
-	requestPlatform := openAICompatibleRequestPlatform(c.Request.Context(), apiKey)
 
 	service.SetOpsLatencyMs(c, service.OpsAuthLatencyMsKey, time.Since(requestStart).Milliseconds())
 	routingStart := time.Now()
@@ -982,6 +989,17 @@ func (h *OpenAIGatewayHandler) Messages(c *gin.Context) {
 
 	setOpsRequestContext(c, reqModel, reqStream)
 	setOpsEndpointContext(c, "", int16(service.RequestTypeFromLegacy(reqStream, false)))
+	requestPlatform := openAICompatibleRequestPlatform(c.Request.Context(), apiKey)
+	preflightRoutingModel := routingModel
+	if preferredMappedModel != "" {
+		preflightRoutingModel = preferredMappedModel
+	}
+	if classification, reject := preflightModelAvailabilityFromGin(
+		c, h.gatewayService, apiKey.GroupID, preflightRoutingModel, clientRequestedModel(c, reqModel), requestPlatform,
+	); reject {
+		h.anthropicErrorResponse(c, classification.Status, classification.ErrType, classification.Message)
+		return
+	}
 
 	if decision := h.checkSecurityAudit(c, reqLog, apiKey, subject, service.ContentModerationProtocolAnthropicMessages, reqModel, body); decision != nil && !decision.AllowNextStage {
 		h.anthropicSecurityAuditError(c, decision)
@@ -998,8 +1016,6 @@ func (h *OpenAIGatewayHandler) Messages(c *gin.Context) {
 	}
 
 	subscription, _ := middleware2.GetSubscriptionFromContext(c)
-	requestPlatform := openAICompatibleRequestPlatform(c.Request.Context(), apiKey)
-
 	service.SetOpsLatencyMs(c, service.OpsAuthLatencyMsKey, time.Since(requestStart).Milliseconds())
 	routingStart := time.Now()
 

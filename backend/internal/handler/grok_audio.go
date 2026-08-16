@@ -147,12 +147,24 @@ func (h *OpenAIGatewayHandler) GrokVoice(c *gin.Context, endpoint string) {
 		h.errorResponse(c, status, code, message)
 		return
 	}
-
 	body, err := readGrokVoiceGatewayBody(c)
 	if err != nil {
 		h.errorResponse(c, http.StatusBadRequest, "invalid_request_error", err.Error())
 		return
 	}
+	if endpoint == "tts" {
+		if err := validateGrokTTSRequestBody(body); err != nil {
+			h.errorResponse(c, http.StatusBadRequest, "invalid_request_error", err.Error())
+			return
+		}
+		if classification, reject := preflightModelAvailabilityFromGin(
+			c, h.gatewayService, apiKey.GroupID, "grok-4.5", "grok-4.5", service.PlatformGrok,
+		); reject {
+			h.errorResponse(c, classification.Status, classification.ErrType, classification.Message)
+			return
+		}
+	}
+
 	if endpoint == "tts" {
 		subject, _ := middleware2.GetAuthSubjectFromContext(c)
 		reqLog := requestLogger(c, "handler.openai_gateway.grok_voice", zap.String("endpoint", endpoint))
@@ -342,4 +354,15 @@ func extractGrokTTSInputText(body []byte) string {
 		}
 	}
 	return ""
+}
+
+func validateGrokTTSRequestBody(body []byte) error {
+	if len(body) == 0 {
+		return errors.New("request body is required")
+	}
+	var payload map[string]any
+	if err := json.Unmarshal(body, &payload); err != nil || payload == nil {
+		return errors.New("request body must be a valid JSON object")
+	}
+	return nil
 }

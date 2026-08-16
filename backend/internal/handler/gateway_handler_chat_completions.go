@@ -105,6 +105,16 @@ func (h *GatewayHandler) ChatCompletions(c *gin.Context) {
 			"This group is restricted to Claude Code clients (/v1/messages only)")
 		return
 	}
+	requestPlatform := effectiveAPIKeyPlatform(c, apiKey)
+	if scope, scopeErr := h.gatewayService.ResolveModelAvailabilityScope(c.Request.Context(), apiKey.GroupID, reqModel); scopeErr == nil {
+		requestPlatform = scope.Platform
+		if classification, reject := preflightModelAvailabilityFromGin(
+			c, h.gatewayService, scope.GroupID, scope.RoutingModel, clientRequestedModel(c, reqModel), scope.Platform,
+		); reject {
+			h.chatCompletionsErrorResponse(c, classification.Status, classification.ErrType, classification.Message)
+			return
+		}
+	}
 
 	if decision := h.checkSecurityAudit(c, reqLog, apiKey, subject, service.ContentModerationProtocolOpenAIChat, reqModel, body); decision != nil && !decision.AllowNextStage {
 		h.openAISecurityAuditError(c, decision)
@@ -154,7 +164,7 @@ func (h *GatewayHandler) ChatCompletions(c *gin.Context) {
 		APIKeyID:  apiKey.ID,
 	}
 	sessionHash := h.gatewayService.GenerateSessionHash(parsedReq)
-	groupPlatform := effectiveAPIKeyPlatform(c, apiKey)
+	groupPlatform := requestPlatform
 	selectionSessionHash := sessionHash
 	if groupPlatform == service.PlatformGemini && selectionSessionHash != "" {
 		selectionSessionHash = "gemini:" + selectionSessionHash

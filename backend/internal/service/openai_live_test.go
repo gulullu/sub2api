@@ -94,6 +94,89 @@ func TestValidateLiveCallRequestDoesNotRequireDelegation(t *testing.T) {
 	require.NotContains(t, string(request.Session), "delegation")
 }
 
+func TestLiveCallRequestedModelFeedsLiveSchedulerMapping(t *testing.T) {
+	request := &LiveCallRequest{
+		SDP:     "v=0\r\n",
+		Session: json.RawMessage(`{"model":"  gpt-live-target  ","instructions":"hello"}`),
+	}
+	requestedModel := LiveCallRequestedModel(request)
+	require.Equal(t, "gpt-live-target", requestedModel)
+	require.Empty(t, LiveCallRequestedModel(&LiveCallRequest{Session: json.RawMessage(`{"instructions":"hello"}`)}))
+	for _, session := range []string{
+		`{"model":123}`,
+		`{"model":true}`,
+		`{"model":{"name":"gpt-live-target"}}`,
+		`{"model":null}`,
+	} {
+		require.Empty(t, LiveCallRequestedModel(&LiveCallRequest{Session: json.RawMessage(session)}))
+	}
+
+	groupID := int64(10130)
+	accounts := []Account{
+		{
+			ID: 39001, Platform: PlatformOpenAI, Type: AccountTypeOAuth,
+			Status: StatusActive, Schedulable: true, Concurrency: 1, Priority: 10,
+			Credentials: map[string]any{"model_mapping": map[string]any{"some-other-live-model": "some-other-live-model"}},
+		},
+		{
+			ID: 39002, Platform: PlatformOpenAI, Type: AccountTypeOAuth,
+			Status: StatusActive, Schedulable: true, Concurrency: 1, Priority: 0,
+			Credentials: map[string]any{"model_mapping": map[string]any{"gpt-live-target": "gpt-live-target"}},
+		},
+	}
+	cfg := &config.Config{}
+	cfg.Gateway.Scheduling.LoadBatchEnabled = false
+	svc := &OpenAIGatewayService{
+		accountRepo:        schedulerTestOpenAIAccountRepo{accounts: accounts},
+		cache:              &schedulerTestGatewayCache{},
+		cfg:                cfg,
+		concurrencyService: NewConcurrencyService(schedulerTestConcurrencyCache{}),
+	}
+
+	selection, _, err := svc.SelectAccountWithSchedulerForCapability(
+		context.Background(),
+		&groupID,
+		"",
+		"",
+		requestedModel,
+		nil,
+		OpenAIUpstreamTransportHTTPSSE,
+		OpenAIEndpointCapabilityLive,
+		false,
+		false,
+		false,
+	)
+	require.NoError(t, err)
+	require.NotNil(t, selection)
+	require.NotNil(t, selection.Account)
+	require.Equal(t, int64(39002), selection.Account.ID)
+	if selection.ReleaseFunc != nil {
+		selection.ReleaseFunc()
+	}
+
+	nonStringModel := LiveCallRequestedModel(&LiveCallRequest{Session: json.RawMessage(`{"model":123}`)})
+	require.Empty(t, nonStringModel)
+	selection, _, err = svc.SelectAccountWithSchedulerForCapability(
+		context.Background(),
+		&groupID,
+		"",
+		"",
+		nonStringModel,
+		nil,
+		OpenAIUpstreamTransportHTTPSSE,
+		OpenAIEndpointCapabilityLive,
+		false,
+		false,
+		false,
+	)
+	require.NoError(t, err)
+	require.NotNil(t, selection)
+	require.NotNil(t, selection.Account)
+	if selection.ReleaseFunc != nil {
+		selection.ReleaseFunc()
+	}
+}
+
 func TestCreateUpstreamLiveCallPreservesSession(t *testing.T) {
 	upstream := &liveHTTPUpstreamStub{}
 	service := &OpenAIGatewayService{

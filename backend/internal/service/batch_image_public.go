@@ -10,6 +10,7 @@ import (
 	"sort"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/Wei-Shaw/sub2api/internal/config"
@@ -37,6 +38,10 @@ type BatchImageAccountSelectionRepository interface {
 	GetByID(ctx context.Context, id int64) (*Account, error)
 	ListSchedulableByPlatform(ctx context.Context, platform string) ([]Account, error)
 	ListSchedulableByGroupIDAndPlatform(ctx context.Context, groupID int64, platform string) ([]Account, error)
+}
+
+type batchImageModelAvailabilityRepository interface {
+	ListModelAvailabilityCandidates(ctx context.Context, groupID *int64, platforms []string, includeGrouped bool) ([]Account, error)
 }
 
 type BatchImageGroupPricingRepository interface {
@@ -82,16 +87,71 @@ type BatchImageOwner struct {
 }
 
 type BatchImagePublicService struct {
-	Repo              BatchImageRepository
-	AccountRepo       BatchImageAccountSelectionRepository
-	GroupRepo         BatchImageGroupPricingRepository
-	UserGroupRateRepo BatchImageUserGroupRateRepository
-	Queue             BatchImageQueue
-	ProviderRegistry  *BatchImageProviderRegistry
-	Pricing           BatchImagePricingResolver
-	BillingRepo       UsageBillingRepository
-	AuthCache         APIKeyAuthCacheInvalidator
-	Config            *config.Config
+	Repo                       BatchImageRepository
+	AccountRepo                BatchImageAccountSelectionRepository
+	GroupRepo                  BatchImageGroupPricingRepository
+	UserGroupRateRepo          BatchImageUserGroupRateRepository
+	Queue                      BatchImageQueue
+	ProviderRegistry           *BatchImageProviderRegistry
+	Pricing                    BatchImagePricingResolver
+	BillingRepo                UsageBillingRepository
+	AuthCache                  APIKeyAuthCacheInvalidator
+	Config                     *config.Config
+	modelAvailabilityCacheOnce sync.Once
+	modelAvailabilityCache     *modelAvailabilityPreflightCache
+}
+
+func (s *BatchImagePublicService) getModelAvailabilityPreflightCache() *modelAvailabilityPreflightCache {
+	s.modelAvailabilityCacheOnce.Do(func() {
+		s.modelAvailabilityCache = newModelAvailabilityPreflightCache()
+	})
+	return s.modelAvailabilityCache
+}
+
+// PreflightModelAvailabilityForPlatform applies the shared bounded pre-audit
+// lookup to batch-image submissions. Batch providers currently schedule only
+// Gemini-platform accounts; provider/capability constraints remain downstream
+// and therefore cannot create a false structural 404 here.
+func (s *BatchImagePublicService) PreflightModelAvailabilityForPlatform(
+	ctx context.Context,
+	groupID *int64,
+	requestedModel string,
+	platform string,
+) ModelAvailabilityDiagnosis {
+	if s == nil || s.AccountRepo == nil || platform != PlatformGemini || strings.TrimSpace(requestedModel) == "" {
+		return modelAvailabilitySafeDiagnosis()
+	}
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	if len(requestedModel) > modelAvailabilityPreflightMaxModelBytes {
+		return modelAvailabilitySafeDiagnosis()
+	}
+	availabilityRepo, ok := s.AccountRepo.(batchImageModelAvailabilityRepository)
+	if !ok {
+		return modelAvailabilitySafeDiagnosis()
+	}
+	queryGroupID := groupID
+	if queryGroupID != nil && *queryGroupID <= 0 {
+		queryGroupID = nil
+	}
+	includeGrouped := queryGroupID == nil
+	key := modelAvailabilityPreflightKeyFor(queryGroupID, includeGrouped, requestedModel, "batch:"+platform)
+	return s.getModelAvailabilityPreflightCache().diagnose(ctx, key, func(loadCtx context.Context) (ModelAvailabilityDiagnosis, error) {
+		accounts, err := availabilityRepo.ListModelAvailabilityCandidates(loadCtx, queryGroupID, []string{platform}, includeGrouped)
+		if err != nil {
+			return ModelAvailabilityDiagnosis{}, err
+		}
+		diagnosis := ModelAvailabilityDiagnosis{}
+		for i := range accounts {
+			diagnosis.HasAccountsInPool = true
+			if accounts[i].IsModelSupported(requestedModel) {
+				diagnosis.HasModelSupport = true
+				break
+			}
+		}
+		return diagnosis, nil
+	})
 }
 
 type BatchImagePricingSnapshot struct {
@@ -990,10 +1050,33 @@ func (s *BatchImagePublicService) ensureGroupAllowsBatchImage(ctx context.Contex
 	if err != nil || group == nil {
 		return ErrBatchImageSettlementPricingMissing
 	}
-	if !group.AllowBatchImageGeneration {
-		return ErrBatchImageGroupDisabled
+	return batchImageGroupAccessError(group)
+}
+
+// ModelAvailabilityPreflightAllowedForSubmit preserves Submit's feature and
+// group gates before the handler performs the optional model-availability
+// lookup. A disabled or incompletely wired service is deliberately deferred to
+// Submit so its existing BATCH_IMAGE_DISABLED response remains authoritative.
+// When an explicit group is unavailable in the auth context, the lookup also
+// fails open and Submit performs its normal repository-backed group check.
+func (s *BatchImagePublicService) ModelAvailabilityPreflightAllowedForSubmit(groupID *int64, group *Group) (bool, error) {
+	if s == nil || !s.enabled() {
+		return false, nil
 	}
-	if group.Platform != PlatformGemini {
+	if groupID == nil || *groupID <= 0 {
+		return true, nil
+	}
+	if group == nil {
+		return false, nil
+	}
+	if err := batchImageGroupAccessError(group); err != nil {
+		return false, err
+	}
+	return true, nil
+}
+
+func batchImageGroupAccessError(group *Group) error {
+	if group == nil || !group.AllowBatchImageGeneration || group.Platform != PlatformGemini {
 		return ErrBatchImageGroupDisabled
 	}
 	return nil

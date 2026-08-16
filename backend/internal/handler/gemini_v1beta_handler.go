@@ -181,6 +181,7 @@ func (h *GatewayHandler) GeminiV1BetaModels(c *gin.Context) {
 		googleError(c, http.StatusBadRequest, "Invalid model in URL")
 		return
 	}
+	displayModel := clientRequestedModel(c, modelName)
 	if resolvedModel, ok := service.ResolvedUpstreamModelFromContext(c.Request.Context()); ok && strings.TrimSpace(resolvedModel) != "" {
 		modelName = strings.TrimSpace(resolvedModel)
 	}
@@ -207,16 +208,25 @@ func (h *GatewayHandler) GeminiV1BetaModels(c *gin.Context) {
 	pricingCtx, pricingAt := service.WithGatewayTokenRequestPricing(c.Request.Context())
 	c.Request = c.Request.WithContext(pricingCtx)
 
-	if decision := h.checkSecurityAudit(c, reqLog, apiKey, authSubject, service.ContentModerationProtocolGemini, modelName, body); decision != nil && !decision.AllowNextStage {
-		googleSecurityAuditError(c, decision)
-		return
-	}
-
-	// 解析渠道级模型映射
+	// Resolve the same channel-mapped model and effective fallback/platform
+	// scope that account selection will use before spending an audit request.
 	channelMapping, _ := h.gatewayService.ResolveChannelMappingAndRestrict(c.Request.Context(), apiKey.GroupID, modelName)
 	reqModel := modelName // 保存映射前的原始模型名
 	if channelMapping.Mapped {
 		modelName = channelMapping.MappedModel
+	}
+	if scope, scopeErr := h.gatewayService.ResolveModelAvailabilityScope(c.Request.Context(), apiKey.GroupID, modelName); scopeErr == nil {
+		if classification, reject := preflightModelAvailabilityFromGin(
+			c, h.gatewayService, scope.GroupID, scope.RoutingModel, displayModel, scope.Platform,
+		); reject {
+			googleError(c, classification.Status, classification.Message)
+			return
+		}
+	}
+
+	if decision := h.checkSecurityAudit(c, reqLog, apiKey, authSubject, service.ContentModerationProtocolGemini, reqModel, body); decision != nil && !decision.AllowNextStage {
+		googleSecurityAuditError(c, decision)
+		return
 	}
 
 	// Get subscription (may be nil)
@@ -374,7 +384,11 @@ func (h *GatewayHandler) GeminiV1BetaModels(c *gin.Context) {
 				return
 			}
 			if len(fs.FailedAccountIDs) == 0 {
-				cls := classifyNoAccountErrorFromGin(c, h.gatewayService, apiKey, modelName, modelName, service.PlatformGemini)
+				diagnosisPlatform := effectiveAPIKeyPlatform(c, apiKey)
+				if forcedPlatform, ok := middleware.GetForcePlatformFromContext(c); ok {
+					diagnosisPlatform = forcedPlatform
+				}
+				cls := classifyNoAccountErrorFromGin(c, h.gatewayService, apiKey, modelName, displayModel, diagnosisPlatform)
 				if !cls.ModelNotFound {
 					markOpsRoutingCapacityLimitedIfNoAvailable(c, err)
 				}

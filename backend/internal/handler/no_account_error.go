@@ -37,10 +37,82 @@ func isPromptRiskRouteSelectionError(ctx context.Context, err error) bool {
 //     after a backoff can plausibly succeed (or, in the empty-pool case, the
 //     operator may be in the middle of adding accounts).
 type noAccountErrorClassification struct {
-	Status        int
-	ErrType       string
-	Message       string
-	ModelNotFound bool // true when this is a 404 model_not_found classification
+	Status                 int
+	ErrType                string
+	Message                string
+	ModelNotFound          bool // true when this is a 404 model_not_found classification
+	RoutingCapacityLimited bool // true when the persistent routing pool is conclusively empty
+}
+
+func transientNoAccountErrorClassification() noAccountErrorClassification {
+	return noAccountErrorClassification{
+		Status:  http.StatusServiceUnavailable,
+		ErrType: "api_error",
+		Message: "Service temporarily unavailable",
+	}
+}
+
+// classifyModelAvailabilityDiagnosis converts a completed persistent-pool
+// diagnosis into the existing client response. Keeping this pure lets the
+// Responses preflight and the post-selection error path share exactly the
+// same result-to-response semantics without coupling this helper to storage.
+func classifyModelAvailabilityDiagnosis(
+	result service.ModelAvailabilityDiagnosis,
+	displayModel string,
+) noAccountErrorClassification {
+	if !result.HasAccountsInPool {
+		classification := transientNoAccountErrorClassification()
+		classification.RoutingCapacityLimited = true
+		return classification
+	}
+	if result.HasAccountsInPool && !result.HasModelSupport {
+		return noAccountErrorClassification{
+			Status:        http.StatusNotFound,
+			ErrType:       "model_not_found",
+			Message:       fmt.Sprintf("Model %q is not supported by any configured account in this group", strings.TrimSpace(displayModel)),
+			ModelNotFound: true,
+		}
+	}
+	return transientNoAccountErrorClassification()
+}
+
+// preflightModelAvailabilityFromGin performs the bounded structural check used
+// immediately before Prompt Audit. A conclusive empty persistent pool returns
+// the route's existing temporary-capacity 503, while a non-empty pool with no
+// model support returns 404. Repository failures, timeouts, overload, caller
+// cancellation, and other uncertain results fail open into audit/scheduling.
+func preflightModelAvailabilityFromGin(
+	c *gin.Context,
+	preflighter service.ModelAvailabilityPreflighter,
+	groupID *int64,
+	routingModel string,
+	displayModel string,
+	platform string,
+) (noAccountErrorClassification, bool) {
+	fallback := transientNoAccountErrorClassification()
+	if preflighter == nil || strings.TrimSpace(routingModel) == "" || strings.TrimSpace(platform) == "" {
+		return fallback, false
+	}
+	ctx := context.Background()
+	if c != nil && c.Request != nil {
+		ctx = c.Request.Context()
+	}
+	if strings.TrimSpace(displayModel) == "" {
+		displayModel = routingModel
+	}
+	classification := classifyModelAvailabilityDiagnosis(
+		preflighter.PreflightModelAvailabilityForPlatform(ctx, groupID, routingModel, platform),
+		displayModel,
+	)
+	if !classification.ModelNotFound && !classification.RoutingCapacityLimited {
+		return classification, false
+	}
+	if classification.ModelNotFound {
+		service.MarkOpsClientBusinessLimited(c, opsClientBusinessLimitedReasonLocalModelUnsupported)
+	} else {
+		markOpsRoutingCapacityLimited(c)
+	}
+	return classification, true
 }
 
 // classifyNoAccountError decides between 404 model_not_found and 503
@@ -75,11 +147,7 @@ func classifyNoAccountError(
 	displayModel string,
 	platform string,
 ) noAccountErrorClassification {
-	fallback := noAccountErrorClassification{
-		Status:  http.StatusServiceUnavailable,
-		ErrType: "api_error",
-		Message: "Service temporarily unavailable",
-	}
+	fallback := transientNoAccountErrorClassification()
 	// Prompt-audit risk routing is a server-side hard pool. Its exhaustion is
 	// temporary routing capacity, never evidence that the client model is
 	// globally unsupported by the group, so it must remain a retryable 503.
@@ -97,15 +165,7 @@ func classifyNoAccountError(
 	}
 
 	result := diag.DiagnoseModelAvailabilityForPlatform(ctx, apiKey.GroupID, routingModel, platform)
-	if result.HasAccountsInPool && !result.HasModelSupport {
-		return noAccountErrorClassification{
-			Status:        http.StatusNotFound,
-			ErrType:       "model_not_found",
-			Message:       fmt.Sprintf("Model %q is not supported by any configured account in this group", displayModel),
-			ModelNotFound: true,
-		}
-	}
-	return fallback
+	return classifyModelAvailabilityDiagnosis(result, displayModel)
 }
 
 // classifyNoAccountErrorFromGin is a thin wrapper that forwards the gin

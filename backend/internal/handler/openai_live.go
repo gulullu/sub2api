@@ -14,7 +14,6 @@ import (
 	"github.com/Wei-Shaw/sub2api/internal/service"
 	coderws "github.com/coder/websocket"
 	"github.com/gin-gonic/gin"
-	"github.com/tidwall/gjson"
 	"go.uber.org/zap"
 )
 
@@ -42,7 +41,7 @@ func (h *OpenAIGatewayHandler) Live(c *gin.Context) {
 		h.errorResponse(c, http.StatusBadRequest, "invalid_request_error", err.Error())
 		return
 	}
-	model := strings.TrimSpace(gjson.GetBytes(request.Session, "model").String())
+	model := service.LiveCallRequestedModel(request)
 	reqLog := requestLogger(
 		c,
 		"handler.openai_gateway.live",
@@ -50,6 +49,14 @@ func (h *OpenAIGatewayHandler) Live(c *gin.Context) {
 		zap.Int64("api_key_id", apiKey.ID),
 		zap.Any("group_id", apiKey.GroupID),
 	)
+	if model != "" {
+		if classification, reject := preflightModelAvailabilityFromGin(
+			c, h.gatewayService, apiKey.GroupID, model, model, service.PlatformOpenAI,
+		); reject {
+			h.errorResponse(c, classification.Status, classification.ErrType, classification.Message)
+			return
+		}
+	}
 	if decision := h.checkSecurityAudit(
 		c,
 		reqLog,

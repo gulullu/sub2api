@@ -147,6 +147,7 @@ func (s *OpenAIGatewayService) CreateLiveCall(
 	// Live 按通话时长计费，不属于 token 利润门的语义范围：显式豁免，避免
 	// 防御性装门按文本 D 过滤 Live 账号池且门与计费时刻不同源。
 	ctx = WithOpenAIProfitControlSuppressed(ctx)
+	requestedModel := LiveCallRequestedModel(request)
 	var lastErr error
 	for attempt := 0; attempt <= 3; attempt++ {
 		selection, _, selectErr := s.SelectAccountWithSchedulerForCapability(
@@ -154,7 +155,7 @@ func (s *OpenAIGatewayService) CreateLiveCall(
 			identity.GroupID,
 			"",
 			uuid.NewString(),
-			"",
+			requestedModel,
 			excluded,
 			OpenAIUpstreamTransportHTTPSSE,
 			OpenAIEndpointCapabilityLive,
@@ -211,7 +212,7 @@ func (s *OpenAIGatewayService) CreateLiveCall(
 		}
 
 		now := time.Now()
-		model := strings.TrimSpace(gjson.GetBytes(request.Session, "model").String())
+		model := requestedModel
 		if model == "" {
 			model = "gpt-live"
 		}
@@ -246,6 +247,21 @@ func (s *OpenAIGatewayService) CreateLiveCall(
 		return nil, lastErr
 	}
 	return nil, ErrLiveUnavailable
+}
+
+// LiveCallRequestedModel returns the explicit model that both the HTTP
+// preflight and Live account scheduler must compare. An omitted or blank model
+// remains empty so the existing default-capability selection semantics stay
+// unchanged; only the persisted call record supplies the gpt-live label.
+func LiveCallRequestedModel(request *LiveCallRequest) string {
+	if request == nil {
+		return ""
+	}
+	model := gjson.GetBytes(request.Session, "model")
+	if !model.Exists() || model.Type != gjson.String {
+		return ""
+	}
+	return strings.TrimSpace(model.String())
 }
 
 func (s *OpenAIGatewayService) shouldFailoverLiveCreateError(err error) bool {

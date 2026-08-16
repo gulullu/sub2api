@@ -208,6 +208,14 @@ func (h *GatewayHandler) Messages(c *gin.Context) {
 		h.errorResponse(c, http.StatusBadRequest, "invalid_request_error", "Model is not supported by composite groups")
 		return
 	}
+	if scope, scopeErr := h.gatewayService.ResolveModelAvailabilityScope(c.Request.Context(), apiKey.GroupID, reqModel); scopeErr == nil {
+		if classification, reject := preflightModelAvailabilityFromGin(
+			c, h.gatewayService, scope.GroupID, scope.RoutingModel, clientRequestedModel(c, reqModel), scope.Platform,
+		); reject {
+			h.errorResponse(c, classification.Status, classification.ErrType, classification.Message)
+			return
+		}
+	}
 
 	if decision := h.checkSecurityAudit(c, reqLog, apiKey, subject, service.ContentModerationProtocolAnthropicMessages, reqModel, body); decision != nil && !decision.AllowNextStage {
 		h.anthropicSecurityAuditError(c, decision)

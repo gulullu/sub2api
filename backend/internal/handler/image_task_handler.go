@@ -135,10 +135,16 @@ func (h *AsyncImageHandler) checkSecurityAuditBeforeSubmit(c *gin.Context, apiKe
 		return false
 	}
 	model := ""
+	routingModel := ""
 	moderationBody := body
 	if platform == service.PlatformGrok {
 		parsed := service.ParseGrokMediaRequest(c.GetHeader("Content-Type"), body)
 		model, moderationBody = parsed.Model, parsed.ModerationBody()
+		endpoint := service.GrokMediaEndpointImagesGenerations
+		if strings.Contains(c.Request.URL.Path, "/images/edits") {
+			endpoint = service.GrokMediaEndpointImagesEdits
+		}
+		routingModel = service.NormalizeGrokMediaModelForEndpoint(endpoint, model, parsed.HasInputImage())
 	} else if h.openAI.gatewayService != nil {
 		parsed, err := h.openAI.gatewayService.ParseOpenAIImagesRequest(c, body)
 		if err != nil {
@@ -146,6 +152,16 @@ func (h *AsyncImageHandler) checkSecurityAuditBeforeSubmit(c *gin.Context, apiKe
 			return false
 		}
 		model, moderationBody = parsed.Model, parsed.ModerationBody()
+		routingModel = model
+		if resolvedModel, ok := service.ResolvedUpstreamModelFromContext(c.Request.Context()); ok {
+			routingModel = resolvedModel
+		}
+	}
+	if classification, reject := preflightModelAvailabilityFromGin(
+		c, h.openAI.gatewayService, apiKey.GroupID, routingModel, clientRequestedModel(c, model), platform,
+	); reject {
+		imageTaskJSONError(c, classification.Status, classification.ErrType, classification.Message)
+		return false
 	}
 	if len(moderationBody) == 0 {
 		c.Set(securityAuditCompletedContextKey, true)

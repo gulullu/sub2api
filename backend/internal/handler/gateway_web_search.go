@@ -76,6 +76,20 @@ func (h *GatewayHandler) WebSearch(c *gin.Context) {
 		}})
 		return
 	}
+	groupID := apiKey.GroupID
+	if groupID == nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": gin.H{
+			"type":    "invalid_request_error",
+			"message": "group required",
+		}})
+		return
+	}
+	if classification, reject := preflightModelAvailabilityFromGin(
+		c, h.gatewayService, groupID, searchModel, searchModel, service.PlatformGrok,
+	); reject {
+		c.JSON(classification.Status, gin.H{"error": gin.H{"type": classification.ErrType, "message": classification.Message}})
+		return
+	}
 
 	// Billing eligibility (same as other requests)
 	subscription, _ := middleware2.GetSubscriptionFromContext(c)
@@ -114,15 +128,6 @@ func (h *GatewayHandler) WebSearch(c *gin.Context) {
 	}
 
 	// Use exactly the same scheduling as other requests (SelectAccountWithLoadAwareness handles load, rate limit, sticky, etc.)
-	groupID := apiKey.GroupID
-	if groupID == nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": gin.H{
-			"type":    "invalid_request_error",
-			"message": "group required",
-		}})
-		return
-	}
-
 	failedAccounts := make(map[int64]struct{})
 	var account *service.Account
 	var accountReleaseFunc func()

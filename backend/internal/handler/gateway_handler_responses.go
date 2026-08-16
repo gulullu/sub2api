@@ -114,6 +114,14 @@ func (h *GatewayHandler) Responses(c *gin.Context) {
 			"This group is restricted to Claude Code clients (/v1/messages only)")
 		return
 	}
+	if scope, scopeErr := h.gatewayService.ResolveModelAvailabilityScope(c.Request.Context(), apiKey.GroupID, reqModel); scopeErr == nil {
+		if classification, reject := preflightModelAvailabilityFromGin(
+			c, h.gatewayService, scope.GroupID, scope.RoutingModel, clientRequestedModel(c, reqModel), scope.Platform,
+		); reject {
+			h.responsesErrorResponse(c, classification.Status, classification.ErrType, classification.Message)
+			return
+		}
+	}
 
 	if decision := h.checkSecurityAudit(c, reqLog, apiKey, subject, service.ContentModerationProtocolOpenAIResponses, reqModel, body); decision != nil && !decision.AllowNextStage {
 		h.responsesSecurityAuditError(c, decision)

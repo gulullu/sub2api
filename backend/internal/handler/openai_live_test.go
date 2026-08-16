@@ -8,6 +8,7 @@ import (
 	"net/http/httptest"
 	"testing"
 
+	middleware2 "github.com/Wei-Shaw/sub2api/internal/server/middleware"
 	"github.com/Wei-Shaw/sub2api/internal/service"
 	"github.com/gin-gonic/gin"
 	"github.com/stretchr/testify/require"
@@ -87,6 +88,80 @@ func TestLiveEnabledForAPIKey(t *testing.T) {
 	require.True(t, liveEnabledForAPIKey(&service.APIKey{
 		Group: &service.Group{Platform: service.PlatformOpenAI, AllowLive: true},
 	}))
+}
+
+func TestLiveExplicitUnsupportedModelSkipsPromptAudit(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	engine := blockingHandlerPromptEngine()
+	h := newResponsesModelPreflightHandler(t, []service.Account{{
+		ID: 1, Platform: service.PlatformOpenAI, Status: service.StatusActive, Schedulable: true,
+		Credentials: map[string]any{"model_mapping": map[string]any{"gpt-live-supported": "gpt-live-supported"}},
+	}}, engine)
+	c, recorder := responsesModelPreflightContext(t, "/v1/live", "ignored")
+	c.Request = httptest.NewRequest(
+		http.MethodPost,
+		"/v1/live",
+		bytes.NewBufferString(`{"sdp":"v=0\\r\\n","session":{"model":"gpt-live-unsupported","instructions":"hello"}}`),
+	)
+	c.Request.Header.Set("Content-Type", "application/json")
+	apiKey, ok := middleware2.GetAPIKeyFromContext(c)
+	require.True(t, ok)
+	apiKey.Group.AllowLive = true
+
+	h.Live(c)
+
+	require.Equal(t, http.StatusNotFound, recorder.Code)
+	evaluated, _, _ := engine.snapshot()
+	require.Zero(t, evaluated)
+	require.True(t, service.HasOpsClientBusinessLimited(c))
+}
+
+func TestLiveOmittedModelPreservesPromptAuditPath(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	engine := blockingHandlerPromptEngine()
+	h := newResponsesModelPreflightHandler(t, nil, engine)
+	c, recorder := responsesModelPreflightContext(t, "/v1/live", "ignored")
+	c.Request = httptest.NewRequest(
+		http.MethodPost,
+		"/v1/live",
+		bytes.NewBufferString(`{"sdp":"v=0\\r\\n","session":{"instructions":"hello"}}`),
+	)
+	c.Request.Header.Set("Content-Type", "application/json")
+	apiKey, ok := middleware2.GetAPIKeyFromContext(c)
+	require.True(t, ok)
+	apiKey.Group.AllowLive = true
+
+	h.Live(c)
+
+	require.Equal(t, http.StatusForbidden, recorder.Code)
+	evaluated, _, _ := engine.snapshot()
+	require.Equal(t, 1, evaluated)
+}
+
+func TestLiveNonStringModelPreservesPromptAuditPath(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	for _, model := range []string{`123`, `true`, `{"name":"gpt-live-unsupported"}`, `null`} {
+		t.Run(model, func(t *testing.T) {
+			engine := blockingHandlerPromptEngine()
+			h := newResponsesModelPreflightHandler(t, nil, engine)
+			c, recorder := responsesModelPreflightContext(t, "/v1/live", "ignored")
+			c.Request = httptest.NewRequest(
+				http.MethodPost,
+				"/v1/live",
+				bytes.NewBufferString(`{"sdp":"v=0\\r\\n","session":{"model":`+model+`,"instructions":"hello"}}`),
+			)
+			c.Request.Header.Set("Content-Type", "application/json")
+			apiKey, ok := middleware2.GetAPIKeyFromContext(c)
+			require.True(t, ok)
+			apiKey.Group.AllowLive = true
+
+			h.Live(c)
+
+			require.Equal(t, http.StatusForbidden, recorder.Code)
+			evaluated, _, _ := engine.snapshot()
+			require.Equal(t, 1, evaluated)
+		})
+	}
 }
 
 func TestLiveAttestationErrorIsExplicit(t *testing.T) {

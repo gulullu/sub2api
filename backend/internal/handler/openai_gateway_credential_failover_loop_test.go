@@ -27,22 +27,28 @@ import (
 
 type grokCredentialHandlerRepo struct {
 	service.AccountRepository
-	mu             sync.Mutex
-	accounts       []service.Account
-	setErrorIDs    []int64
-	setTempIDs     []int64
-	rateLimitIDs   []int64
-	updateExtraIDs []int64
-	selectionCalls int
-	setErrorErr    error
-	setTempErr     error
-	missingOnGet   map[int64]bool
+	mu                       sync.Mutex
+	accounts                 []service.Account
+	setErrorIDs              []int64
+	setTempIDs               []int64
+	rateLimitIDs             []int64
+	updateExtraIDs           []int64
+	selectionCalls           int
+	availabilityCalls        int
+	availabilityTimeoutFirst bool
+	selectionErr             error
+	setErrorErr              error
+	setTempErr               error
+	missingOnGet             map[int64]bool
 }
 
 func (r *grokCredentialHandlerRepo) ListSchedulableByPlatform(_ context.Context, platform string) ([]service.Account, error) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	r.selectionCalls++
+	if r.selectionErr != nil {
+		return nil, r.selectionErr
+	}
 	out := make([]service.Account, 0, len(r.accounts))
 	for _, account := range r.accounts {
 		if account.Platform == platform && account.IsSchedulable() {
@@ -50,6 +56,41 @@ func (r *grokCredentialHandlerRepo) ListSchedulableByPlatform(_ context.Context,
 		}
 	}
 	return out, nil
+}
+
+func (r *grokCredentialHandlerRepo) ListModelAvailabilityCandidates(
+	ctx context.Context,
+	_ *int64,
+	platforms []string,
+	_ bool,
+) ([]service.Account, error) {
+	r.mu.Lock()
+	r.availabilityCalls++
+	call := r.availabilityCalls
+	timeoutFirst := r.availabilityTimeoutFirst
+	accounts := append([]service.Account(nil), r.accounts...)
+	r.mu.Unlock()
+	if timeoutFirst && call == 1 {
+		<-ctx.Done()
+		return nil, ctx.Err()
+	}
+	allowed := make(map[string]struct{}, len(platforms))
+	for _, platform := range platforms {
+		allowed[platform] = struct{}{}
+	}
+	out := make([]service.Account, 0, len(accounts))
+	for _, account := range accounts {
+		if _, ok := allowed[account.Platform]; ok && account.Status == service.StatusActive && account.Schedulable {
+			out = append(out, account)
+		}
+	}
+	return out, nil
+}
+
+func (r *grokCredentialHandlerRepo) availabilityCallCount() int {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	return r.availabilityCalls
 }
 
 func (r *grokCredentialHandlerRepo) ListSchedulableByGroupIDAndPlatform(ctx context.Context, _ int64, platform string) ([]service.Account, error) {
@@ -695,6 +736,27 @@ func TestGrokMedia429FailoverIsBounded(t *testing.T) {
 	})
 }
 
+func TestGrokMediaPreflightTimeoutFreshDiagnosisUsesNormalizedRoutingModel(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	_, repo, upstream, router, cleanup := newGrokCredentialFailoverHandler(t, "media_preflight_timeout_selection_error")
+	defer cleanup()
+	recorder := httptest.NewRecorder()
+	request := httptest.NewRequest(
+		http.MethodPost,
+		"/openai/v1/images/generations",
+		bytes.NewBufferString(`{"model":"grok-imagine","prompt":"draw a cat"}`),
+	)
+	request.Header.Set("Content-Type", "application/json")
+
+	router.ServeHTTP(recorder, request)
+
+	require.Equal(t, http.StatusServiceUnavailable, recorder.Code, recorder.Body.String())
+	require.NotContains(t, recorder.Body.String(), "grok-imagine-image-quality")
+	require.NotContains(t, recorder.Body.String(), "model_not_found")
+	require.GreaterOrEqual(t, repo.availabilityCallCount(), 2, "preflight timeout must be followed by an authoritative fresh diagnosis")
+	require.Empty(t, upstream.accountHits())
+}
+
 func TestGrokOAuthCredentialFailoverAcrossHTTPHandlers(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 	endpoints := []struct {
@@ -884,6 +946,15 @@ func newGrokCredentialFailoverHandler(t *testing.T, mode string) (*OpenAIGateway
 		accounts[1].Credentials["expires_at"] = time.Now().Add(-time.Minute).UTC().Format(time.RFC3339)
 	}
 	repo := &grokCredentialHandlerRepo{accounts: accounts, missingOnGet: map[int64]bool{}}
+	if mode == "media_preflight_timeout_selection_error" {
+		repo.availabilityTimeoutFirst = true
+		repo.selectionErr = errors.New("scheduler repository unavailable")
+		for i := range repo.accounts {
+			repo.accounts[i].Credentials["model_mapping"] = map[string]any{
+				"grok-imagine-image-quality": "grok-imagine-image-quality",
+			}
+		}
+	}
 	if mode == "missing_row" {
 		repo.missingOnGet[801] = true
 	}
@@ -950,6 +1021,7 @@ func newGrokCredentialFailoverHandler(t *testing.T, mode string) (*OpenAIGateway
 	router.POST("/openai/v1/messages", h.Messages)
 	router.POST("/openai/v1/chat/completions", h.ChatCompletions)
 	router.POST("/openai/v1/videos/generations", h.GrokVideoGeneration)
+	router.POST("/openai/v1/images/generations", h.GrokImages)
 	router.GET("/openai/v1/videos/:request_id", h.GrokVideoStatus)
 	handlerRefresherStarted.Store(router, refresher.started)
 	cleanup := func() {
