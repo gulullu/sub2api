@@ -219,6 +219,10 @@ func (s *OpenAIGatewayService) proxyOpenAIWSHTTPBridgeTurn(
 	if account.Platform != PlatformGrok && isOpenAIResponsesLiteWebSocketPayload(payload) {
 		upstreamReq.Header.Set(responsesLiteHeader, "true")
 	}
+	// The bridge derives the HTTP Lite header from the original WS marker after
+	// buildUpstreamRequestOpenAIPassthrough has run. Re-apply the final-model
+	// guard here so known non-Lite OpenAI account models cannot have the header restored.
+	guardOpenAIResponsesLiteHTTPHeader(upstreamReq, account, body)
 
 	proxyURL := ""
 	if account.ProxyID != nil && account.Proxy != nil {

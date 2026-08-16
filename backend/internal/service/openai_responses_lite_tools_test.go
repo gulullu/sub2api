@@ -151,6 +151,211 @@ func TestNormalizeOpenAIResponsesLiteTools_KeepsSupportedTopLevelTools(t *testin
 	require.Len(t, reqBody["tools"], 4)
 }
 
+func TestNormalizeOpenAIResponsesLiteTools_RequiredWithoutTopLevelToolsFallsBackToAuto(t *testing.T) {
+	tests := []struct {
+		name    string
+		reqBody map[string]any
+	}{
+		{
+			name: "missing tools",
+			reqBody: map[string]any{
+				"input":       "hello",
+				"tool_choice": "required",
+			},
+		},
+		{
+			name: "null tools",
+			reqBody: map[string]any{
+				"input":       "hello",
+				"tools":       nil,
+				"tool_choice": "required",
+			},
+		},
+		{
+			name: "empty tools",
+			reqBody: map[string]any{
+				"input":       "hello",
+				"tools":       []any{},
+				"tool_choice": "required",
+			},
+		},
+		{
+			name: "existing additional tools",
+			reqBody: map[string]any{
+				"input": []any{map[string]any{
+					"type": "additional_tools",
+					"tools": []any{map[string]any{
+						"type": "namespace",
+						"name": "collaboration",
+					}},
+				}},
+				"tool_choice": "required",
+			},
+		},
+		{
+			name: "namespace only",
+			reqBody: map[string]any{
+				"input": "hello",
+				"tools": []any{map[string]any{
+					"type": "namespace",
+					"name": "collaboration",
+				}},
+				"tool_choice": "required",
+			},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			changed, err := normalizeOpenAIResponsesLiteTools(tt.reqBody)
+
+			require.NoError(t, err)
+			require.True(t, changed)
+			require.Equal(t, "auto", tt.reqBody["tool_choice"])
+			require.Equal(t, "all_turns", tt.reqBody["reasoning"].(map[string]any)["context"])
+			if tt.name == "existing additional tools" || tt.name == "namespace only" {
+				input := tt.reqBody["input"].([]any)
+				additional := input[len(input)-1].(map[string]any)
+				require.Equal(t, "additional_tools", additional["type"])
+				require.Equal(t, "collaboration", additional["tools"].([]any)[0].(map[string]any)["name"])
+			}
+			if tt.name == "namespace only" {
+				require.NotContains(t, tt.reqBody, "tools")
+			}
+		})
+	}
+}
+
+func TestNormalizeOpenAIResponsesLiteTools_RequiredWithTopLevelToolIsPreserved(t *testing.T) {
+	reqBody := map[string]any{
+		"input": "hello",
+		"tools": []any{
+			map[string]any{"type": "function", "name": "shell"},
+			map[string]any{"type": "tool_search", "execution": "client"},
+			map[string]any{"type": "namespace", "name": "collaboration"},
+		},
+		"tool_choice": "required",
+	}
+
+	changed, err := normalizeOpenAIResponsesLiteTools(reqBody)
+
+	require.NoError(t, err)
+	require.True(t, changed)
+	require.Equal(t, "required", reqBody["tool_choice"])
+	require.Equal(t, "shell", reqBody["tools"].([]any)[0].(map[string]any)["name"])
+	input := reqBody["input"].([]any)
+	require.Equal(t, "collaboration", input[1].(map[string]any)["tools"].([]any)[0].(map[string]any)["name"])
+}
+
+func TestNormalizeOpenAIResponsesLiteTools_RequiredWithOnlyClientToolSearchFallsBackToAuto(t *testing.T) {
+	reqBody := map[string]any{
+		"input": "hello",
+		"tools": []any{
+			map[string]any{"type": "tool_search", "execution": "client"},
+			map[string]any{"type": "namespace", "name": "collaboration"},
+		},
+		"tool_choice": "required",
+	}
+
+	changed, err := normalizeOpenAIResponsesLiteTools(reqBody)
+
+	require.NoError(t, err)
+	require.True(t, changed)
+	require.Equal(t, "auto", reqBody["tool_choice"])
+	tools := reqBody["tools"].([]any)
+	require.Len(t, tools, 1)
+	require.Equal(t, "tool_search", tools[0].(map[string]any)["type"])
+	require.Equal(t, "client", tools[0].(map[string]any)["execution"])
+}
+
+func TestNormalizeOpenAIResponsesLiteTools_RequiredCandidatesArePreserved(t *testing.T) {
+	tests := []struct {
+		name  string
+		tools []any
+	}{
+		{name: "function", tools: []any{map[string]any{"type": "function", "name": "shell"}}},
+		{name: "custom", tools: []any{map[string]any{"type": "custom", "name": "exec"}}},
+		{name: "custom shorthand", tools: []any{"exec"}},
+		{name: "tool search without execution", tools: []any{map[string]any{"type": "tool_search"}}},
+		{name: "non client tool search", tools: []any{map[string]any{"type": "tool_search", "execution": "server"}}},
+		{name: "mixed client search and custom", tools: []any{
+			map[string]any{"type": "tool_search", "execution": "client"},
+			map[string]any{"type": "custom", "name": "exec"},
+		}},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			reqBody := map[string]any{
+				"reasoning":   map[string]any{"context": "all_turns"},
+				"tools":       tt.tools,
+				"tool_choice": "required",
+			}
+
+			changed, err := normalizeOpenAIResponsesLiteTools(reqBody)
+
+			require.NoError(t, err)
+			require.False(t, changed)
+			require.Equal(t, "required", reqBody["tool_choice"])
+		})
+	}
+}
+
+func TestNormalizeOpenAIResponsesLiteTools_OtherToolChoicesArePreserved(t *testing.T) {
+	tests := []struct {
+		name   string
+		choice any
+	}{
+		{name: "auto", choice: "auto"},
+		{name: "none", choice: "none"},
+		{name: "namespace object", choice: map[string]any{"type": "namespace", "name": "collaboration"}},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			reqBody := map[string]any{
+				"input": "hello",
+				"tools": []any{map[string]any{
+					"type": "namespace",
+					"name": "collaboration",
+				}},
+				"tool_choice": tt.choice,
+			}
+
+			changed, err := normalizeOpenAIResponsesLiteTools(reqBody)
+
+			require.NoError(t, err)
+			require.True(t, changed)
+			require.Equal(t, tt.choice, reqBody["tool_choice"])
+		})
+	}
+}
+
+func TestNormalizeOpenAIResponsesLiteTools_InvalidToolsDoNotRewriteRequiredChoice(t *testing.T) {
+	tests := []struct {
+		name  string
+		tools any
+	}{
+		{name: "non array", tools: "invalid"},
+		{name: "unsupported tool", tools: []any{map[string]any{"type": "web_search"}}},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			reqBody := map[string]any{
+				"tools":       tt.tools,
+				"tool_choice": "required",
+			}
+
+			changed, err := normalizeOpenAIResponsesLiteTools(reqBody)
+
+			require.Error(t, err)
+			require.False(t, changed)
+			require.Equal(t, "required", reqBody["tool_choice"])
+		})
+	}
+}
+
 func TestNormalizeOpenAIResponsesLiteTools_EnsuresReasoningContext(t *testing.T) {
 	tests := []struct {
 		name      string
@@ -306,6 +511,74 @@ func TestOpenAIGatewayServiceForward_NormalizesResponsesLiteToolsForOAuth(t *tes
 			require.Equal(t, "collaboration", gjson.GetBytes(upstream.lastBody, `input.#(type=="additional_tools").tools.0.name`).String())
 			require.Equal(t, "namespace", gjson.GetBytes(upstream.lastBody, "tool_choice.type").String())
 			require.Equal(t, "collaboration", gjson.GetBytes(upstream.lastBody, "tool_choice.name").String())
+		})
+	}
+}
+
+func TestOpenAIGatewayServiceForward_ResponsesLiteRequiredWithoutTopLevelToolsFallsBackToAuto(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+
+	tests := []struct {
+		name        string
+		passthrough bool
+		lite        bool
+	}{
+		{name: "managed lite", lite: true},
+		{name: "passthrough lite", passthrough: true, lite: true},
+		{name: "managed non lite"},
+		{name: "passthrough non lite", passthrough: true},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			rec := httptest.NewRecorder()
+			c, _ := gin.CreateTestContext(rec)
+			c.Request = httptest.NewRequest(http.MethodPost, "/v1/responses", bytes.NewReader(nil))
+			c.Request.Header.Set("User-Agent", "codex_cli_rs/0.144.1")
+			if tt.lite {
+				c.Request.Header.Set(responsesLiteHeader, "true")
+			}
+			upstream := &httpUpstreamRecorder{resp: &http.Response{
+				StatusCode: http.StatusOK,
+				Header:     http.Header{"Content-Type": []string{"text/event-stream"}},
+				Body: io.NopCloser(strings.NewReader(
+					"data: {\"type\":\"response.completed\",\"response\":{\"id\":\"resp_lite_required\",\"usage\":{\"input_tokens\":1,\"output_tokens\":1}}}\n\n" +
+						"data: [DONE]\n\n",
+				)),
+			}}
+			svc := &OpenAIGatewayService{cfg: &config.Config{}, httpUpstream: upstream}
+			account := &Account{
+				ID: 502, Name: "responses-lite-required", Platform: PlatformOpenAI, Type: AccountTypeOAuth,
+				Concurrency: 1, Status: StatusActive, Schedulable: true, RateMultiplier: f64p(1),
+				Credentials: map[string]any{"access_token": "oauth-token", "chatgpt_account_id": "chatgpt-account"},
+				Extra:       map[string]any{"openai_passthrough": tt.passthrough},
+			}
+			body := []byte(`{
+				"model":"gpt-5.6-terra","stream":true,"instructions":"test",
+				"tools":[
+					{"type":"tool_search","execution":"client"},
+					{"type":"namespace","name":"collaboration","tools":[{"type":"function","name":"spawn_agent","parameters":{"type":"object"}}]}
+				],
+				"input":[{"type":"message","role":"user","content":"hello"}],
+				"tool_choice":"required"
+			}`)
+
+			result, err := svc.Forward(context.Background(), c, account, body)
+
+			require.NoError(t, err)
+			require.NotNil(t, result)
+			if tt.lite {
+				require.Equal(t, "true", upstream.lastReq.Header.Get(responsesLiteHeader))
+				require.Equal(t, "auto", gjson.GetBytes(upstream.lastBody, "tool_choice").String())
+				require.Equal(t, "client", gjson.GetBytes(upstream.lastBody, `tools.#(type=="tool_search").execution`).String())
+				require.Equal(t, "collaboration", gjson.GetBytes(upstream.lastBody, `input.#(type=="additional_tools").tools.0.name`).String())
+				require.Equal(t, "all_turns", gjson.GetBytes(upstream.lastBody, "reasoning.context").String())
+			} else {
+				require.Empty(t, upstream.lastReq.Header.Get(responsesLiteHeader))
+				require.Equal(t, "required", gjson.GetBytes(upstream.lastBody, "tool_choice").String())
+				require.Equal(t, "collaboration", gjson.GetBytes(upstream.lastBody, `tools.#(type=="namespace").name`).String())
+				require.False(t, gjson.GetBytes(upstream.lastBody, `input.#(type=="additional_tools")`).Exists())
+			}
 		})
 	}
 }

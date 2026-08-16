@@ -23,7 +23,7 @@ func normalizeOpenAIResponsesLiteTools(reqBody map[string]any) (bool, error) {
 	}
 	rawTools, exists := reqBody["tools"]
 	if !exists || rawTools == nil {
-		return ensureOpenAIResponsesLiteReasoningContext(reqBody)
+		return finalizeOpenAIResponsesLiteTools(reqBody)
 	}
 	tools, ok := rawTools.([]any)
 	if !ok {
@@ -57,7 +57,7 @@ func normalizeOpenAIResponsesLiteTools(reqBody map[string]any) (bool, error) {
 		}
 	}
 	if len(namespaceTools) == 0 {
-		return ensureOpenAIResponsesLiteReasoningContext(reqBody)
+		return finalizeOpenAIResponsesLiteTools(reqBody)
 	}
 
 	input, err := appendOpenAIResponsesLiteAdditionalTools(reqBody["input"], namespaceTools)
@@ -73,7 +73,61 @@ func normalizeOpenAIResponsesLiteTools(reqBody map[string]any) (bool, error) {
 	} else {
 		reqBody["tools"] = topLevelTools
 	}
+	normalizeOpenAIResponsesLiteRequiredToolChoice(reqBody)
 	return true, nil
+}
+
+// finalizeOpenAIResponsesLiteTools applies the Lite invariants that depend on
+// the final top-level tools shape. Responses validates tool_choice="required"
+// against callable top-level tools; input.additional_tools and the client-side
+// tool_search discovery entrypoint do not satisfy that validation. When no
+// callable top-level tool remains, "auto" is the closest valid best-effort mode
+// and matches the existing Codex tool-choice compatibility fallback.
+func finalizeOpenAIResponsesLiteTools(reqBody map[string]any) (bool, error) {
+	changed, err := ensureOpenAIResponsesLiteReasoningContext(reqBody)
+	if err != nil {
+		return false, err
+	}
+	if normalizeOpenAIResponsesLiteRequiredToolChoice(reqBody) {
+		changed = true
+	}
+	return changed, nil
+}
+
+func normalizeOpenAIResponsesLiteRequiredToolChoice(reqBody map[string]any) bool {
+	choice, ok := reqBody["tool_choice"].(string)
+	if !ok || strings.TrimSpace(choice) != "required" {
+		return false
+	}
+	if tools, ok := reqBody["tools"].([]any); ok && openAIResponsesLiteToolsSatisfyRequiredChoice(tools) {
+		return false
+	}
+	reqBody["tool_choice"] = "auto"
+	return true
+}
+
+func openAIResponsesLiteToolsSatisfyRequiredChoice(tools []any) bool {
+	for _, rawTool := range tools {
+		if customTool, ok := rawTool.(string); ok {
+			if strings.TrimSpace(customTool) != "" {
+				return true
+			}
+			continue
+		}
+		tool, ok := rawTool.(map[string]any)
+		if !ok {
+			continue
+		}
+		switch strings.TrimSpace(firstNonEmptyString(tool["type"])) {
+		case "function", "custom":
+			return true
+		case "tool_search":
+			if strings.TrimSpace(firstNonEmptyString(tool["execution"])) != "client" {
+				return true
+			}
+		}
+	}
+	return false
 }
 
 func ensureOpenAIResponsesLiteReasoningContext(reqBody map[string]any) (bool, error) {

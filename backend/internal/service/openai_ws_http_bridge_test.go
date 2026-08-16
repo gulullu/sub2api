@@ -62,6 +62,34 @@ func TestOpenAIWSHTTPBridgeDecisionKeepsSmallFramesOnWS(t *testing.T) {
 	require.True(t, svc.shouldBridgeOpenAIWSHTTP(&Account{Platform: PlatformGrok}, 1, "resp_existing"))
 }
 
+func TestPrepareOpenAIWSHTTPBridgeBodyPreservesResponsesLiteRequiredFallback(t *testing.T) {
+	payload := []byte(`{
+		"type":"response.create",
+		"generate":true,
+		"model":"gpt-5.6-terra",
+		"client_metadata":{"ws_request_header_x_openai_internal_codex_responses_lite":"true"},
+		"tools":[
+			{"type":"tool_search","execution":"client"},
+			{"type":"namespace","name":"collaboration"}
+		],
+		"input":"hello",
+		"tool_choice":"required"
+	}`)
+	normalized, changed, err := normalizeOpenAIResponsesLiteToolsPayload(payload)
+	require.NoError(t, err)
+	require.True(t, changed)
+
+	body, err := prepareOpenAIWSHTTPBridgeBody(normalized)
+
+	require.NoError(t, err)
+	require.Equal(t, "auto", gjson.GetBytes(body, "tool_choice").String())
+	require.Equal(t, "client", gjson.GetBytes(body, `tools.#(type=="tool_search").execution`).String())
+	require.Equal(t, "collaboration", gjson.GetBytes(body, `input.#(type=="additional_tools").tools.0.name`).String())
+	require.Equal(t, "all_turns", gjson.GetBytes(body, "reasoning.context").String())
+	require.False(t, gjson.GetBytes(body, "type").Exists())
+	require.False(t, gjson.GetBytes(body, "generate").Exists())
+}
+
 func TestProxyOpenAIWSHTTPBridgeTurnTransportErrorFailoverSafety(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 
@@ -460,7 +488,9 @@ func TestOpenAIWSHTTPBridgeRelaysSSEFramesAsWebSocketMessages(t *testing.T) {
 
 	require.NotNil(t, upstream.lastReq)
 	require.Equal(t, http.MethodPost, upstream.lastReq.Method)
-	require.Equal(t, "true", upstream.lastReq.Header.Get(responsesLiteHeader))
+	// Generic gpt-5 canonicalizes to the full-Responses gpt-5.4 route for
+	// this API-key account, so the stale private Lite marker is stripped.
+	require.Empty(t, upstream.lastReq.Header.Get(responsesLiteHeader))
 	require.False(t, gjson.GetBytes(upstream.lastBody, "type").Exists())
 	require.False(t, gjson.GetBytes(upstream.lastBody, "generate").Exists())
 	require.True(t, gjson.GetBytes(upstream.lastBody, "stream").Bool())

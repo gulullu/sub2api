@@ -257,8 +257,26 @@ func (s *OpenAIGatewayService) ProxyResponsesWebSocketFromClient(
 			}
 			normalized = next
 		}
-		if account.IsOpenAIOAuth() && isOpenAIResponsesLiteWebSocketPayload(normalized) {
-			litePayload, _, liteErr := normalizeOpenAIResponsesLiteToolsPayload(normalized)
+		requestModel := originalModel
+		if hooks != nil && hooks.MapRequestModel != nil {
+			mappedModel, mapErr := hooks.MapRequestModel(turn, originalModel)
+			if mapErr != nil {
+				return openAIWSClientPayload{}, mapErr
+			}
+			if mappedModel = strings.TrimSpace(mappedModel); mappedModel != "" {
+				requestModel = mappedModel
+			}
+		}
+		upstreamModel := normalizeOpenAIModelForUpstream(account, account.GetMappedModel(requestModel))
+		if modelMissing || upstreamModel != originalModel {
+			next, setErr := applyPayloadMutation(normalized, "model", upstreamModel)
+			if setErr != nil {
+				return openAIWSClientPayload{}, NewOpenAIWSClientCloseError(coderws.StatusPolicyViolation, "invalid websocket request payload", setErr)
+			}
+			normalized = next
+		}
+		if isOpenAIResponsesLiteWebSocketPayload(normalized) {
+			litePayload, _, liteErr := normalizeOpenAIResponsesLiteWSPayloadForModel(account, normalized, upstreamModel)
 			if liteErr != nil {
 				return openAIWSClientPayload{}, NewOpenAIWSClientCloseError(
 					coderws.StatusPolicyViolation,
@@ -308,24 +326,6 @@ func (s *OpenAIGatewayService) ProxyResponsesWebSocketFromClient(
 				normalized = rebuilt
 			}
 		}
-		requestModel := originalModel
-		if hooks != nil && hooks.MapRequestModel != nil {
-			mappedModel, mapErr := hooks.MapRequestModel(turn, originalModel)
-			if mapErr != nil {
-				return openAIWSClientPayload{}, mapErr
-			}
-			if mappedModel = strings.TrimSpace(mappedModel); mappedModel != "" {
-				requestModel = mappedModel
-			}
-		}
-		upstreamModel := normalizeOpenAIModelForUpstream(account, account.GetMappedModel(requestModel))
-		if modelMissing || upstreamModel != originalModel {
-			next, setErr := applyPayloadMutation(normalized, "model", upstreamModel)
-			if setErr != nil {
-				return openAIWSClientPayload{}, NewOpenAIWSClientCloseError(coderws.StatusPolicyViolation, "invalid websocket request payload", setErr)
-			}
-			normalized = next
-		}
 		normalizedSparkPayload, sparkContextChanged, sparkContextErr := normalizeCodexSparkReasoningContextForUpstream(normalized, upstreamModel)
 		if sparkContextErr != nil {
 			return openAIWSClientPayload{}, NewOpenAIWSClientCloseError(coderws.StatusPolicyViolation, "invalid websocket request payload", sparkContextErr)
@@ -347,6 +347,11 @@ func (s *OpenAIGatewayService) ProxyResponsesWebSocketFromClient(
 			normalized = stripped
 			logOpenAIWSModeInfo("ingress_ws_codex_spark_image_tool_stripped account_id=%d", account.ID)
 		}
+		normalizedChoicePayload, _, choiceErr := normalizeOpenAIRequiredClientToolSearchChoice(account, normalized)
+		if choiceErr != nil {
+			return openAIWSClientPayload{}, NewOpenAIWSClientCloseError(coderws.StatusPolicyViolation, "invalid websocket request payload", choiceErr)
+		}
+		normalized = normalizedChoicePayload
 		imageIntent := IsImageGenerationIntentForPlatform(openAIResponsesEndpoint, originalModel, normalized, account.Platform)
 		if imageIntent && !imageGenerationAllowed {
 			return openAIWSClientPayload{}, NewOpenAIWSClientCloseError(coderws.StatusPolicyViolation, ImageGenerationPermissionMessage(), nil)

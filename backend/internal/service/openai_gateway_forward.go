@@ -57,7 +57,20 @@ func (s *OpenAIGatewayService) Forward(ctx context.Context, c *gin.Context, acco
 	if toolSchemaSanitized {
 		body = sanitizedToolBody
 	}
-	if account.IsOpenAIOAuth() && isOpenAIResponsesLiteHeader(c.GetHeader(responsesLiteHeader)) {
+	wsDecision := s.getOpenAIWSProtocolResolver().Resolve(account)
+	// 仅允许 WS 入站请求走 WS 上游，避免出现 HTTP -> WS 协议混用。
+	wsDecision = resolveOpenAIWSDecisionByClientTransport(wsDecision, GetOpenAIClientTransport(c))
+	passthroughEnabled := account.IsOpenAIPassthroughEnabled()
+	compactPath := isOpenAIResponsesCompactPath(c)
+	clientRequestedResponsesLite := isOpenAIResponsesLiteHeader(c.GetHeader(responsesLiteHeader))
+	responsesLiteAttemptEnabled := isOpenAIResponsesLiteHTTPAttemptEnabled(
+		account,
+		body,
+		passthroughEnabled,
+		compactPath,
+		clientRequestedResponsesLite,
+	)
+	if account.IsOpenAIOAuth() && responsesLiteAttemptEnabled {
 		liteBody, changed, liteErr := normalizeOpenAIResponsesLiteToolsPayload(body)
 		if liteErr != nil {
 			setOpsUpstreamError(c, http.StatusBadRequest, liteErr.Error(), "")
@@ -70,11 +83,6 @@ func (s *OpenAIGatewayService) Forward(ctx context.Context, c *gin.Context, acco
 			body = liteBody
 		}
 	}
-	wsDecision := s.getOpenAIWSProtocolResolver().Resolve(account)
-	// 仅允许 WS 入站请求走 WS 上游，避免出现 HTTP -> WS 协议混用。
-	wsDecision = resolveOpenAIWSDecisionByClientTransport(wsDecision, GetOpenAIClientTransport(c))
-	passthroughEnabled := account.IsOpenAIPassthroughEnabled()
-	compactPath := isOpenAIResponsesCompactPath(c)
 	if shouldFlattenOpenAIResponsesNamespaces(account, wsDecision.Transport, passthroughEnabled, compactPath) {
 		body, err = flattenOpenAIResponsesNamespaces(c, body)
 		if err != nil {
@@ -264,7 +272,7 @@ func (s *OpenAIGatewayService) Forward(ctx context.Context, c *gin.Context, acco
 		imageGenerationAllowed = GroupAllowsImageGeneration(apiKey.Group)
 	}
 	codexImageGenerationBridgeEnabled := isCodexCLI &&
-		!isOpenAIResponsesLiteHeader(c.GetHeader(responsesLiteHeader)) &&
+		!responsesLiteAttemptEnabled &&
 		imageGenerationAllowed &&
 		codexImageGenerationExplicitToolPolicy != codexImageGenerationExplicitToolPolicyStrip &&
 		s.isCodexImageGenerationBridgeEnabled(ctx, account, apiKey)
@@ -1078,6 +1086,12 @@ func shouldForwardOpenAIResponsesViaRawChatCompletions(account *Account) bool {
 }
 
 func (s *OpenAIGatewayService) buildUpstreamRequest(ctx context.Context, c *gin.Context, account *Account, body []byte, token string, isStream bool, promptCacheKey string, isCodexCLI bool) (*http.Request, error) {
+	normalizedBody, _, compatErr := normalizeOpenAIRequiredClientToolSearchChoice(account, body)
+	if compatErr != nil {
+		return nil, compatErr
+	}
+	body = normalizedBody
+
 	// Determine target URL based on account type
 	var targetURL string
 	switch account.Type {
@@ -1208,6 +1222,7 @@ func (s *OpenAIGatewayService) buildUpstreamRequest(ctx context.Context, c *gin.
 	// x-codex-beta-features：按真实 Codex 的会话级行为补注（在账号级覆写之后，
 	// 保证不被覆盖丢失）。
 	applyOpenAICodexBetaFeatures(c, account, req.Header)
+	guardOpenAIResponsesLiteHTTPHeader(req, account, body)
 	setOpenAICodexRoutingHintFromBody(req.Header, account, body)
 	logOpenAIRoutingDiagnosticsFromBody(ctx, account, "http", req.Header, body, "not_applicable")
 

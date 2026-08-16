@@ -674,13 +674,6 @@ func (s *OpenAIGatewayService) proxyResponsesWebSocketV2Passthrough(
 	if err := validateOpenAIWSBearerToken(account, token); err != nil {
 		return err
 	}
-	if account.IsOpenAIOAuth() && isOpenAIResponsesLiteWebSocketPayload(firstClientMessage) {
-		liteFirstMessage, _, liteErr := normalizeOpenAIResponsesLiteToolsPayload(firstClientMessage)
-		if liteErr != nil {
-			return NewOpenAIWSClientCloseError(coderws.StatusPolicyViolation, liteErr.Error(), liteErr)
-		}
-		firstClientMessage = liteFirstMessage
-	}
 	if hooks != nil && (hooks.MaxReasoningEffort != "" || len(hooks.ReasoningEffortMappings) > 0) {
 		if capped, changed := ApplyOpenAIReasoningEffortPolicy(firstClientMessage, hooks.MaxReasoningEffort, hooks.ReasoningEffortMappings); changed {
 			firstClientMessage = capped
@@ -729,6 +722,11 @@ func (s *OpenAIGatewayService) proxyResponsesWebSocketV2Passthrough(
 	if capturedSessionModel != "" && capturedSessionModel != strings.TrimSpace(gjson.GetBytes(firstClientMessage, "model").String()) {
 		firstClientMessage = s.ReplaceModelInBody(firstClientMessage, capturedSessionModel)
 	}
+	liteFirstMessage, _, liteErr := normalizeOpenAIResponsesLiteWSPayloadForModel(account, firstClientMessage, capturedSessionModel)
+	if liteErr != nil {
+		return NewOpenAIWSClientCloseError(coderws.StatusPolicyViolation, liteErr.Error(), liteErr)
+	}
+	firstClientMessage = liteFirstMessage
 	normalizedSparkFirstMessage, sparkContextChanged, sparkContextErr := normalizeCodexSparkReasoningContextForUpstream(firstClientMessage, capturedSessionModel)
 	if sparkContextErr != nil {
 		return NewOpenAIWSClientCloseError(coderws.StatusPolicyViolation, "invalid websocket request payload", sparkContextErr)
@@ -736,6 +734,11 @@ func (s *OpenAIGatewayService) proxyResponsesWebSocketV2Passthrough(
 	if sparkContextChanged {
 		firstClientMessage = normalizedSparkFirstMessage
 	}
+	normalizedChoiceFirstMessage, _, choiceErr := normalizeOpenAIRequiredClientToolSearchChoice(account, firstClientMessage)
+	if choiceErr != nil {
+		return NewOpenAIWSClientCloseError(coderws.StatusPolicyViolation, choiceErr.Error(), choiceErr)
+	}
+	firstClientMessage = normalizedChoiceFirstMessage
 	usageMeta := newOpenAIWSPassthroughUsageMeta(initialRequestModel, firstClientMessage)
 	updatedFirst, blocked, policyErr := s.applyOpenAIFastPolicyToWSResponseCreate(ctx, account, capturedSessionModel, firstClientMessage)
 	if policyErr != nil {
@@ -961,13 +964,6 @@ func (s *OpenAIGatewayService) proxyResponsesWebSocketV2Passthrough(
 				}()
 			}
 			if isResponseCreate {
-				if account.IsOpenAIOAuth() && isOpenAIResponsesLiteWebSocketPayload(payload) {
-					litePayload, _, liteErr := normalizeOpenAIResponsesLiteToolsPayload(payload)
-					if liteErr != nil {
-						return payload, nil, NewOpenAIWSClientCloseError(coderws.StatusPolicyViolation, liteErr.Error(), liteErr)
-					}
-					payload = litePayload
-				}
 				if hooks != nil && (hooks.MaxReasoningEffort != "" || len(hooks.ReasoningEffortMappings) > 0) {
 					if capped, changed := ApplyOpenAIReasoningEffortPolicy(payload, hooks.MaxReasoningEffort, hooks.ReasoningEffortMappings); changed {
 						payload = capped
@@ -1026,6 +1022,11 @@ func (s *OpenAIGatewayService) proxyResponsesWebSocketV2Passthrough(
 				payload = s.ReplaceModelInBody(payload, model)
 			}
 			if isResponseCreate {
+				litePayload, _, liteErr := normalizeOpenAIResponsesLiteWSPayloadForModel(account, payload, model)
+				if liteErr != nil {
+					return payload, nil, NewOpenAIWSClientCloseError(coderws.StatusPolicyViolation, liteErr.Error(), liteErr)
+				}
+				payload = litePayload
 				normalizedSparkPayload, sparkContextChanged, sparkContextErr := normalizeCodexSparkReasoningContextForUpstream(payload, model)
 				if sparkContextErr != nil {
 					return payload, nil, NewOpenAIWSClientCloseError(coderws.StatusPolicyViolation, "invalid websocket request payload", sparkContextErr)
@@ -1033,6 +1034,11 @@ func (s *OpenAIGatewayService) proxyResponsesWebSocketV2Passthrough(
 				if sparkContextChanged {
 					payload = normalizedSparkPayload
 				}
+				normalizedChoicePayload, _, choiceErr := normalizeOpenAIRequiredClientToolSearchChoice(account, payload)
+				if choiceErr != nil {
+					return payload, nil, NewOpenAIWSClientCloseError(coderws.StatusPolicyViolation, choiceErr.Error(), choiceErr)
+				}
+				payload = normalizedChoicePayload
 			}
 			out, blocked, policyErr := s.applyOpenAIFastPolicyToWSResponseCreate(ctx, account, model, payload)
 			// 多轮 passthrough usage：仅在成功（non-block / non-err）

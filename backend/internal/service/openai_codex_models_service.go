@@ -550,15 +550,21 @@ func codexModelsManifestBodyETag(body []byte) string {
 }
 
 var apiKeyCodexModelsWithoutResponsesLite = map[string]struct{}{
-	"gpt-5.6-sol":   {},
-	"gpt-5.6-terra": {},
-	"gpt-5.6-luna":  {},
+	"gpt-5.3-codex-spark": {},
+	"gpt-5.4":             {},
+	"gpt-5.4-mini":        {},
+	"gpt-5.5":             {},
+	"gpt-5.6-sol":         {},
+	"gpt-5.6-terra":       {},
+	"gpt-5.6-luna":        {},
 }
 
 // adjustAPIKeyCodexModelsManifest prevents Codex from selecting Responses
 // Lite for custom API key providers. Those clients do not install web.run in
-// Lite mode, so the affected model manifests must advertise the full Responses
-// path. Return the original body when no targeted true value is present.
+// Lite mode, so the affected model manifests must explicitly advertise the full
+// Responses path. Missing values must also become false: Codex otherwise falls
+// back to its bundled model metadata and can re-enable Lite. Return the original
+// body when no targeted entry is missing the field or explicitly enables Lite.
 func adjustAPIKeyCodexModelsManifest(body []byte) ([]byte, error) {
 	var envelope map[string]json.RawMessage
 	if err := json.Unmarshal(body, &envelope); err != nil {
@@ -582,9 +588,11 @@ func adjustAPIKeyCodexModelsManifest(body []byte) ([]byte, error) {
 		if _, targeted := apiKeyCodexModelsWithoutResponsesLite[slug]; !targeted {
 			continue
 		}
-		var useResponsesLite bool
-		if err := json.Unmarshal(model["use_responses_lite"], &useResponsesLite); err != nil || !useResponsesLite {
-			continue
+		if rawUseResponsesLite, exists := model["use_responses_lite"]; exists {
+			var useResponsesLite bool
+			if err := json.Unmarshal(rawUseResponsesLite, &useResponsesLite); err != nil || !useResponsesLite {
+				continue
+			}
 		}
 		model["use_responses_lite"] = json.RawMessage("false")
 		adjusted, err := json.Marshal(model)

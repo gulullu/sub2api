@@ -280,6 +280,7 @@ func TestPassthroughLifecycle_ResponsesLiteSparkMappedModelPersistsWhenFollowupO
 	}`)
 	firstWrite := requirePassthroughUpstreamWrite(t, upstream, time.Second)
 	require.Equal(t, "gpt-5.3-codex-spark", gjson.GetBytes(firstWrite, "model").String())
+	require.False(t, gjson.GetBytes(firstWrite, "client_metadata."+responsesLiteWSMetadataKey).Exists())
 	require.Equal(t, "current_turn", gjson.GetBytes(firstWrite, "reasoning.context").String())
 	require.Equal(t, "high", gjson.GetBytes(firstWrite, "reasoning.effort").String())
 
@@ -295,6 +296,7 @@ func TestPassthroughLifecycle_ResponsesLiteSparkMappedModelPersistsWhenFollowupO
 	}`)
 	secondWrite := requirePassthroughUpstreamWrite(t, upstream, time.Second)
 	require.Equal(t, "gpt-5.3-codex-spark", gjson.GetBytes(secondWrite, "model").String())
+	require.False(t, gjson.GetBytes(secondWrite, "client_metadata."+responsesLiteWSMetadataKey).Exists())
 	require.Equal(t, "current_turn", gjson.GetBytes(secondWrite, "reasoning.context").String())
 	require.Equal(t, "high", gjson.GetBytes(secondWrite, "reasoning.effort").String())
 	require.Equal(t, "resp_passthrough_spark_lite_1", gjson.GetBytes(secondWrite, "previous_response_id").String())

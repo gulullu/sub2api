@@ -517,9 +517,14 @@ func TestAdjustAPIKeyCodexModelsManifest(t *testing.T) {
 			want: ` {"models":[{"slug":"gpt-5.6-codex","use_responses_lite":true}]} `,
 		},
 		{
-			name: "false missing and alternate entries unchanged",
+			name: "false stays false missing becomes explicit false and alternate entries stay unchanged",
 			body: `{"models":[{"slug":"gpt-5.6-sol","use_responses_lite":false},{"slug":"gpt-5.6-terra"},null,"gpt-5.6-luna",{"slug":17,"use_responses_lite":true}]}`,
-			want: `{"models":[{"slug":"gpt-5.6-sol","use_responses_lite":false},{"slug":"gpt-5.6-terra"},null,"gpt-5.6-luna",{"slug":17,"use_responses_lite":true}]}`,
+			want: `{"models":[{"slug":"gpt-5.6-sol","use_responses_lite":false},{"slug":"gpt-5.6-terra","use_responses_lite":false},null,"gpt-5.6-luna",{"slug":17,"use_responses_lite":true}]}`,
+		},
+		{
+			name: "known non lite models override true and missing values",
+			body: `{"models":[{"slug":"gpt-5.3-codex-spark"},{"slug":"gpt-5.5","use_responses_lite":true},{"slug":"gpt-5.4"},{"slug":"gpt-5.4-mini","use_responses_lite":false}]}`,
+			want: `{"models":[{"slug":"gpt-5.3-codex-spark","use_responses_lite":false},{"slug":"gpt-5.5","use_responses_lite":false},{"slug":"gpt-5.4","use_responses_lite":false},{"slug":"gpt-5.4-mini","use_responses_lite":false}]}`,
 		},
 	}
 
