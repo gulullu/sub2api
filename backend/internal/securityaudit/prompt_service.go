@@ -21,6 +21,13 @@ type PromptService struct {
 	metrics   *AtomicMetrics
 	circuit   *endpointCircuitBreaker
 	clock     Clock
+	// CYB admin mutations span the prompt config CAS and feedback review CAS.
+	// Production currently runs one application instance, so this mutex closes
+	// the local adopt/reject/revoke/regenerate race. A multi-instance deployment
+	// must replace it with a DB-level transaction or shared lock.
+	cyberAdminMu     sync.Mutex
+	cyberAdminRepo   CyberFeedbackRepository
+	cyberAdminConfig CyberSupplementConfigStore
 
 	lifecycleMu  sync.Mutex
 	cancel       context.CancelFunc
@@ -385,9 +392,11 @@ func (s *PromptService) resolveProbeEndpoint(input UpdateEndpoint) (ActiveEndpoi
 	token := strings.TrimSpace(input.Token)
 	adapter := strings.TrimSpace(input.Adapter)
 	template := DefaultPromptTemplate()
+	cyberRules := []CyberSupplementRule(nil)
 	flagThreshold, blockThreshold := DefaultFlagThreshold, DefaultBlockThreshold
 	if cfg, ok := s.config.Active(); ok {
 		template = activePromptTemplate(cfg.PromptTemplates, cfg.ActivePromptTemplateID)
+		cyberRules = cloneCyberSupplementRules(cfg.CyberSupplementRules)
 		if cfg.FlagThreshold >= 0 && cfg.FlagThreshold < cfg.BlockThreshold && cfg.BlockThreshold <= 1 {
 			flagThreshold, blockThreshold = cfg.FlagThreshold, cfg.BlockThreshold
 		}
@@ -409,6 +418,15 @@ func (s *PromptService) resolveProbeEndpoint(input UpdateEndpoint) (ActiveEndpoi
 	}
 	if adapter == "" {
 		adapter = AdapterQwen3Guard
+	}
+	systemPrompt := template.SystemPrompt
+	supplementApplied := false
+	if adapterSupportsSystemPrompt(adapter) {
+		systemPrompt, err = CompileCyberSupplement(template.SystemPrompt, cyberRules)
+		if err != nil {
+			return ActiveEndpoint{}, false, err
+		}
+		supplementApplied = len(cyberRules) > 0
 	}
 	model := strings.TrimSpace(input.Model)
 	if model == "" {
@@ -438,7 +456,8 @@ func (s *PromptService) resolveProbeEndpoint(input UpdateEndpoint) (ActiveEndpoi
 	}
 	return ActiveEndpoint{ID: storage.Endpoints[0].ID, Name: storage.Endpoints[0].Name, Priority: MinEndpointPriority, Protocol: "openai_compatible", Adapter: adapter,
 		BaseURL: baseURL, Model: model, Token: token, TimeoutMS: timeout, InputLimit: limit, Enabled: true,
-		PromptTemplateID: template.ID, SystemPrompt: template.SystemPrompt, FlagThreshold: flagThreshold, BlockThreshold: blockThreshold}, token != "", nil
+		PromptTemplateID: template.ID, SystemPrompt: systemPrompt, SupportsSystemPrompt: adapterSupportsSystemPrompt(adapter), CyberSupplementApplied: supplementApplied,
+		FlagThreshold: flagThreshold, BlockThreshold: blockThreshold}, token != "", nil
 }
 
 func (s *PromptService) finishProbe(id string, started time.Time, result ProbeResult) ProbeResult {

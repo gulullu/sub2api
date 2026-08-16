@@ -2,6 +2,7 @@ package securityaudit
 
 import (
 	"crypto/sha256"
+	"encoding/binary"
 	"encoding/hex"
 	"encoding/json"
 	"errors"
@@ -46,6 +47,7 @@ func extractPromptSnapshot(req Request, latestTurnOnly bool) (PromptSnapshot, er
 		return PromptSnapshot{}, errors.New("prompt audit request JSON is invalid")
 	}
 	extracted := extractProtocolSegments(req.Protocol, document)
+	canonicalDigest := cyberCanonicalPromptDigest(normalizedPromptSegments(extracted))
 	segments := normalizeSegmentsLatestUserFirst(extracted)
 	if latestTurnOnly {
 		segments = blockingSegmentsLatestUserAndPreviousOutput(extracted)
@@ -67,8 +69,31 @@ func extractPromptSnapshot(req Request, latestTurnOnly bool) (PromptSnapshot, er
 		PromptHash: hex.EncodeToString(digest[:]), RedactedPreview: BuildPromptPreview(metadataText, DefaultPromptPreviewMaxRunes),
 		FullPrompt:   BuildFullPrompt(metadataText, DefaultFullPromptMaxRunes),
 		PromptLength: utf8.RuneCountInString(metadataText), MessageCount: len(segments), Stage: stage,
-		ScanText: scanText,
+		ScanText: scanText, cyberCanonicalDigest: canonicalDigest,
 	}, nil
+}
+
+func cyberCanonicalPromptDigest(segments []promptSegment) []byte {
+	if len(segments) == 0 {
+		return nil
+	}
+	hash := sha256.New()
+	_, _ = hash.Write([]byte("sub2api/cyber-canonical-prompt/v1\x00"))
+	var length [8]byte
+	for _, segment := range segments {
+		role := strings.ToLower(strings.TrimSpace(segment.role))
+		if role == "" && segment.user {
+			role = "user"
+		}
+		text := strings.TrimSpace(segment.text)
+		binary.BigEndian.PutUint64(length[:], uint64(len([]byte(role))))
+		_, _ = hash.Write(length[:])
+		_, _ = hash.Write([]byte(role))
+		binary.BigEndian.PutUint64(length[:], uint64(len([]byte(text))))
+		_, _ = hash.Write(length[:])
+		_, _ = hash.Write([]byte(text))
+	}
+	return hash.Sum(nil)
 }
 
 // DefaultPromptPreviewMaxRunes caps how much sanitized prompt text may be

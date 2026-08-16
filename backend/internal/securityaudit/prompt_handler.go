@@ -25,10 +25,24 @@ type PromptAdminService interface {
 	DeleteByFilter(context.Context, DeleteByFilterRequest, int64) (*DeleteResult, error)
 }
 
-type PromptAdminHandler struct{ service PromptAdminService }
+type PromptAdminHandler struct {
+	service PromptAdminService
+	cyber   PromptCyberAdminService
+}
 
 func NewPromptAdminHandler(service PromptAdminService) *PromptAdminHandler {
-	return &PromptAdminHandler{service: service}
+	handler := &PromptAdminHandler{service: service}
+	if cyber, ok := service.(PromptCyberAdminService); ok {
+		handler.cyber = cyber
+	}
+	return handler
+}
+
+func (h *PromptAdminHandler) cyberService() (PromptCyberAdminService, error) {
+	if h == nil || h.cyber == nil {
+		return nil, cyberFeedbackUnavailableError()
+	}
+	return h.cyber, nil
 }
 
 func (h *PromptAdminHandler) GetConfig(c *gin.Context) {
@@ -78,6 +92,173 @@ func (h *PromptAdminHandler) ProbeEndpoint(c *gin.Context) {
 
 func (h *PromptAdminHandler) GetRuntime(c *gin.Context) {
 	response.Success(c, h.service.Runtime(c.Request.Context()))
+}
+
+func (h *PromptAdminHandler) ListCyberFeedback(c *gin.Context) {
+	service, err := h.cyberService()
+	if err != nil {
+		response.ErrorFrom(c, err)
+		return
+	}
+	page, err := positiveIntQuery(c, "page", 1, 0)
+	if err != nil {
+		response.ErrorFrom(c, err)
+		return
+	}
+	pageSize, err := positiveIntQuery(c, "page_size", 20, 100)
+	if err != nil {
+		response.ErrorFrom(c, err)
+		return
+	}
+	groupID, err := optionalPositiveInt64Query(c, "group_id")
+	if err != nil {
+		response.ErrorFrom(c, err)
+		return
+	}
+	result, err := service.ListCyberFeedbackAdmin(c.Request.Context(), CyberFeedbackFilter{
+		GroupID: groupID, ReviewStatus: c.Query("status"), GenerationStatus: c.Query("candidate_status"),
+	}, page, pageSize)
+	if err != nil {
+		response.ErrorFrom(c, err)
+		return
+	}
+	response.Success(c, result)
+}
+
+func (h *PromptAdminHandler) GetCyberFeedback(c *gin.Context) {
+	service, err := h.cyberService()
+	if err != nil {
+		response.ErrorFrom(c, err)
+		return
+	}
+	id, err := positiveCyberFeedbackID(c)
+	if err != nil {
+		response.ErrorFrom(c, err)
+		return
+	}
+	result, err := service.GetCyberFeedbackAdmin(c.Request.Context(), id)
+	if err != nil {
+		response.ErrorFrom(c, err)
+		return
+	}
+	response.Success(c, result)
+}
+
+func (h *PromptAdminHandler) ListCyberRules(c *gin.Context) {
+	service, err := h.cyberService()
+	if err != nil {
+		response.ErrorFrom(c, err)
+		return
+	}
+	result, err := service.ListCyberRulesAdmin(c.Request.Context())
+	if err != nil {
+		response.ErrorFrom(c, err)
+		return
+	}
+	response.Success(c, result)
+}
+
+func (h *PromptAdminHandler) AdoptCyberFeedback(c *gin.Context) {
+	service, err := h.cyberService()
+	if err != nil {
+		response.ErrorFrom(c, err)
+		return
+	}
+	id, err := positiveCyberFeedbackID(c)
+	if err != nil {
+		setPromptAdminAudit(c, "failed", infraerrors.Reason(err), nil)
+		response.ErrorFrom(c, err)
+		return
+	}
+	var request AdoptCyberFeedbackRequest
+	if err := c.ShouldBindJSON(&request); err != nil {
+		setPromptAdminAudit(c, "failed", "prompt_audit_cyber_adopt_invalid", map[string]any{"feedback_id": id})
+		response.ErrorFrom(c, infraerrors.BadRequest("prompt_audit_cyber_adopt_invalid", "CYB 反馈采纳请求无效"))
+		return
+	}
+	result, err := service.AdoptCyberFeedback(c.Request.Context(), id, request, adminID(c))
+	if err != nil {
+		setPromptAdminAudit(c, "failed", infraerrors.Reason(err), map[string]any{"feedback_id": id, "expected_config_version": request.ExpectedConfigVersion})
+		response.ErrorFrom(c, err)
+		return
+	}
+	setPromptAdminAudit(c, "success", "", cyberActionAuditFields(id, result))
+	response.Success(c, result)
+}
+
+func (h *PromptAdminHandler) RejectCyberFeedback(c *gin.Context) {
+	service, err := h.cyberService()
+	if err != nil {
+		response.ErrorFrom(c, err)
+		return
+	}
+	id, err := positiveCyberFeedbackID(c)
+	if err != nil {
+		setPromptAdminAudit(c, "failed", infraerrors.Reason(err), nil)
+		response.ErrorFrom(c, err)
+		return
+	}
+	var request RejectCyberFeedbackRequest
+	if err := c.ShouldBindJSON(&request); err != nil {
+		setPromptAdminAudit(c, "failed", "prompt_audit_cyber_reject_invalid", map[string]any{"feedback_id": id})
+		response.ErrorFrom(c, infraerrors.BadRequest("prompt_audit_cyber_reject_invalid", "CYB 反馈拒绝请求无效"))
+		return
+	}
+	result, err := service.RejectCyberFeedback(c.Request.Context(), id, request, adminID(c))
+	if err != nil {
+		setPromptAdminAudit(c, "failed", infraerrors.Reason(err), map[string]any{"feedback_id": id})
+		response.ErrorFrom(c, err)
+		return
+	}
+	setPromptAdminAudit(c, "success", "", cyberActionAuditFields(id, result))
+	response.Success(c, result)
+}
+
+func (h *PromptAdminHandler) RegenerateCyberRuleDraft(c *gin.Context) {
+	service, err := h.cyberService()
+	if err != nil {
+		response.ErrorFrom(c, err)
+		return
+	}
+	id, err := positiveCyberFeedbackID(c)
+	if err != nil {
+		setPromptAdminAudit(c, "failed", infraerrors.Reason(err), nil)
+		response.ErrorFrom(c, err)
+		return
+	}
+	result, err := service.RegenerateCyberRuleDraft(c.Request.Context(), id, adminID(c))
+	if err != nil {
+		setPromptAdminAudit(c, "failed", infraerrors.Reason(err), map[string]any{"feedback_id": id})
+		response.ErrorFrom(c, err)
+		return
+	}
+	setPromptAdminAudit(c, "success", "", cyberActionAuditFields(id, result))
+	response.Success(c, result)
+}
+
+func (h *PromptAdminHandler) RevokeCyberRule(c *gin.Context) {
+	service, err := h.cyberService()
+	if err != nil {
+		response.ErrorFrom(c, err)
+		return
+	}
+	var request RevokeCyberRuleRequest
+	if err := c.ShouldBindJSON(&request); err != nil {
+		setPromptAdminAudit(c, "failed", "prompt_audit_cyber_revoke_invalid", nil)
+		response.ErrorFrom(c, infraerrors.BadRequest("prompt_audit_cyber_revoke_invalid", "CYB 规则撤销请求无效"))
+		return
+	}
+	id := strings.TrimSpace(c.Param("id"))
+	result, err := service.RevokeCyberRule(c.Request.Context(), id, request, adminID(c))
+	if err != nil {
+		setPromptAdminAudit(c, "failed", infraerrors.Reason(err), map[string]any{"rule_id": id, "expected_config_version": request.ExpectedConfigVersion})
+		response.ErrorFrom(c, err)
+		return
+	}
+	fields := cyberActionAuditFields(0, result)
+	fields["rule_id"] = id
+	setPromptAdminAudit(c, "success", "", fields)
+	response.Success(c, result)
 }
 
 func (h *PromptAdminHandler) ListEvents(c *gin.Context) {
@@ -258,6 +439,35 @@ func adminID(c *gin.Context) int64 {
 		return 0
 	}
 	return subject.UserID
+}
+
+func positiveCyberFeedbackID(c *gin.Context) (int64, error) {
+	id, err := strconv.ParseInt(strings.TrimSpace(c.Param("id")), 10, 64)
+	if err != nil || id <= 0 {
+		return 0, infraerrors.BadRequest("prompt_audit_cyber_feedback_id_invalid", "CYB 反馈 ID 无效")
+	}
+	return id, nil
+}
+
+func cyberActionAuditFields(feedbackID int64, result *CyberFeedbackActionResult) map[string]any {
+	fields := map[string]any{}
+	if feedbackID > 0 {
+		fields["feedback_id"] = feedbackID
+	}
+	if result == nil {
+		return fields
+	}
+	fields["config_version"] = result.ConfigVersion
+	if result.Rule != nil {
+		fields["rule_id"] = result.Rule.ID
+		fields["source_feedback_id"] = result.Rule.SourceFeedbackID
+		fields["rule_status"] = result.Rule.Status
+	}
+	if result.Event != nil {
+		fields["review_status"] = result.Event.Status
+		fields["generation_status"] = result.Event.GenerationStatus
+	}
+	return fields
 }
 
 func eventFilterFromQuery(c *gin.Context) (EventFilter, error) {

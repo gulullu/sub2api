@@ -116,10 +116,15 @@ type PromptSnapshot struct {
 	Stage              string `json:"stage"`
 
 	ScanText string `json:"-"`
+
+	// cyberCanonicalDigest preserves role and segment boundaries for exact
+	// replay matching without changing the historical PromptHash contract.
+	cyberCanonicalDigest []byte
 }
 
 func (s PromptSnapshot) Redacted() PromptSnapshot {
 	s.ScanText = ""
+	s.cyberCanonicalDigest = nil
 	return s
 }
 

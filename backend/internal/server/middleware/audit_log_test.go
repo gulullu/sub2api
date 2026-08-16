@@ -132,12 +132,16 @@ func TestPromptAuditAdminOperationsUseOmittedBodiesAndAllowlistedDetails(t *test
 
 func TestPromptAuditMutationAuditRoutesHaveStableActionsAndOmitBodies(t *testing.T) {
 	expected := map[string]string{
-		"PUT /api/v1/admin/prompt-audit/config":                   "admin.prompt_audit.config.update",
-		"POST /api/v1/admin/prompt-audit/endpoints/probe":         "admin.prompt_audit.endpoint.probe",
-		"DELETE /api/v1/admin/prompt-audit/events/:id":            "admin.prompt_audit.event.delete",
-		"POST /api/v1/admin/prompt-audit/events/batch-delete":     "admin.prompt_audit.events.batch_delete",
-		"POST /api/v1/admin/prompt-audit/events/delete-preview":   "admin.prompt_audit.events.delete_preview",
-		"POST /api/v1/admin/prompt-audit/events/delete-by-filter": "admin.prompt_audit.events.filter_delete",
+		"PUT /api/v1/admin/prompt-audit/config":                       "admin.prompt_audit.config.update",
+		"POST /api/v1/admin/prompt-audit/endpoints/probe":             "admin.prompt_audit.endpoint.probe",
+		"DELETE /api/v1/admin/prompt-audit/events/:id":                "admin.prompt_audit.event.delete",
+		"POST /api/v1/admin/prompt-audit/events/batch-delete":         "admin.prompt_audit.events.batch_delete",
+		"POST /api/v1/admin/prompt-audit/events/delete-preview":       "admin.prompt_audit.events.delete_preview",
+		"POST /api/v1/admin/prompt-audit/events/delete-by-filter":     "admin.prompt_audit.events.filter_delete",
+		"POST /api/v1/admin/prompt-audit/cyber/events/:id/adopt":      "admin.prompt_audit.cyber.feedback.adopt",
+		"POST /api/v1/admin/prompt-audit/cyber/events/:id/reject":     "admin.prompt_audit.cyber.feedback.reject",
+		"POST /api/v1/admin/prompt-audit/cyber/events/:id/regenerate": "admin.prompt_audit.cyber.feedback.regenerate",
+		"POST /api/v1/admin/prompt-audit/cyber/rules/:id/revoke":      "admin.prompt_audit.cyber.rule.revoke",
 	}
 	for route, action := range expected {
 		require.Equal(t, action, auditActionOverrides[route])

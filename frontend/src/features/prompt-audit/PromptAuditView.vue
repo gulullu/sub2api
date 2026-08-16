@@ -97,6 +97,10 @@
               @preview-delete="requestFilterDeletePreview"
             />
           </div>
+
+          <div v-if="activeTab === 'cyber'" data-test="tab-panel-cyber">
+            <CyberLearningWorkspace :initial-event-id="initialCyberFeedbackId" />
+          </div>
         </main>
       </template>
     </div>
@@ -170,6 +174,7 @@ import PolicyPanel from './components/PolicyPanel.vue'
 import EventWorkspace from './components/EventWorkspace.vue'
 import EventDetailDialog from './components/EventDetailDialog.vue'
 import FilterDeleteDialog from './components/FilterDeleteDialog.vue'
+import CyberLearningWorkspace from './components/CyberLearningWorkspace.vue'
 import promptAuditAPI from './api'
 import type {
   PromptAuditDraft,
@@ -188,10 +193,14 @@ import { buildUpdateRequest, cloneData, configToDraft, draftFingerprint, emptyEv
 
 const { t, locale } = useI18n()
 const appStore = useAppStore()
-type PromptAuditPageTab = 'config' | 'events'
-const activeTab = ref<PromptAuditPageTab>('events')
+type PromptAuditPageTab = 'config' | 'events' | 'cyber'
+const initialQuery = new URLSearchParams(window.location.search)
+const parsedCyberFeedbackId = Number(initialQuery.get('cyber_feedback_id'))
+const initialCyberFeedbackId = Number.isSafeInteger(parsedCyberFeedbackId) && parsedCyberFeedbackId > 0 ? parsedCyberFeedbackId : null
+const activeTab = ref<PromptAuditPageTab>(initialQuery.get('tab') === 'cyber' || initialCyberFeedbackId ? 'cyber' : 'events')
 const pageTabs = computed(() => [
   { id: 'events' as const, label: t('admin.promptAudit.tabs.events') },
+  { id: 'cyber' as const, label: t('admin.promptAudit.tabs.cyber') },
   { id: 'config' as const, label: t('admin.promptAudit.tabs.config') },
 ])
 const serverConfig = ref<PromptAuditDraft | null>(null)

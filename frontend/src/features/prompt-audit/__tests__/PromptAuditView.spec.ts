@@ -46,6 +46,7 @@ const EventsStub = defineComponent({
   template: '<div data-test="events"><button data-test="preview" @click="$emit(\'preview-delete\')">preview</button><button data-test="change-filter" @click="$emit(\'filters-change\', { ...filters, keyword: \'changed\' })">change</button><button data-test="delete-one" @click="$emit(\'delete\', 5)">delete</button><button data-test="select-batch" @click="$emit(\'selection\', [5, 6])">select</button><button data-test="delete-batch" @click="$emit(\'batch-delete\')">batch</button></div>',
 })
 const DetailStub = defineComponent({ props: ['show', 'event', 'loading'], emits: ['close'], template: '<div data-test="detail" />' })
+const CyberStub = defineComponent({ props: ['initialEventId'], template: '<div data-test="cyber-workspace">{{ initialEventId }}</div>' })
 const ConfirmStub = defineComponent({ props: ['show', 'title', 'message'], emits: ['confirm', 'cancel'], template: '<div v-if="show" data-test="confirm"><button data-test="confirm-action" @click="$emit(\'confirm\')">confirm</button></div>' })
 const FilterDeleteStub = defineComponent({
   props: ['show', 'initialFilters', 'preview', 'previewing', 'deleting'],
@@ -55,12 +56,13 @@ const FilterDeleteStub = defineComponent({
 
 function mountView() {
   return mount(PromptAuditView, {
-    global: { stubs: { AppLayout: AppLayoutStub, RuntimeOverview: RuntimeStub, EndpointPool: EndpointStub, RiskRouteAccountSelector: RiskRouteStub, PolicyPanel: PolicyStub, EventWorkspace: EventsStub, EventDetailDialog: DetailStub, FilterDeleteDialog: FilterDeleteStub, ConfirmDialog: ConfirmStub } },
+    global: { stubs: { AppLayout: AppLayoutStub, RuntimeOverview: RuntimeStub, EndpointPool: EndpointStub, RiskRouteAccountSelector: RiskRouteStub, PolicyPanel: PolicyStub, EventWorkspace: EventsStub, EventDetailDialog: DetailStub, CyberLearningWorkspace: CyberStub, FilterDeleteDialog: FilterDeleteStub, ConfirmDialog: ConfirmStub } },
   })
 }
 
 describe('PromptAuditView', () => {
   beforeEach(() => {
+    window.history.replaceState({}, '', '/admin/prompt-audit')
     Object.values(mocks).forEach((mock) => mock.mockReset())
     mocks.getConfig.mockResolvedValue(baseConfig())
     mocks.getRuntime.mockResolvedValue(runtime())
@@ -73,6 +75,15 @@ describe('PromptAuditView', () => {
     mocks.deleteEventsByFilter.mockResolvedValue({ deleted_events: 2, deleted_jobs: 2 })
     mocks.deleteEvent.mockResolvedValue({ deleted_events: 1, deleted_jobs: 1 })
     mocks.batchDeleteEvents.mockResolvedValue({ deleted_events: 2, deleted_jobs: 2 })
+  })
+
+  it('opens the CYB tab and forwards a valid feedback deep link', async () => {
+    window.history.replaceState({}, '', '/admin/prompt-audit?tab=cyber&cyber_feedback_id=17')
+    const wrapper = mountView()
+    await flushPromises()
+    expect(wrapper.get('[data-test="tab-cyber"]').attributes('aria-selected')).toBe('true')
+    expect(wrapper.get('[data-test="cyber-workspace"]').text()).toBe('17')
+    expect(wrapper.find('[data-test="save-config"]').exists()).toBe(false)
   })
 
   it('starts config, runtime, groups, accounts, and events loads independently', async () => {
@@ -102,6 +113,13 @@ describe('PromptAuditView', () => {
     expect(wrapper.find('[data-test="pass-events-disabled-notice"]').exists()).toBe(true)
     expect(wrapper.get('[data-test="tab-events"]').text()).toContain('admin.promptAudit.tabs.events')
     expect(wrapper.get('[data-test="tab-config"]').text()).toContain('admin.promptAudit.tabs.config')
+    expect(wrapper.get('[data-test="tab-cyber"]').text()).toContain('admin.promptAudit.tabs.cyber')
+
+    await wrapper.get('[data-test="tab-cyber"]').trigger('click')
+    await flushPromises()
+    expect(wrapper.get('[data-test="tab-cyber"]').attributes('aria-selected')).toBe('true')
+    expect(wrapper.find('[data-test="cyber-workspace"]').exists()).toBe(true)
+    expect(wrapper.find('[data-test="save-config"]').exists()).toBe(false)
 
     await wrapper.get('[data-test="tab-config"]').trigger('click')
     await flushPromises()

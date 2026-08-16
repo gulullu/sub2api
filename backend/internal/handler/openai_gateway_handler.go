@@ -37,6 +37,7 @@ type OpenAIGatewayHandler struct {
 	errorPassthroughService    *service.ErrorPassthroughService
 	contentModerationService   *service.ContentModerationService
 	securityAuditCoordinator   *securityaudit.Coordinator
+	cyberFeedbackService       *securityaudit.CyberFeedbackService
 	grokMediaEligibilityProber grokMediaEligibilityProber
 	opsService                 *service.OpsService
 	concurrencyHelper          *ConcurrencyHelper
@@ -3255,6 +3256,7 @@ func (h *OpenAIGatewayHandler) recordCyberPolicyIfMarked(c *gin.Context, apiKey 
 		}
 	}
 	cmSvc := h.contentModerationService
+	cyberSvc := h.cyberFeedbackService
 	gwSvc := h.gatewayService
 	opsSvc := h.opsService
 	apiKeySvc := h.apiKeyService
@@ -3296,9 +3298,42 @@ func (h *OpenAIGatewayHandler) recordCyberPolicyIfMarked(c *gin.Context, apiKey 
 		ClientIP:        clientIPStr,
 		CreatedAt:       time.Now(),
 	}
+	cyberEvidence, hasCyberEvidence := currentCyberTurnEvidence(c)
+	isOpenAIOAuth := account != nil && account.IsOpenAIOAuth()
+	if isOpenAIOAuth && !hasCyberEvidence {
+		stage, transport, turnNumber := "http", "http", 0
+		if turn, ok := securityAuditWSTurn(c); ok && turn > 0 {
+			turnNumber, transport = turn, "websocket"
+			stage = "subsequent_turn"
+			if turn == 1 {
+				stage = "first_turn"
+			}
+		}
+		protocol := service.ContentModerationProtocolOpenAIResponses
+		if strings.Contains(inboundEndpoint, "/messages") {
+			protocol = service.ContentModerationProtocolAnthropicMessages
+		} else if strings.Contains(inboundEndpoint, "/chat/completions") {
+			protocol = service.ContentModerationProtocolOpenAIChat
+		}
+		fallbackGroupID := int64(0)
+		if groupID != nil {
+			fallbackGroupID = *groupID
+		}
+		cyberEvidence = securityaudit.CyberTurnEvidence{
+			Scope:     securityaudit.CyberFingerprintScope{GroupID: fallbackGroupID, Protocol: protocol, Stage: stage},
+			RequestID: requestID, APIKeyID: apiKeyID, Model: model, Endpoint: inboundEndpoint,
+			Transport: transport, Stage: stage, TurnNumber: turnNumber,
+		}
+		hasCyberEvidence = true
+	}
 	go func() {
 		ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 		defer cancel()
+		if cyberSvc != nil && isOpenAIOAuth && hasCyberEvidence {
+			if _, _, err := cyberSvc.ConfirmOpenAIOAuthCYB(ctx, cyberEvidence, accountID, mark.UpstreamStatus); err != nil {
+				logger.L().Warn("openai OAuth cyber feedback confirmation failed", zap.Int64("account_id", accountID), zap.Error(err))
+			}
+		}
 		if cmSvc != nil {
 			cmSvc.RecordCyberPolicyEvent(ctx, service.CyberPolicyRecordInput{
 				RequestID:       requestID,
@@ -3355,6 +3390,7 @@ func clearCyberPolicyTurnState(c *gin.Context) {
 	}
 	service.ClearOpsCyberPolicy(c)
 	c.Set(cyberPolicyRecordedKey, false)
+	c.Set(securityAuditCyberTurnEvidenceContextKey, nil)
 }
 
 func summarizeWSCloseErrorForLog(err error) (string, string) {

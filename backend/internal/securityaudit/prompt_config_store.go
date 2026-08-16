@@ -342,9 +342,10 @@ func (m *ConfigManager) buildNextStorage(current storageConfig, req UpdateConfig
 		RiskRouteAccountIDs: append([]int64(nil), current.RiskRouteAccountIDs...),
 		MaxTotalInputChars:  current.MaxTotalInputChars,
 		PromptTemplates:     clonePromptTemplates(current.PromptTemplates), ActivePromptTemplateID: current.ActivePromptTemplateID,
-		FlagThreshold:   float64Pointer(thresholdValue(current.FlagThreshold, DefaultFlagThreshold)),
-		BlockThreshold:  float64Pointer(thresholdValue(current.BlockThreshold, DefaultBlockThreshold)),
-		BlockHTTPStatus: current.BlockHTTPStatus, BlockMessage: current.BlockMessage,
+		CyberSupplementRules: cloneCyberSupplementRules(current.CyberSupplementRules),
+		FlagThreshold:        float64Pointer(thresholdValue(current.FlagThreshold, DefaultFlagThreshold)),
+		BlockThreshold:       float64Pointer(thresholdValue(current.BlockThreshold, DefaultBlockThreshold)),
+		BlockHTTPStatus:      current.BlockHTTPStatus, BlockMessage: current.BlockMessage,
 		ConfigVersion: current.ConfigVersion, UpdatedBy: actorID,
 		Endpoints: make([]StorageEndpoint, 0, len(req.Endpoints)),
 	}
@@ -359,6 +360,9 @@ func (m *ConfigManager) buildNextStorage(current storageConfig, req UpdateConfig
 	}
 	if req.ActivePromptTemplateID != nil {
 		next.ActivePromptTemplateID = strings.TrimSpace(*req.ActivePromptTemplateID)
+	}
+	if req.cyberSupplementRules != nil {
+		next.CyberSupplementRules = cloneCyberSupplementRules(*req.cyberSupplementRules)
 	}
 	if req.FlagThreshold != nil {
 		next.FlagThreshold = float64Pointer(*req.FlagThreshold)
@@ -436,6 +440,65 @@ func (m *ConfigManager) RuntimeState() (expected int64, active int64, loadedAt *
 	loadError = m.lastLoadError
 	m.stateMu.RUnlock()
 	return
+}
+
+// SaveCyberSupplementRules is the only config mutation path for reviewed CYB
+// rules. It reconstructs the ordinary update request from the full storage
+// snapshot so endpoint credentials remain preserved by Save's existing
+// token-omitted/clear=false semantics and the same DB CAS, version increment,
+// snapshot install, Pub/Sub invalidation, and decision-cache key are reused.
+func (m *ConfigManager) SaveCyberSupplementRules(ctx context.Context, expectedVersion int64, rules []CyberSupplementRule, actorID int64) (PublicConfig, error) {
+	if m == nil {
+		return PublicConfig{}, infraerrors.ServiceUnavailable(ErrorCodeConfigUnavailable, "提示词审计配置暂不可用")
+	}
+	snapshot := m.snapshot.Load()
+	if snapshot == nil {
+		return PublicConfig{}, infraerrors.ServiceUnavailable(ErrorCodeConfigUnavailable, "提示词审计配置暂不可用")
+	}
+	storage := cloneStorageConfig(snapshot.storage)
+	if storage.ConfigVersion != expectedVersion {
+		return PublicConfig{}, infraerrors.Conflict(ErrorCodeConfigConflict, "提示词审计配置已被其他管理员更新")
+	}
+	rules = normalizeCyberSupplementRules(rules)
+	if err := validateCyberSupplementRules(rules); err != nil {
+		return PublicConfig{}, err
+	}
+	req := updateRequestFromStorage(storage)
+	req.ExpectedConfigVersion = expectedVersion
+	req.cyberSupplementRules = &rules
+	return m.Save(ctx, req, actorID)
+}
+
+func updateRequestFromStorage(storage storageConfig) UpdateConfigRequest {
+	riskIDs := append([]int64(nil), storage.RiskRouteAccountIDs...)
+	maxChars := storage.MaxTotalInputChars
+	templates := clonePromptTemplates(storage.PromptTemplates)
+	activeTemplateID := storage.ActivePromptTemplateID
+	flagThreshold := thresholdValue(storage.FlagThreshold, DefaultFlagThreshold)
+	blockThreshold := thresholdValue(storage.BlockThreshold, DefaultBlockThreshold)
+	blockStatus := storage.BlockHTTPStatus
+	blockMessage := storage.BlockMessage
+	request := UpdateConfigRequest{
+		ExpectedConfigVersion: storage.ConfigVersion,
+		Enabled:               storage.Enabled, BlockingEnabled: storage.BlockingEnabled,
+		BlockingLatestTurnOnly: storage.BlockingLatestTurnOnly, StorePassEvents: storage.StorePassEvents,
+		Strategy: storage.Strategy, WorkerCount: storage.WorkerCount, QueueCapacity: storage.QueueCapacity,
+		Scanners: append([]string(nil), storage.Scanners...), AllGroups: storage.AllGroups,
+		GroupIDs: append([]int64(nil), storage.GroupIDs...), RiskRouteAccountIDs: &riskIDs,
+		MaxTotalInputChars: &maxChars, PromptTemplates: &templates, ActivePromptTemplateID: &activeTemplateID,
+		FlagThreshold: &flagThreshold, BlockThreshold: &blockThreshold,
+		BlockHTTPStatus: &blockStatus, BlockMessage: &blockMessage,
+		Endpoints: make([]UpdateEndpoint, 0, len(storage.Endpoints)),
+	}
+	for _, endpoint := range storage.Endpoints {
+		request.Endpoints = append(request.Endpoints, UpdateEndpoint{
+			ID: endpoint.ID, Name: endpoint.Name, Priority: endpoint.Priority,
+			Protocol: endpoint.Protocol, Adapter: endpoint.Adapter, BaseURL: endpoint.BaseURL,
+			Model: endpoint.Model, TimeoutMS: endpoint.TimeoutMS, InputLimit: endpoint.InputLimit,
+			Enabled: endpoint.Enabled,
+		})
+	}
+	return request
 }
 
 func (m *ConfigManager) Encrypt(value string) (string, error) { return m.encryptor.Encrypt(value) }
@@ -543,6 +606,7 @@ func cloneStorageConfig(cfg storageConfig) storageConfig {
 	cfg.GroupIDs = append([]int64(nil), cfg.GroupIDs...)
 	cfg.RiskRouteAccountIDs = append([]int64(nil), cfg.RiskRouteAccountIDs...)
 	cfg.PromptTemplates = clonePromptTemplates(cfg.PromptTemplates)
+	cfg.CyberSupplementRules = cloneCyberSupplementRules(cfg.CyberSupplementRules)
 	cfg.FlagThreshold = float64Pointer(thresholdValue(cfg.FlagThreshold, DefaultFlagThreshold))
 	cfg.BlockThreshold = float64Pointer(thresholdValue(cfg.BlockThreshold, DefaultBlockThreshold))
 	cfg.Endpoints = append([]StorageEndpoint(nil), cfg.Endpoints...)
@@ -554,6 +618,7 @@ func cloneActiveConfig(cfg ActiveConfig) ActiveConfig {
 	cfg.GroupIDs = append([]int64(nil), cfg.GroupIDs...)
 	cfg.RiskRouteAccountIDs = append([]int64(nil), cfg.RiskRouteAccountIDs...)
 	cfg.PromptTemplates = clonePromptTemplates(cfg.PromptTemplates)
+	cfg.CyberSupplementRules = cloneCyberSupplementRules(cfg.CyberSupplementRules)
 	cfg.Endpoints = append([]ActiveEndpoint(nil), cfg.Endpoints...)
 	return cfg
 }

@@ -31,6 +31,7 @@ const (
 	NotificationEmailEventContentModerationViolation  = "content_moderation.violation_notice"
 	NotificationEmailEventContentModerationDisabled   = "content_moderation.account_disabled"
 	NotificationEmailEventCyberPolicyNotice           = "content_moderation.cyber_policy_notice"
+	NotificationEmailEventOpenAIOAuthCYBAdminAlert    = "security.openai_oauth_cyb_admin_alert"
 	NotificationEmailEventOpsAlert                    = "ops.alert"
 	NotificationEmailEventOpsScheduledReport          = "ops.scheduled_report"
 
@@ -915,6 +916,15 @@ func notificationEmailSampleVariables(locale string) map[string]string {
 			"order_id":            "1024",
 			"unsubscribe_url":     "https://example.com/unsubscribe",
 			"account_id":          "1001",
+			"group_id":            "12",
+			"event_id":            "3001",
+			"model":               "gpt-5.6-sol",
+			"endpoint":            "/v1/responses",
+			"protocol":            "openai_responses",
+			"transport":           "http",
+			"stage":               "http",
+			"upstream_status":     "400",
+			"admin_link":          "https://example.com/admin/prompt-audit?tab=cyber&cyber_feedback_id=3001",
 			"account_name":        "openai-main",
 			"platform":            "openai",
 			"quota_dimension":     "每日额度",
@@ -963,6 +973,15 @@ func notificationEmailSampleVariables(locale string) map[string]string {
 		"order_id":            "1024",
 		"unsubscribe_url":     "https://example.com/unsubscribe",
 		"account_id":          "1001",
+		"group_id":            "12",
+		"event_id":            "3001",
+		"model":               "gpt-5.6-sol",
+		"endpoint":            "/v1/responses",
+		"protocol":            "openai_responses",
+		"transport":           "http",
+		"stage":               "http",
+		"upstream_status":     "400",
+		"admin_link":          "https://example.com/admin/prompt-audit?tab=cyber&cyber_feedback_id=3001",
 		"account_name":        "openai-main",
 		"platform":            "openai",
 		"quota_dimension":     "Daily quota",
@@ -1032,6 +1051,7 @@ var notificationEmailEventOrder = []string{
 	NotificationEmailEventContentModerationViolation,
 	NotificationEmailEventContentModerationDisabled,
 	NotificationEmailEventCyberPolicyNotice,
+	NotificationEmailEventOpenAIOAuthCYBAdminAlert,
 	NotificationEmailEventOpsAlert,
 	NotificationEmailEventOpsScheduledReport,
 }
@@ -1128,6 +1148,15 @@ var notificationEmailEventDefinitions = map[string]NotificationEmailEventInfo{
 		Optional:    false,
 		Placeholders: append(append([]string{}, notificationEmailCommonPlaceholders...),
 			"triggered_at", "model", "group_name", "upstream_message"),
+	},
+	NotificationEmailEventOpenAIOAuthCYBAdminAlert: {
+		Event:       NotificationEmailEventOpenAIOAuthCYBAdminAlert,
+		Label:       "OpenAI OAuth CYB administrator alert",
+		Description: "Sent to the fixed administrator recipient after a real OpenAI OAuth cyber_policy response is confirmed.",
+		Category:    "security",
+		Optional:    false,
+		Placeholders: append(append([]string{}, notificationEmailCommonPlaceholders...),
+			"event_id", "group_id", "account_id", "model", "endpoint", "protocol", "transport", "stage", "upstream_status", "triggered_at", "admin_link"),
 	},
 	NotificationEmailEventOpsAlert: {
 		Event:       NotificationEmailEventOpsAlert,
@@ -1402,6 +1431,40 @@ var notificationEmailOfficialTemplates = map[string]map[string]notificationEmail
   <tr><td style="width:128px;vertical-align:top;">上游说明</td><td style="overflow-wrap:anywhere;word-break:break-all;white-space:pre-wrap;">{{upstream_message}}</td></tr>
 </table>
 <p>如认为系误判，可调整请求措辞后重试，或申请获得授权的安全访问权限。</p>`),
+		},
+	},
+	NotificationEmailEventOpenAIOAuthCYBAdminAlert: {
+		notificationEmailDefaultLocale: {
+			Subject: "[{{site_name}}] OpenAI OAuth upstream security rejection alert · #{{event_id}}",
+			HTML: notificationEmailCard("#b91c1c", "OpenAI OAuth upstream security rejection alert", `
+<p>A real upstream security-policy rejection was confirmed.</p>
+<table style="width:100%;border-collapse:collapse;table-layout:fixed;">
+  <tr><td>Event ID</td><td>{{event_id}}</td></tr>
+  <tr><td>Group ID</td><td>{{group_id}}</td></tr>
+  <tr><td>Account ID</td><td>{{account_id}}</td></tr>
+  <tr><td>Model</td><td>{{model}}</td></tr>
+  <tr><td>Endpoint</td><td>{{endpoint}}</td></tr>
+  <tr><td>Protocol / transport / stage</td><td>{{protocol}} / {{transport}} / {{stage}}</td></tr>
+  <tr><td>Upstream status</td><td>{{upstream_status}}</td></tr>
+  <tr><td>Triggered at</td><td>{{triggered_at}}</td></tr>
+</table>
+<p><a href="{{admin_link}}">Open administrator review</a></p>`),
+		},
+		notificationEmailLocaleChinese: {
+			Subject: "[{{site_name}}] OpenAI OAuth 上游安全拦截告警 · #{{event_id}}",
+			HTML: notificationEmailCard("#b91c1c", "OpenAI OAuth 上游安全拦截告警", `
+<p>已确认一次真实的上游安全策略拒绝。</p>
+<table style="width:100%;border-collapse:collapse;table-layout:fixed;">
+  <tr><td>事件 ID</td><td>{{event_id}}</td></tr>
+  <tr><td>分组 ID</td><td>{{group_id}}</td></tr>
+  <tr><td>账号 ID</td><td>{{account_id}}</td></tr>
+  <tr><td>模型</td><td>{{model}}</td></tr>
+  <tr><td>端点</td><td>{{endpoint}}</td></tr>
+  <tr><td>协议 / 传输 / 阶段</td><td>{{protocol}} / {{transport}} / {{stage}}</td></tr>
+  <tr><td>上游状态码</td><td>{{upstream_status}}</td></tr>
+  <tr><td>触发时间</td><td>{{triggered_at}}</td></tr>
+</table>
+<p><a href="{{admin_link}}">打开管理员审核页面</a></p>`),
 		},
 	},
 	NotificationEmailEventOpsAlert: {

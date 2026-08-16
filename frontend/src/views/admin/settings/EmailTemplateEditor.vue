@@ -390,6 +390,11 @@ const eventDisplayMeta: Record<string, EventDisplayMeta> = {
     timing: "内容审计违规次数达到封禁阈值并自动禁用用户账号时发送。",
     categoryLabel: "风控",
   },
+  "security.openai_oauth_cyb_admin_alert": {
+    label: "OpenAI OAuth CYB 管理员告警",
+    timing: "真实上游 CYB 首次确认时发送给管理员，不含请求正文或账号名称，不可退订。",
+    categoryLabel: "安全告警",
+  },
   "ops.alert": {
     label: "运维告警",
     timing: "运维监控规则触发告警并满足邮件通知配置时发送给运维收件人。",
@@ -452,6 +457,11 @@ const eventDisplayMetaEn: Record<string, EventDisplayMeta> = {
     label: "Risk Control Account Disabled",
     timing: "Sent when content moderation reaches the ban threshold and automatically disables the user account.",
     categoryLabel: "Risk Control",
+  },
+  "security.openai_oauth_cyb_admin_alert": {
+    label: "OpenAI OAuth CYB Admin Alert",
+    timing: "Sent to administrators when a real upstream CYB signal is confirmed for the first time. It contains no request body or account name and cannot be unsubscribed.",
+    categoryLabel: "Security Alert",
   },
   "ops.alert": {
     label: "Ops Alert",

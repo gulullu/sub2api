@@ -15,6 +15,9 @@ import (
 const securityAuditCompletedContextKey = "sub2api.security_audit.completed"
 const securityAuditWSTurnContextKey = "sub2api.security_audit.ws_turn"
 const securityAuditWSDedupeContextKey = "sub2api.security_audit.ws_dedupe"
+const securityAuditCyberTurnEvidenceContextKey = "sub2api.security_audit.cyber_turn_evidence"
+
+const openAIOAuthCyberReplayErrorCode = "openai_oauth_cyber_replay"
 
 type securityAuditWSDedupeEntry struct {
 	stage    string
@@ -55,6 +58,9 @@ func (h *OpenAIGatewayHandler) checkSecurityAudit(c *gin.Context, reqLog *zap.Lo
 	if h == nil {
 		return nil
 	}
+	if decision := h.checkOpenAIOAuthCyberReplay(c, apiKey, subject, protocol, model, body, "http"); decision != nil {
+		return decision
+	}
 	return runSecurityAudit(c, reqLog, h.securityAuditCoordinator, h.contentModerationService, apiKey, subject, protocol, model, body, "http")
 }
 
@@ -62,7 +68,58 @@ func (h *OpenAIGatewayHandler) checkSecurityAuditStage(c *gin.Context, reqLog *z
 	if h == nil {
 		return nil
 	}
+	if decision := h.checkOpenAIOAuthCyberReplay(c, apiKey, subject, protocol, model, body, stage); decision != nil {
+		return decision
+	}
 	return runSecurityAudit(c, reqLog, h.securityAuditCoordinator, h.contentModerationService, apiKey, subject, protocol, model, body, stage)
+}
+
+func (h *OpenAIGatewayHandler) checkOpenAIOAuthCyberReplay(c *gin.Context, apiKey *service.APIKey, subject middleware2.AuthSubject, protocol, model string, body []byte, stage string) *securityaudit.Decision {
+	if h == nil || h.cyberFeedbackService == nil || c == nil || c.Request == nil {
+		return nil
+	}
+	request := buildSecurityAuditRequest(c, apiKey, subject, protocol, model, body, stage)
+	turnNumber := 0
+	if isSecurityAuditWebSocketStage(request.Stage) {
+		turnNumber = 1
+		if turn, ok := securityAuditWSTurn(c); ok && turn > 0 {
+			turnNumber = turn
+		}
+	}
+	evidence, ok := h.cyberFeedbackService.PrepareTurn(request, turnNumber)
+	if !ok {
+		return nil
+	}
+	// This slot is overwritten for every WS response.create turn and captured
+	// before the asynchronous post-forward recorder starts.
+	c.Set(securityAuditCyberTurnEvidenceContextKey, evidence)
+	if !h.cyberFeedbackService.IsReplay(c.Request.Context(), evidence) {
+		return nil
+	}
+	decision := &securityaudit.Decision{
+		Kind: securityaudit.DecisionBlock, HTTPStatus: http.StatusForbidden,
+		ErrorCode:     openAIOAuthCyberReplayErrorCode,
+		ClientMessage: "Request blocked because an identical prompt was previously rejected by the upstream cyber-security policy",
+		Prompt: &securityaudit.PromptDecision{
+			Kind: securityaudit.DecisionBlock, ErrorCode: openAIOAuthCyberReplayErrorCode,
+			AllowNextStage: false, BlockHTTPStatus: http.StatusForbidden,
+		},
+		AllowNextStage: false,
+	}
+	applySecurityAuditDecisionContext(c, *decision)
+	return decision
+}
+
+func currentCyberTurnEvidence(c *gin.Context) (securityaudit.CyberTurnEvidence, bool) {
+	if c == nil {
+		return securityaudit.CyberTurnEvidence{}, false
+	}
+	value, exists := c.Get(securityAuditCyberTurnEvidenceContextKey)
+	if !exists {
+		return securityaudit.CyberTurnEvidence{}, false
+	}
+	evidence, ok := value.(securityaudit.CyberTurnEvidence)
+	return evidence, ok
 }
 
 func runSecurityAudit(c *gin.Context, reqLog *zap.Logger, coordinator *securityaudit.Coordinator, legacy *service.ContentModerationService, apiKey *service.APIKey, subject middleware2.AuthSubject, protocol, model string, body []byte, stage string) *securityaudit.Decision {

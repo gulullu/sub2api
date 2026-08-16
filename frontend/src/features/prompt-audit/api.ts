@@ -13,6 +13,10 @@ import type {
   PromptEventPage,
   PromptProbeResult,
   PromptAuditEndpointDraft,
+  CyberFeedbackActionResult,
+  CyberFeedbackEvent,
+  CyberFeedbackPage,
+  CyberFeedbackStatus,
 } from './types'
 import { eventFilterPayload, eventQueryParams } from './viewModel'
 
@@ -65,6 +69,51 @@ export async function listEvents(
 
 export async function getEvent(id: number): Promise<PromptAuditEvent> {
   const { data } = await apiClient.get<PromptAuditEvent>(`${basePath}/events/${id}`)
+  return data
+}
+
+export async function listCyberEvents(
+  status: CyberFeedbackStatus,
+  page: number,
+  pageSize: number,
+): Promise<CyberFeedbackPage> {
+  const { data } = await apiClient.get<CyberFeedbackPage>(`${basePath}/cyber/events`, {
+    params: { status, page, page_size: pageSize },
+  })
+  return data
+}
+
+export async function getCyberEvent(id: number): Promise<CyberFeedbackActionResult> {
+  const { data } = await apiClient.get<CyberFeedbackActionResult | CyberFeedbackEvent>(`${basePath}/cyber/events/${id}`)
+  return 'id' in data ? { event: data } : data
+}
+
+export async function adoptCyberEvent(
+  id: number,
+  ruleText: string,
+  expectedConfigVersion: number,
+): Promise<CyberFeedbackActionResult> {
+  const { data } = await apiClient.post<CyberFeedbackActionResult>(`${basePath}/cyber/events/${id}/adopt`, {
+    rule_text: ruleText,
+    expected_config_version: expectedConfigVersion,
+  })
+  return data
+}
+
+export async function rejectCyberEvent(id: number, reason: string): Promise<CyberFeedbackActionResult> {
+  const { data } = await apiClient.post<CyberFeedbackActionResult>(`${basePath}/cyber/events/${id}/reject`, { reason })
+  return data
+}
+
+export async function regenerateCyberCandidate(id: number): Promise<CyberFeedbackActionResult> {
+  const { data } = await apiClient.post<CyberFeedbackActionResult>(`${basePath}/cyber/events/${id}/regenerate`)
+  return data
+}
+
+export async function revokeCyberRule(id: string, expectedConfigVersion: number): Promise<CyberFeedbackActionResult> {
+  const { data } = await apiClient.post<CyberFeedbackActionResult>(`${basePath}/cyber/rules/${encodeURIComponent(id)}/revoke`, {
+    expected_config_version: expectedConfigVersion,
+  })
   return data
 }
 
@@ -154,6 +203,12 @@ export const promptAuditAPI = {
   getRuntime,
   listEvents,
   getEvent,
+  listCyberEvents,
+  getCyberEvent,
+  adoptCyberEvent,
+  rejectCyberEvent,
+  regenerateCyberCandidate,
+  revokeCyberRule,
   deleteEvent,
   batchDeleteEvents,
   previewDelete,

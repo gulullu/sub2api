@@ -68,4 +68,34 @@ describe('Prompt Audit API', () => {
       snapshot_max_id: 10, filter_hash: 'a'.repeat(64), confirmation_token: 'opaque-token', confirm: true,
     }))
   })
+
+  it('uses the isolated CYB feedback and rule endpoints with optimistic config versions', async () => {
+    client.get.mockResolvedValue({ data: { items: [], total: 0, page: 1, page_size: 20, active_rules: [], config_version: 30 } })
+    await promptAuditAPI.listCyberEvents('pending', 2, 20)
+    expect(client.get).toHaveBeenCalledWith('/admin/prompt-audit/cyber/events', {
+      params: { status: 'pending', page: 2, page_size: 20 },
+    })
+
+    client.get.mockResolvedValue({ data: { event: { id: 17 } } })
+    await promptAuditAPI.getCyberEvent(17)
+    expect(client.get).toHaveBeenCalledWith('/admin/prompt-audit/cyber/events/17')
+
+    client.post.mockResolvedValue({ data: { config_version: 31 } })
+    await promptAuditAPI.adoptCyberEvent(17, 'Detect abstract automation abuse patterns.', 30)
+    expect(client.post).toHaveBeenCalledWith('/admin/prompt-audit/cyber/events/17/adopt', {
+      rule_text: 'Detect abstract automation abuse patterns.',
+      expected_config_version: 30,
+    })
+
+    await promptAuditAPI.rejectCyberEvent(17, 'Not generalizable')
+    expect(client.post).toHaveBeenCalledWith('/admin/prompt-audit/cyber/events/17/reject', { reason: 'Not generalizable' })
+
+    await promptAuditAPI.regenerateCyberCandidate(17)
+    expect(client.post).toHaveBeenCalledWith('/admin/prompt-audit/cyber/events/17/regenerate')
+
+    await promptAuditAPI.revokeCyberRule('cyb/rule 17', 31)
+    expect(client.post).toHaveBeenCalledWith('/admin/prompt-audit/cyber/rules/cyb%2Frule%2017/revoke', {
+      expected_config_version: 31,
+    })
+  })
 })

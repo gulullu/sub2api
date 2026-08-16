@@ -306,6 +306,67 @@ export interface PromptAuditGroup {
   platform: string
 }
 
+export type CyberFeedbackStatus = 'pending' | 'approved' | 'rejected'
+export type CyberPolicyRuleStatus = 'active' | 'revoked' | string
+
+// CYB feedback deliberately exposes only the minimum metadata needed for
+// administrator review. Raw prompts, hashes, user/key identity, and account
+// names are not part of this frontend contract.
+export interface CyberFeedbackEvent {
+  id: number
+  request_id: string
+  turn_number?: number
+  account_id: number | null
+  group_id: number | null
+  model: string
+  endpoint: string
+  protocol: string
+  stage: string
+  transport: string
+  upstream_status: number | null
+  redacted_preview: string
+  candidate_rule_text: string
+  generation_status: 'pending' | 'generated' | 'failed' | string
+  generation_error_code: string
+  status: CyberFeedbackStatus
+  confirm_count: number
+  similar_count?: number
+  first_confirmed_at?: string
+  last_confirmed_at?: string
+  created_at?: string
+  updated_at?: string
+  reviewed_at: string | null
+  reviewed_by: number | null
+  rule_id: string | null
+  config_version: number
+  admin_alert_status?: string
+}
+
+export interface CyberPolicyRule {
+  id: string
+  rule_text: string
+  source_feedback_id: number
+  status: CyberPolicyRuleStatus
+  created_at: string
+  created_by: number
+  config_version: number
+}
+
+export interface CyberFeedbackPage {
+  items: CyberFeedbackEvent[]
+  total: number
+  page: number
+  page_size: number
+  active_rules: CyberPolicyRule[]
+  config_version: number
+}
+
+export interface CyberFeedbackActionResult {
+  event?: CyberFeedbackEvent
+  rule?: CyberPolicyRule
+  config_version?: number
+}
+
 export interface PromptLoadErrors {
   config: string
   runtime: string

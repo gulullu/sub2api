@@ -3,7 +3,7 @@ export default {
     title: '提示词审计',
     description: '通过 OpenAI 兼容审计节点异步复核或同步阻止用户输入；事件的完整提示词会入库保存，仅供管理员复核。',
     configVersion: '配置版本 v{version}',
-    tabs: { config: '配置', events: '事件' },
+    tabs: { config: '配置', events: '事件', cyber: 'CYB 反馈 / 规则' },
     actions: { refresh: '刷新运行态', retry: '重试', Allow: '放行', Warn: '警告', Block: '阻止' },
     common: { actions: '操作', never: '从未' },
     mode: { off: '已关闭', async_audit: '异步只审计', blocking: '同步审计并阻止' },
@@ -126,6 +126,34 @@ export default {
         chunks: '分片数', latency: '耗时', protocol: '协议',
       },
       deleteConfirmTitle: '删除审计事件？', deleteConfirmMessage: '将永久删除 {count} 条事件及符合条件的孤立任务。', filterDeleteCount: '服务端快照匹配 {count} 条事件。', snapshotMax: '快照最大事件 ID', expiresAt: '确认令牌过期时间', filterDeleteWarning: '只删除预览高水位内的事件；预览后产生的新事件会保留。筛选一旦变化，必须重新预览。', confirmFilterDelete: '确认永久删除',
+    },
+    cyber: {
+      title: 'CYB 反馈与规则学习',
+      description: '复核上游已确认的 CYB 信号，将安全、抽象的模式采纳为审核规则。本页面绝不展示原始提示词、Hash、用户、Key 或账号名称。',
+      refresh: '刷新', statusLabel: 'CYB 复核状态', total: '共 {count} 条', empty: '当前状态下没有事件。', review: '复核', noPreview: '暂无安全预览。',
+      previous: '上一页', next: '下一页', page: '第 {page} / {pages} 页', detailTitle: 'CYB 反馈详情',
+      safePreview: '脱敏预览', safePreviewHint: '仅显示服务端生成的脱敏片段；本页面不会返回原始输入或提示词 Hash。', safeMetadata: '安全元数据',
+      promptInjection: '{count} 条生效规则会自动加入审核提示词 · 配置版本 v{version}',
+      promptInjectionHint: '采纳或撤销规则都会生成新配置版本；审核节点会自动使用已采纳的规则补充。',
+      status: { pending: '待复核', approved: '已采纳', rejected: '已拒绝' },
+      fields: {
+        requestId: 'Request ID', accountId: '账号 ID', groupId: '分组 ID', model: '模型', endpoint: '入口', protocol: '协议', stage: '阶段', transport: '传输方式', upstreamStatus: '上游状态码',
+        confirmCount: '确认次数', similarCount: '相似事件数', firstConfirmed: '首次确认', lastConfirmed: '最近确认', reviewedAt: '复核时间', reviewedBy: '复核管理员 ID', ruleId: '规则 ID', configVersion: '配置版本', adminAlert: '管理员告警',
+      },
+      generation: {
+        pending: '系统正在自动生成抽象候选规则，无需手工总结。', failed: '候选规则生成失败。', regenerate: '重新生成候选规则', unknownError: 'candidate_generation_failed',
+      },
+      adopt: {
+        ruleLabel: '系统生成的候选规则', rulePlaceholder: '等待系统自动生成抽象规则…',
+        ruleHint: '请复核并按需编辑抽象规则；不要补充请求正文、身份信息、Key、Hash 或账号名称。', action: '采纳规则',
+      },
+      reject: { reasonLabel: '拒绝原因（可选）', reasonPlaceholder: '可选：记录为何不应将此候选采纳为规则', action: '拒绝反馈' },
+      rules: { title: '生效规则', description: '当前已加入审核提示词的抽象规则。', empty: '暂无生效的 CYB 规则。', revoke: '撤销' },
+      messages: { adopted: '规则已采纳，审核配置已更新到 v{version}。', rejected: '反馈已拒绝。', revoked: '规则已撤销，审核配置已更新到 v{version}。', regenerating: '已启动候选规则重新生成。' },
+      errors: {
+        load: '无法加载 CYB 反馈。', adopt: '无法采纳此规则。', reject: '无法拒绝此反馈。', revoke: '无法撤销此规则。', regenerate: '无法重新生成候选规则。',
+        configConflict: '其他会话已更新审核配置，页面已刷新到最新版本；请复核后重试。',
+      },
     },
     messages: { saved: '提示词审计配置已保存，明文 API Key 状态已清除。', probeSucceeded: '审计节点连接正常。', deleted: '已删除 {count} 条审计事件。' },
     errors: {
