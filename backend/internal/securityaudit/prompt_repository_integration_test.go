@@ -198,6 +198,41 @@ func TestPromptAuditDatabasePersistsFullPromptOnEventsOnly(t *testing.T) {
 	require.LessOrEqual(t, len([]rune(message)), 160)
 }
 
+func TestPromptAuditConfidenceReasonIsFullInDetailAndBoundedInList(t *testing.T) {
+	db := openPromptAuditIntegrationDB(t)
+	repo := NewPostgreSQLRepository(db)
+	ctx := context.Background()
+
+	rawReason := strings.Repeat("完整抽象判断依据。", 40) + "\x00\n最后一行仍然保留。"
+	response, err := json.Marshal(map[string]any{"confidence": 0.9, "reason": rawReason})
+	require.NoError(t, err)
+	parsed, err := ParseConfidenceJSON(string(response), ActiveEndpoint{FlagThreshold: 0.4, BlockThreshold: 0.7})
+	require.NoError(t, err)
+	expectedReason := strings.ReplaceAll(rawReason, "\x00", "")
+	require.Equal(t, expectedReason, parsed.Reason)
+	require.NotContains(t, parsed.Reason, "\x00")
+
+	aggregated, err := AggregateResults([]*NormalizedResult{parsed}, 0)
+	require.NoError(t, err)
+	require.Equal(t, expectedReason, aggregated.ScannerEvidence[confidenceScoreKey])
+	event, err := repo.RecordBlocking(ctx, integrationSnapshot("reason"), 1, aggregated, true)
+	require.NoError(t, err)
+
+	page, err := repo.ListEvents(ctx, EventFilter{RequestID: "request-reason"}, 1, 100)
+	require.NoError(t, err)
+	require.Len(t, page.Items, 1)
+	listReason := page.Items[0].ScannerEvidence[confidenceScoreKey]
+	require.Len(t, []rune(listReason), maxScannerEvidenceListPreviewRunes)
+	require.True(t, strings.HasSuffix(listReason, "…"))
+	require.NotEqual(t, expectedReason, listReason)
+	require.Equal(t, listReason, page.Items[0].IssueSummaries[0].Evidence)
+
+	detail, err := repo.GetEvent(ctx, event.ID)
+	require.NoError(t, err)
+	require.Equal(t, expectedReason, detail.ScannerEvidence[confidenceScoreKey])
+	require.Equal(t, expectedReason, detail.IssueSummaries[0].Evidence)
+}
+
 func TestPromptAuditRepositoryAdmissionClaimFencingAndEventTransaction(t *testing.T) {
 	db := openPromptAuditIntegrationDB(t)
 	repo := NewPostgreSQLRepository(db)

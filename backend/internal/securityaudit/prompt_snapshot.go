@@ -634,6 +634,17 @@ func systemPromptSegments(texts []string) []promptSegment {
 }
 
 func RedactPreview(value string, maxRunes int) string {
+	return TrimRunes(RedactSensitiveText(value), maxRunes)
+}
+
+// RedactSensitiveText removes credential and identity patterns without
+// shortening the remaining text. Scanner evidence uses this path so an
+// administrator can review the complete reason returned by the guard while
+// secrets accidentally echoed by the model remain masked.
+func RedactSensitiveText(value string) string {
+	// PostgreSQL text/jsonb cannot store U+0000 even when it arrives through a
+	// valid JSON escape. Strip it before the evidence reaches persistence.
+	value = strings.ReplaceAll(value, "\x00", "")
 	value = bearerPattern.ReplaceAllString(value, "Bearer ***")
 	value = apiKeyPattern.ReplaceAllStringFunc(value, func(match string) string {
 		if index := strings.IndexAny(match, ":= \t"); index >= 0 {
@@ -644,7 +655,7 @@ func RedactPreview(value string, maxRunes int) string {
 	value = canaryPattern.ReplaceAllString(value, "${1}***")
 	value = emailPattern.ReplaceAllString(value, "***@***")
 	value = phonePattern.ReplaceAllString(value, "***PHONE***")
-	return TrimRunes(value, maxRunes)
+	return value
 }
 
 // BuildPromptPreview stores only a short, non-recoverable head of sanitized

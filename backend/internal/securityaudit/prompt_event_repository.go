@@ -51,6 +51,8 @@ type DeleteResult struct {
 	JobIDs        []int64 `json:"-"`
 }
 
+const maxScannerEvidenceListPreviewRunes = 160
+
 type EventRepository interface {
 	ListEvents(ctx context.Context, filter EventFilter, page, pageSize int) (*EventPage, error)
 	GetEvent(ctx context.Context, id int64) (*Event, error)
@@ -78,7 +80,7 @@ func (r *PostgreSQLRepository) ListEvents(ctx context.Context, filter EventFilte
 	queryArgs := append([]any(nil), args...)
 	limitIndex := len(queryArgs) + 1
 	queryArgs = append(queryArgs, pageSize, (page-1)*pageSize)
-	rows, err := r.db.QueryContext(ctx, `SELECT `+eventColumns("e")+` FROM prompt_audit_events e`+where+
+	rows, err := r.db.QueryContext(ctx, `SELECT `+eventListColumns("e")+` FROM prompt_audit_events e`+where+
 		fmt.Sprintf(` ORDER BY e.created_at DESC, e.id DESC LIMIT $%d OFFSET $%d`, limitIndex, limitIndex+1), queryArgs...)
 	if err != nil {
 		return nil, err
@@ -310,20 +312,31 @@ func buildEventWhere(filter EventFilter, firstIndex int) (string, []any) {
 	return strings.Join(clauses, ""), args
 }
 
-func eventColumns(alias string) string {
+func eventColumns(alias, scannerEvidenceExpression string) string {
 	return fmt.Sprintf(`%[1]s.id,%[1]s.job_id,%[1]s.request_id,%[1]s.user_id,%[1]s.username_snapshot,
 		%[1]s.user_email_snapshot,%[1]s.api_key_id,%[1]s.api_key_name_snapshot,%[1]s.group_id,%[1]s.group_name,
 		%[1]s.provider,%[1]s.endpoint,%[1]s.protocol,%[1]s.model,%[1]s.prompt_hash,%[1]s.redacted_preview,
 		%[1]s.stage,%[1]s.decision,%[1]s.risk_level,%[1]s.action,%[1]s.categories,%[1]s.matched_scanners,
-		%[1]s.scanner_scores,%[1]s.scanner_evidence,%[1]s.scanner_backend,%[1]s.scanner_version,
+		%[1]s.scanner_scores,%[2]s,%[1]s.scanner_backend,%[1]s.scanner_version,
 		%[1]s.guard_endpoint_id,%[1]s.policy_id,%[1]s.policy_version,%[1]s.config_version,
-		%[1]s.chunk_total,%[1]s.latency_ms,%[1]s.created_at`, alias)
+		%[1]s.chunk_total,%[1]s.latency_ms,%[1]s.created_at`, alias, scannerEvidenceExpression)
+}
+
+// eventListColumns projects only a bounded evidence preview. The full scanner
+// reason remains stored and is loaded exclusively by GetEvent, preventing a
+// 100-row list response from multiplying large guard responses.
+func eventListColumns(alias string) string {
+	evidence := fmt.Sprintf(`COALESCE((SELECT jsonb_object_agg(item.key,
+		CASE WHEN char_length(item.value) > %[2]d THEN left(item.value, %[3]d) || '…' ELSE item.value END)
+		FROM jsonb_each_text(%[1]s.scanner_evidence) AS item), '{}'::jsonb)`,
+		alias, maxScannerEvidenceListPreviewRunes, maxScannerEvidenceListPreviewRunes-1)
+	return eventColumns(alias, evidence)
 }
 
 // eventDetailColumns adds the full prompt, which can be large, so it is only
 // loaded for single-event detail reads and never for list pages.
 func eventDetailColumns(alias string) string {
-	return eventColumns(alias) + fmt.Sprintf(",%[1]s.full_prompt", alias)
+	return eventColumns(alias, alias+".scanner_evidence") + fmt.Sprintf(",%[1]s.full_prompt", alias)
 }
 
 func scanEvent(row rowScanner, withFullPrompt ...bool) (*Event, error) {

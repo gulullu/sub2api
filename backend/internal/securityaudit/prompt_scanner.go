@@ -93,7 +93,7 @@ func AggregateResults(results []*NormalizedResult, latency time.Duration) (*Norm
 		}
 		for scanner, evidence := range result.ScannerEvidence {
 			if _, exists := aggregated.ScannerEvidence[scanner]; !exists {
-				aggregated.ScannerEvidence[scanner] = RedactPreview(evidence, 160)
+				aggregated.ScannerEvidence[scanner] = RedactSensitiveText(evidence)
 			}
 		}
 		for _, category := range result.UnknownCategories {
@@ -104,7 +104,7 @@ func AggregateResults(results []*NormalizedResult, latency time.Duration) (*Norm
 	aggregated.MatchedScanners = orderedScannerKeys(matched)
 	aggregated.UnknownCategories = sortedKeys(unknown)
 	if confidenceResult {
-		aggregated.Reason = RedactPreview(confidenceReason, 160)
+		aggregated.Reason = RedactSensitiveText(confidenceReason)
 		aggregated.ScannerEvidence[confidenceScoreKey] = aggregated.Reason
 	}
 	return aggregated, nil

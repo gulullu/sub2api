@@ -44,7 +44,7 @@
             <section class="rounded-xl border border-gray-200 p-4 dark:border-dark-700" data-test="risk-guard-return">
               <h4 class="text-xs font-bold uppercase tracking-wider text-gray-400">{{ t('admin.promptAudit.events.guardReturn') }}</h4>
               <p class="mt-1 text-xs text-gray-500 dark:text-dark-400">{{ t('admin.promptAudit.events.guardReturnHint') }}</p>
-              <pre class="mt-2 h-[min(46vh,26rem)] overflow-auto whitespace-pre-wrap break-words rounded-xl bg-gray-50 p-4 font-mono text-xs leading-6 text-gray-700 dark:bg-dark-900 dark:text-gray-300">{{ formatGuardReturn(event) }}</pre>
+              <pre class="mt-2 h-[min(46vh,26rem)] overflow-auto whitespace-pre-wrap break-words rounded-xl bg-gray-50 p-4 font-mono text-xs leading-6 text-gray-700 dark:bg-dark-900 dark:text-gray-300" data-test="risk-guard-return-json">{{ formatGuardReturn(event) }}</pre>
             </section>
           </div>
 
@@ -59,7 +59,10 @@
               <dl class="mt-2 grid gap-1 text-xs text-gray-500 dark:text-dark-400 sm:grid-cols-2">
                 <div><dt class="inline text-gray-400">{{ t('admin.promptAudit.events.categories') }} · </dt><dd class="inline">{{ translateCategory(issue.category || issue.scanner_id) }}</dd></div>
                 <div><dt class="inline text-gray-400">{{ t('admin.promptAudit.events.score') }} · </dt><dd class="inline">{{ issue.score }}</dd></div>
-                <div class="sm:col-span-2"><dt class="inline text-gray-400">{{ t('admin.promptAudit.events.evidence') }} · </dt><dd class="inline break-words">{{ issue.evidence ? translateEvidence(issue.evidence) : '—' }}</dd></div>
+                <div class="sm:col-span-2">
+                  <dt class="text-gray-400">{{ t('admin.promptAudit.events.evidence') }}</dt>
+                  <dd class="mt-1 max-h-48 overflow-auto whitespace-pre-wrap break-words rounded-lg bg-gray-50 p-3 font-mono text-xs leading-5 text-gray-700 dark:bg-dark-900 dark:text-gray-300" data-test="risk-issue-evidence">{{ issue.evidence ? translateEvidence(issue.evidence) : '—' }}</dd>
+                </div>
               </dl>
             </article>
             <p v-if="event.issue_summaries.length === 0" class="py-6 text-center text-sm text-gray-500">{{ t('admin.promptAudit.events.noRisks') }}</p>

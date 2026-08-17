@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import type { PromptAuditConfig } from '../types'
 import {
+  DEFAULT_AUDIT_SYSTEM_PROMPT,
   buildUpdateRequest,
   configToDraft,
   createDefaultEndpoint,
@@ -41,6 +42,11 @@ const config = (): PromptAuditConfig => ({
 })
 
 describe('Prompt Audit view model', () => {
+  it('uses the complete-reason contract in the default template', () => {
+    expect(DEFAULT_AUDIT_SYSTEM_PROMPT).not.toContain('reason ≤ 20 字')
+    expect(DEFAULT_AUDIT_SYSTEM_PROMPT).toContain('reason 按网关追加的固定原因协议填写')
+  })
+
   it('localizes the operational audit-unavailable fallback marker', () => {
     expect(LOCALIZED_SCANNER_IDS.has('audit_unavailable')).toBe(true)
   })

@@ -68,7 +68,7 @@ func BuildIssueSummaries(result NormalizedResult) []IssueSummary {
 		}
 	}
 	if score, ok := result.ScannerScores[confidenceScoreKey]; ok && confidenceMatched {
-		evidence := RedactPreview(result.ScannerEvidence[confidenceScoreKey], 160)
+		evidence := RedactSensitiveText(result.ScannerEvidence[confidenceScoreKey])
 		if evidence == "" {
 			evidence = "模型置信度超过配置阈值"
 		}

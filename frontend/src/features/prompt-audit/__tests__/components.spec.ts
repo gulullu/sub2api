@@ -469,17 +469,18 @@ describe('Prompt Audit components', () => {
   })
 
   it('localizes confidence JSON risk summaries instead of showing backend labels or raw category keys', async () => {
+    const fullReason = '内容为针对AI系统的越狱攻击矩阵，包含绕过规则、分阶段攻击步骤以及完整判断依据。\n第二行原因也必须原样显示。'
     const event: PromptAuditEvent = {
       id: 3, job_id: 3, decision: 'flag', risk_level: 'medium', action: 'Warn',
       categories: [], matched_scanners: ['confidence_json'], scanner_scores: { confidence_json: 0.55 },
-      scanner_evidence: { confidence_json: 'cyber abuse' }, scanner_backend: 'confidence-json-openai',
+      scanner_evidence: { confidence_json: fullReason }, scanner_backend: 'confidence-json-openai',
       scanner_version: 'deepseek-chat', guard_endpoint_id: 'deepseek', policy_id: 'relaybases-cyber-safety-v1',
       policy_version: 1, config_version: 2, chunk_total: 1, latency_ms: 20,
       issue_summaries: [{
         category: 'confidence_json', scanner_id: 'confidence_json', title: '模型置信度判定',
         description: '通用审核模型按配置的置信度阈值标记了风险', severity: 'medium', severity_label: '中',
         action: 'Warn', action_label: '警告', code: 'prompt_audit_confidence_json', score: 0.55,
-        evidence: 'cyber abuse', evidence_hash: 'def',
+        evidence: fullReason, evidence_hash: 'def',
       }],
       created_at: '2026-07-16T00:00:00Z',
       snapshot: {
@@ -501,6 +502,11 @@ describe('Prompt Audit components', () => {
     expect(issue).not.toContain('模型置信度判定')
     expect(issue).not.toContain('通用审核模型按配置的置信度阈值标记了风险')
     expect(wrapper.get('[data-test="risk-guard-return"]').text()).toContain('admin.promptAudit.scanners.confidence_json')
+    const evidence = wrapper.get('[data-test="risk-issue-evidence"]')
+    expect(evidence.element.textContent).toBe(fullReason)
+    expect(evidence.classes()).toContain('whitespace-pre-wrap')
+    expect(evidence.classes()).toContain('overflow-auto')
+    expect(wrapper.get('[data-test="risk-guard-return-json"]').text()).toContain('第二行原因也必须原样显示。')
   })
 
   it('localizes over-limit audit events in both the list and detail view', async () => {

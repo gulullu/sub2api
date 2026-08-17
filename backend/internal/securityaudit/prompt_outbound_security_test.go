@@ -85,6 +85,8 @@ func TestConfidenceJSONScannerUsesDeepSeekChatContract(t *testing.T) {
 		require.Contains(t, system["content"], "custom policy")
 		require.Contains(t, system["content"], fixedMultilingualSemanticPolicy)
 		require.Equal(t, 1, strings.Count(system["content"].(string), fixedMultilingualSemanticPolicy))
+		require.Contains(t, system["content"], fixedConfidenceReasonPolicy)
+		require.Equal(t, 1, strings.Count(system["content"].(string), fixedConfidenceReasonPolicy))
 		require.Equal(t, "user", user["role"])
 		userContent := user["content"].(string)
 		require.Equal(t, 1, strings.Count(userContent, "</user_input>"))

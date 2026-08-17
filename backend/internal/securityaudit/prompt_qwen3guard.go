@@ -305,13 +305,11 @@ func ParseConfidenceJSON(content string, endpoint ActiveEndpoint) (*NormalizedRe
 	if err := json.Unmarshal(reasonRaw, &reason); err != nil {
 		return nil, &GuardError{Code: ErrorCodeInvalidResponse, Cause: errors.New("prompt guard reason invalid")}
 	}
-	// The selected template promises a short reason. Treat a longer model
-	// response as recoverable output, but never persist more prompt-derived
-	// text than that public contract allows.
-	reason = RedactPreview(strings.TrimSpace(reason), MaxConfidenceReasonRunes)
-	if runes := []rune(reason); len(runes) > MaxConfidenceReasonRunes {
-		reason = string(runes[:MaxConfidenceReasonRunes-1]) + "…"
-	}
+	// The prompt asks for a concise reason, but upstream models can return a
+	// longer explanation. Preserve that complete explanation for administrator
+	// review; the HTTP response-size limit still bounds it, and any echoed
+	// credentials or identity patterns are masked before persistence.
+	reason = RedactSensitiveText(strings.TrimSpace(reason))
 
 	confidence := 0.0
 	confidenceRaw, hasConfidence := fields["confidence"]
