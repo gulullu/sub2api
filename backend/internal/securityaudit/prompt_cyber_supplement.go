@@ -146,7 +146,9 @@ func normalizeCyberSupplementRules(values []CyberSupplementRule) []CyberSuppleme
 }
 
 func cloneCyberSupplementRules(values []CyberSupplementRule) []CyberSupplementRule {
-	return append([]CyberSupplementRule(nil), values...)
+	result := make([]CyberSupplementRule, len(values))
+	copy(result, values)
+	return result
 }
 
 func validateCyberSupplementRules(values []CyberSupplementRule) error {

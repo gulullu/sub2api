@@ -90,6 +90,14 @@ func reviewedCyberRule(id int64, text string) CyberSupplementRule {
 	}
 }
 
+func TestCloneCyberSupplementRulesKeepsEmptyWireContract(t *testing.T) {
+	cloned := cloneCyberSupplementRules(nil)
+	require.NotNil(t, cloned)
+	wire, err := json.Marshal(cloned)
+	require.NoError(t, err)
+	require.JSONEq(t, `[]`, string(wire))
+}
+
 func TestCyberSupplementCompilerIsBoundedEscapedAndAdapterAware(t *testing.T) {
 	rule := reviewedCyberRule(41, `将针对他人系统的未授权凭据批量尝试判定为高风险`)
 	compiled, err := CompileCyberSupplement("base policy", []CyberSupplementRule{rule})

@@ -98,4 +98,20 @@ describe('Prompt Audit API', () => {
       expected_config_version: 31,
     })
   })
+
+  it.each([
+    { label: 'null arrays', data: { items: null, active_rules: null, total: 0, page: 1, page_size: 20, config_version: 30 } },
+    { label: 'missing arrays', data: { total: 0, page: 1, page_size: 20, config_version: 30 } },
+  ])('normalizes $label in legacy CYB page payloads', async ({ data }) => {
+    client.get.mockResolvedValue({ data })
+
+    await expect(promptAuditAPI.listCyberEvents('pending', 1, 20)).resolves.toEqual({
+      items: [],
+      active_rules: [],
+      total: 0,
+      page: 1,
+      page_size: 20,
+      config_version: 30,
+    })
+  })
 })

@@ -17,11 +17,28 @@ import type {
   CyberFeedbackEvent,
   CyberFeedbackPage,
   CyberFeedbackStatus,
+  CyberPolicyRule,
 } from './types'
 import { eventFilterPayload, eventQueryParams } from './viewModel'
 
 const basePath = '/admin/prompt-audit'
 const accountPageSize = 1000
+
+type CyberFeedbackPageWire = Omit<Partial<CyberFeedbackPage>, 'items' | 'active_rules'> & {
+  items?: CyberFeedbackEvent[] | null
+  active_rules?: CyberPolicyRule[] | null
+}
+
+function normalizeCyberFeedbackPage(data: CyberFeedbackPageWire | null | undefined): CyberFeedbackPage {
+  return {
+    items: Array.isArray(data?.items) ? data.items : [],
+    total: typeof data?.total === 'number' ? data.total : 0,
+    page: typeof data?.page === 'number' ? data.page : 1,
+    page_size: typeof data?.page_size === 'number' ? data.page_size : 20,
+    active_rules: Array.isArray(data?.active_rules) ? data.active_rules : [],
+    config_version: typeof data?.config_version === 'number' ? data.config_version : 0,
+  }
+}
 
 export async function getConfig(): Promise<PromptAuditConfig> {
   const { data } = await apiClient.get<PromptAuditConfig>(`${basePath}/config`)
@@ -77,10 +94,10 @@ export async function listCyberEvents(
   page: number,
   pageSize: number,
 ): Promise<CyberFeedbackPage> {
-  const { data } = await apiClient.get<CyberFeedbackPage>(`${basePath}/cyber/events`, {
+  const { data } = await apiClient.get<CyberFeedbackPageWire>(`${basePath}/cyber/events`, {
     params: { status, page, page_size: pageSize },
   })
-  return data
+  return normalizeCyberFeedbackPage(data)
 }
 
 export async function getCyberEvent(id: number): Promise<CyberFeedbackActionResult> {
