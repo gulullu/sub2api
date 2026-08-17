@@ -357,4 +357,20 @@ describe('DataTable', () => {
 
     expect(wrapper.emitted('update:selectedKeys')?.at(-1)?.[0]).toEqual([99, 1, 2])
   })
+
+  it('applies row classes consistently to desktop rows and mobile cards', () => {
+    const props = {
+      columns: [{ key: 'name', label: 'Name' }],
+      data: [{ id: 1, name: 'One' }, { id: 2, name: 'Two' }],
+      rowKey: 'id',
+      rowClass: (row: { id: number }) => row.id === 2 ? 'highlighted-row' : ''
+    }
+    const desktop = mount(DataTable, { props })
+    expect(desktop.get('tbody tr[data-row-id="2"]').classes()).toContain('highlighted-row')
+    desktop.unmount()
+
+    stubMobileMatchMedia()
+    const mobile = mount(DataTable, { props })
+    expect(mobile.get('.highlighted-row').text()).toContain('Two')
+  })
 })

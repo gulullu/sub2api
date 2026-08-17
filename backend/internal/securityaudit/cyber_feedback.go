@@ -33,6 +33,14 @@ const (
 	CyberGenerationGenerated = "generated"
 	CyberGenerationFailed    = "failed"
 
+	CyberRuleLifecycleActive   = "active"
+	CyberRuleLifecycleDisabled = "disabled"
+	CyberRuleLifecycleDeleted  = "deleted"
+
+	CyberRuleTextSourceReviewed           = "reviewed"
+	CyberRuleTextSourceRecoveredCandidate = "recovered_candidate"
+	CyberRuleTextSourceUnavailable        = "unavailable"
+
 	OpenAIOAuthCYBAdminRecipient = "gulullu@gmail.com"
 	cyberReplayLocalPositiveTTL  = time.Minute
 	cyberReplayLocalCacheCap     = 4096
@@ -47,6 +55,8 @@ var (
 	ErrCyberFeedbackNotFound           = errors.New("cyber feedback not found")
 	ErrCyberFeedbackReviewConflict     = errors.New("cyber feedback review conflict")
 	ErrCyberFeedbackGenerationConflict = errors.New("cyber feedback generation conflict")
+	ErrCyberRuleLifecycleConflict      = errors.New("cyber rule lifecycle conflict")
+	ErrCyberRuleLifecycleDeleted       = errors.New("cyber rule lifecycle deleted")
 )
 
 type CyberFingerprintScope struct {
@@ -175,6 +185,24 @@ type CyberFeedback struct {
 	UpdatedAt              time.Time  `json:"updated_at"`
 }
 
+// CyberRuleProjection retains the reviewed text and reversible lifecycle
+// outside prompt_audit_config. The runtime config continues to contain active
+// rules only, preserving compatibility with older binaries during rollback.
+type CyberRuleProjection struct {
+	FeedbackID         int64
+	RuleID             string
+	RuleText           string
+	LifecycleStatus    string
+	RuleTextSource     string
+	LegacyUnprojected  bool
+	StateConfigVersion int64
+	StateUpdatedAt     *time.Time
+	StateUpdatedBy     *int64
+	CreatedAt          time.Time
+	ReviewedAt         *time.Time
+	ReviewedBy         *int64
+}
+
 // CyberFeedbackEvidence is loaded only for the administrator evidence
 // endpoint. It is intentionally separate from list/detail metadata so
 // ordinary queries cannot accidentally select raw prompt or identity fields.
@@ -228,6 +256,11 @@ type CyberFeedbackRepository interface {
 	GetCyberFeedback(ctx context.Context, id int64) (CyberFeedback, error)
 	GetCyberFeedbackEvidence(ctx context.Context, id int64) (CyberFeedbackEvidence, error)
 	ReviewCyberFeedback(ctx context.Context, id int64, status string, actorID int64, ruleID string, configVersion int64) (CyberFeedback, error)
+	ListCyberRuleProjections(ctx context.Context) ([]CyberRuleProjection, error)
+	GetCyberRuleProjection(ctx context.Context, feedbackID int64) (CyberRuleProjection, error)
+	SaveCyberRuleProjection(ctx context.Context, feedbackID int64, ruleID, ruleText, lifecycleStatus, textSource string, actorID, configVersion int64) error
+	ReconcileActiveCyberRuleProjection(ctx context.Context, rule CyberSupplementRule, lifecycleStatus string, actorID, configVersion int64) (CyberRuleProjection, error)
+	DeleteCyberRuleProjection(ctx context.Context, feedbackID int64, ruleID string, actorID, configVersion int64) error
 	ResetCyberRuleGeneration(ctx context.Context, id int64) error
 	CompleteCyberRuleGeneration(ctx context.Context, id int64, candidateRuleText, errorCode string) error
 }

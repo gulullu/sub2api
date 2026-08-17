@@ -1,15 +1,42 @@
 <template>
   <AppLayout>
-    <div class="mx-auto max-w-[1600px]" :class="activeTab === 'config' && draft ? 'pb-28' : 'pb-8'">
-      <header class="mb-6 flex flex-wrap items-end justify-between gap-4">
-        <div>
-          <p class="text-xs font-semibold uppercase tracking-[0.16em] text-primary-600 dark:text-primary-400">{{ t('nav.securityAudit') }}</p>
-          <h1 class="mt-1 text-2xl font-semibold tracking-tight text-gray-950 dark:text-white">{{ t('admin.promptAudit.title') }}</h1>
-          <p class="mt-2 max-w-3xl text-sm text-gray-500 dark:text-dark-300">{{ t('admin.promptAudit.description') }}</p>
+    <div class="w-full min-w-0 space-y-6 pb-8">
+      <header class="page-header mb-0 rounded-3xl bg-white p-5 shadow-sm ring-1 ring-gray-900/5 dark:bg-dark-800 dark:ring-dark-700 sm:p-6">
+        <div class="flex flex-col gap-4 lg:flex-row lg:items-end lg:justify-between">
+          <div>
+            <h1 class="page-title flex items-center gap-2 text-xl font-black text-gray-900 dark:text-white">
+              <span class="inline-flex h-8 w-8 items-center justify-center rounded-xl bg-primary-50 text-primary-600 dark:bg-primary-900/30 dark:text-primary-300">
+                <Icon name="shield" size="sm" />
+              </span>
+              {{ t('admin.promptAudit.title') }}
+            </h1>
+            <p class="page-description mt-1.5 max-w-3xl text-xs text-gray-500 dark:text-gray-400">{{ t('admin.promptAudit.description') }}</p>
+          </div>
+          <div v-if="draft" class="flex items-center gap-3 text-xs text-gray-500 dark:text-gray-400 lg:justify-end">
+            <span class="inline-flex items-center rounded-full bg-gray-100 px-2.5 py-1 font-medium text-gray-600 dark:bg-dark-700 dark:text-gray-300">
+              {{ t('admin.promptAudit.configVersion', { version: draft.config_version }) }}
+            </span>
+            <span v-if="draft.updated_at">{{ formatDate(draft.updated_at) }}</span>
+          </div>
         </div>
-        <div v-if="draft" class="text-right text-xs text-gray-500 dark:text-dark-400">
-          <p>{{ t('admin.promptAudit.configVersion', { version: draft.config_version }) }}</p>
-          <p v-if="draft.updated_at" class="mt-1">{{ formatDate(draft.updated_at) }}</p>
+
+        <div class="mt-4 border-t border-gray-100 pt-4 dark:border-dark-700" role="tablist" :aria-label="t('admin.promptAudit.title')">
+          <div class="tabs inline-flex w-full flex-wrap sm:w-auto">
+            <button
+              v-for="tab in pageTabs"
+              :key="tab.id"
+              type="button"
+              role="tab"
+              class="tab flex-1 sm:flex-none"
+              :class="{ 'tab-active': activeTab === tab.id }"
+              :aria-selected="activeTab === tab.id"
+              :tabindex="activeTab === tab.id ? 0 : -1"
+              :data-test="`tab-${tab.id}`"
+              @click="activeTab = tab.id"
+            >
+              {{ tab.label }}
+            </button>
+          </div>
         </div>
       </header>
 
@@ -19,26 +46,8 @@
       </div>
 
       <template v-else>
-        <div class="mb-4" role="tablist" :aria-label="t('admin.promptAudit.title')">
-          <div class="tabs inline-flex">
-            <button
-              v-for="tab in pageTabs"
-              :key="tab.id"
-              type="button"
-              role="tab"
-              class="tab"
-              :class="{ 'tab-active': activeTab === tab.id }"
-              :aria-selected="activeTab === tab.id"
-              :data-test="`tab-${tab.id}`"
-              @click="activeTab = tab.id"
-            >
-              {{ tab.label }}
-            </button>
-          </div>
-        </div>
-
-        <main class="card px-4 sm:px-6 lg:px-8">
-          <div v-show="activeTab === 'config'" data-test="tab-panel-config">
+        <main>
+          <div v-show="activeTab === 'config'" class="card px-4 sm:px-6 lg:px-8" data-test="tab-panel-config">
             <RuntimeOverview :runtime="runtime" :loading="loading.runtime" :error="loadErrors.runtime" @refresh="loadRuntime" />
 
             <template v-if="draft">
@@ -65,12 +74,12 @@
             </template>
           </div>
 
-          <div v-show="activeTab === 'events'" data-test="tab-panel-events">
+          <div v-show="activeTab === 'events'" class="space-y-6" data-test="tab-panel-events">
             <div
               v-if="draft?.enabled && !draft.store_pass_events"
               data-test="pass-events-disabled-notice"
               role="status"
-              class="mt-6 flex flex-wrap items-center justify-between gap-3 rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-900 dark:border-amber-900/70 dark:bg-amber-950/30 dark:text-amber-200"
+              class="flex flex-wrap items-center justify-between gap-3 rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-900 dark:border-amber-900/70 dark:bg-amber-950/30 dark:text-amber-200"
             >
               <span>{{ t('admin.promptAudit.events.passEventsDisabled') }}</span>
               <button type="button" class="btn btn-secondary btn-sm" @click="activeTab = 'config'">
@@ -105,8 +114,8 @@
       </template>
     </div>
 
-    <div v-if="draft && activeTab === 'config'" class="fixed inset-x-0 bottom-0 z-30 border-t border-gray-200 bg-white/95 px-4 py-3 shadow-[0_-12px_35px_rgba(15,23,42,0.08)] backdrop-blur dark:border-dark-700/80 dark:bg-dark-900/95 dark:shadow-[0_-12px_35px_rgba(0,0,0,0.35)] lg:left-64">
-      <div class="mx-auto flex max-w-[1600px] flex-wrap items-center justify-between gap-3">
+    <div v-if="draft && activeTab === 'config'" class="sticky bottom-4 z-30 w-full rounded-2xl border border-gray-200 bg-white/95 px-4 py-3 shadow-xl backdrop-blur dark:border-dark-700 dark:bg-dark-900/95">
+      <div class="flex w-full flex-wrap items-center justify-between gap-3">
         <div class="flex flex-wrap items-center gap-x-5 gap-y-2">
           <SaveToggle :label="t('admin.promptAudit.saveBar.enabled')" :model-value="draft.enabled" data-test="enabled-toggle" @update:model-value="setEnabled" />
           <SaveToggle :label="t('admin.promptAudit.saveBar.blocking')" :model-value="draft.blocking_enabled" :disabled="!draft.enabled" data-test="blocking-toggle" @update:model-value="setBlocking" />
@@ -163,6 +172,7 @@ import { computed, defineComponent, h, onMounted, reactive, ref } from 'vue'
 import { useI18n } from 'vue-i18n'
 import AppLayout from '@/components/layout/AppLayout.vue'
 import ConfirmDialog from '@/components/common/ConfirmDialog.vue'
+import Icon from '@/components/icons/Icon.vue'
 import { useAppStore } from '@/stores/app'
 import { extractApiErrorCode, extractApiErrorMessage } from '@/utils/apiError'
 import RuntimeOverview from './components/RuntimeOverview.vue'

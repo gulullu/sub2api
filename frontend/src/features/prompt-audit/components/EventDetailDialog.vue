@@ -2,47 +2,55 @@
   <BaseDialog :show="show" :title="t('admin.promptAudit.events.detailTitle')" width="extra-wide" @close="$emit('close')">
     <div v-if="loading" class="py-12 text-center text-sm text-gray-500" aria-busy="true">{{ t('common.loading') }}</div>
     <div v-else-if="event" class="flex flex-col">
-      <div class="flex flex-wrap gap-2 border-b border-gray-200 pb-3 dark:border-dark-700" role="tablist">
-        <button v-for="tab in tabs" :key="tab" type="button" role="tab" :aria-selected="activeTab === tab" class="rounded-md px-3 py-1.5 text-sm" :class="activeTab === tab ? 'bg-primary-50 text-primary-700 dark:bg-primary-950/40 dark:text-primary-300' : 'text-gray-600 dark:text-dark-300'" @click="activeTab = tab">
+      <div class="rounded-2xl border border-gray-200 bg-gray-50/60 p-5 dark:border-dark-700 dark:bg-dark-900/60">
+        <div class="flex flex-wrap items-center gap-3">
+          <span class="rounded-full px-2.5 py-1 text-xs font-medium" :class="decisionClass(event.decision)">{{ formatDecisionAction(event.decision, event.action) }}</span>
+          <span class="font-medium text-gray-900 dark:text-white">{{ event.snapshot.model || '—' }}</span>
+          <span class="font-mono text-xs text-gray-500">#{{ event.id }}</span>
+        </div>
+        <p class="mt-2 break-all text-xs text-gray-500 dark:text-gray-400">{{ event.snapshot.endpoint }} · {{ event.snapshot.protocol }} · {{ event.snapshot.request_id || '—' }}</p>
+      </div>
+
+      <div class="mt-4 border-b border-gray-200 pb-4 dark:border-dark-700">
+        <div class="tabs inline-flex w-full flex-wrap sm:w-auto" role="tablist">
+          <button v-for="tab in tabs" :key="tab" type="button" role="tab" :aria-selected="activeTab === tab" class="tab flex-1 sm:flex-none" :class="{ 'tab-active': activeTab === tab }" @click="activeTab = tab">
           {{ t(`admin.promptAudit.events.tabs.${tab}`) }}
-        </button>
+          </button>
+        </div>
       </div>
 
       <!-- Fixed panel height so switching tabs does not resize the dialog -->
       <div class="mt-5 h-[min(62vh,36rem)] overflow-y-auto" data-test="event-detail-tab-panel">
-        <div v-show="activeTab === 'summary'" class="grid gap-5 lg:grid-cols-2" role="tabpanel">
-          <div>
-            <h4 class="text-sm font-medium text-gray-900 dark:text-white">{{ t('admin.promptAudit.events.promptFull') }}</h4>
-            <pre class="mt-2 max-h-[min(46vh,26rem)] overflow-auto whitespace-pre-wrap break-words rounded-lg bg-gray-50 p-4 text-sm text-gray-700 dark:bg-dark-900 dark:text-dark-200" data-test="summary-prompt-full">{{ displayPrompt(event) }}</pre>
-          </div>
-          <dl class="grid grid-cols-[auto_1fr] gap-x-4 gap-y-2 text-sm">
-            <dt class="text-gray-500">{{ t('admin.promptAudit.events.decision') }}</dt><dd class="font-medium text-gray-900 dark:text-white">{{ formatDecisionAction(event.decision, event.action) }}</dd>
-            <dt class="text-gray-500">{{ t('admin.promptAudit.events.user') }}</dt><dd>{{ event.snapshot.username || '—' }}</dd>
-            <dt class="text-gray-500">{{ t('admin.promptAudit.events.email') }}</dt><dd>{{ event.snapshot.user_email || '—' }}</dd>
-            <dt class="text-gray-500">{{ t('admin.promptAudit.events.apiKey') }}</dt><dd>{{ event.snapshot.api_key_name || '—' }}</dd>
-            <dt class="text-gray-500">{{ t('admin.promptAudit.events.group') }}</dt><dd>{{ event.snapshot.group_name || '—' }}</dd>
-            <dt class="text-gray-500">{{ t('admin.promptAudit.events.model') }}</dt><dd>{{ event.snapshot.model || '—' }}</dd>
-            <dt class="text-gray-500">{{ t('admin.promptAudit.events.categories') }}</dt><dd>{{ formatCategories(event.categories) }}</dd>
+        <div v-show="activeTab === 'summary'" class="grid gap-5 lg:grid-cols-[minmax(0,1.35fr)_minmax(20rem,0.65fr)]" role="tabpanel">
+          <section>
+            <h4 class="text-xs font-bold uppercase tracking-wider text-gray-400">{{ t('admin.promptAudit.events.promptFull') }}</h4>
+            <pre class="mt-2 max-h-[min(46vh,26rem)] overflow-auto whitespace-pre-wrap break-words rounded-xl bg-gray-50 p-4 font-mono text-xs leading-6 text-gray-700 dark:bg-dark-900 dark:text-gray-300" data-test="summary-prompt-full">{{ displayPrompt(event) }}</pre>
+          </section>
+          <dl class="grid gap-3 sm:grid-cols-2 lg:grid-cols-1">
+            <div v-for="row in summaryRows(event)" :key="row.label" class="rounded-xl bg-gray-50 p-4 dark:bg-dark-900">
+              <dt class="text-xs font-bold uppercase tracking-wider text-gray-400">{{ row.label }}</dt>
+              <dd class="mt-1 break-all text-sm font-medium text-gray-900 dark:text-white">{{ row.value }}</dd>
+            </div>
           </dl>
         </div>
 
         <div v-show="activeTab === 'risks'" class="space-y-5" role="tabpanel">
           <div class="grid gap-4 lg:grid-cols-2">
-            <section data-test="risk-prompt-preview">
-              <h4 class="text-sm font-medium text-gray-900 dark:text-white">{{ t('admin.promptAudit.events.promptFull') }}</h4>
+            <section class="rounded-xl border border-gray-200 p-4 dark:border-dark-700" data-test="risk-prompt-preview">
+              <h4 class="text-xs font-bold uppercase tracking-wider text-gray-400">{{ t('admin.promptAudit.events.promptFull') }}</h4>
               <p class="mt-1 text-xs text-gray-500 dark:text-dark-400">{{ t('admin.promptAudit.events.promptFullHint') }}</p>
-              <pre class="mt-2 h-[min(46vh,26rem)] overflow-auto whitespace-pre-wrap break-words rounded-lg bg-gray-50 p-4 text-sm text-gray-700 dark:bg-dark-900 dark:text-dark-200" data-test="risk-prompt-full">{{ displayPrompt(event) }}</pre>
+              <pre class="mt-2 h-[min(46vh,26rem)] overflow-auto whitespace-pre-wrap break-words rounded-xl bg-gray-50 p-4 font-mono text-xs leading-6 text-gray-700 dark:bg-dark-900 dark:text-gray-300" data-test="risk-prompt-full">{{ displayPrompt(event) }}</pre>
             </section>
-            <section data-test="risk-guard-return">
-              <h4 class="text-sm font-medium text-gray-900 dark:text-white">{{ t('admin.promptAudit.events.guardReturn') }}</h4>
+            <section class="rounded-xl border border-gray-200 p-4 dark:border-dark-700" data-test="risk-guard-return">
+              <h4 class="text-xs font-bold uppercase tracking-wider text-gray-400">{{ t('admin.promptAudit.events.guardReturn') }}</h4>
               <p class="mt-1 text-xs text-gray-500 dark:text-dark-400">{{ t('admin.promptAudit.events.guardReturnHint') }}</p>
-              <pre class="mt-2 h-[min(46vh,26rem)] overflow-auto whitespace-pre-wrap break-words rounded-lg bg-gray-50 p-4 font-mono text-xs text-gray-700 dark:bg-dark-900 dark:text-dark-200">{{ formatGuardReturn(event) }}</pre>
+              <pre class="mt-2 h-[min(46vh,26rem)] overflow-auto whitespace-pre-wrap break-words rounded-xl bg-gray-50 p-4 font-mono text-xs leading-6 text-gray-700 dark:bg-dark-900 dark:text-gray-300">{{ formatGuardReturn(event) }}</pre>
             </section>
           </div>
 
           <div class="space-y-3">
             <h4 class="text-sm font-medium text-gray-900 dark:text-white">{{ t('admin.promptAudit.events.riskSummaries') }}</h4>
-            <article v-for="issue in event.issue_summaries" :key="`${issue.scanner_id}-${issue.code}`" class="border-l-2 border-red-400 pl-4" data-test="risk-issue">
+            <article v-for="issue in event.issue_summaries" :key="`${issue.scanner_id}-${issue.code}`" class="rounded-xl border border-gray-200 border-l-4 border-l-red-400 p-4 dark:border-dark-700 dark:border-l-red-400" data-test="risk-issue">
               <div class="flex flex-wrap items-center gap-2">
                 <h5 class="font-medium text-gray-900 dark:text-white">{{ issueTitle(issue) }}</h5>
                 <span class="text-xs text-red-600 dark:text-red-300">{{ issueSeverity(issue) }} · {{ issueAction(issue) }}</span>
@@ -58,20 +66,17 @@
           </div>
         </div>
 
-        <dl v-show="activeTab === 'technical'" class="grid grid-cols-[auto_minmax(0,1fr)] gap-x-4 gap-y-2 text-sm" role="tabpanel">
-          <dt class="text-gray-500">{{ t('admin.promptAudit.events.requestId') }}</dt><dd class="break-all font-mono">{{ event.snapshot.request_id || '—' }}</dd>
-          <dt class="text-gray-500">{{ t('admin.promptAudit.events.promptHash') }}</dt><dd class="break-all font-mono">{{ event.snapshot.prompt_hash }}</dd>
-          <dt class="text-gray-500">{{ t('admin.promptAudit.events.technical.scanner') }}</dt><dd>{{ event.scanner_backend }} · {{ event.scanner_version }}</dd>
-          <dt class="text-gray-500">{{ t('admin.promptAudit.events.technical.policy') }}</dt><dd>{{ event.policy_id }} · v{{ event.policy_version }}</dd>
-          <dt class="text-gray-500">{{ t('admin.promptAudit.events.technical.guardEndpoint') }}</dt><dd>{{ event.guard_endpoint_id }}</dd>
-          <dt class="text-gray-500">{{ t('admin.promptAudit.events.technical.config') }}</dt><dd>v{{ event.config_version }}</dd>
-          <dt class="text-gray-500">{{ t('admin.promptAudit.events.technical.chunks') }}</dt><dd>{{ event.chunk_total }}</dd>
-          <dt class="text-gray-500">{{ t('admin.promptAudit.events.technical.latency') }}</dt><dd>{{ event.latency_ms }} ms</dd>
-          <dt class="text-gray-500">{{ t('admin.promptAudit.events.stage') }}</dt><dd>{{ event.snapshot.stage || 'http' }}</dd>
-          <dt class="text-gray-500">{{ t('admin.promptAudit.events.technical.protocol') }}</dt><dd>{{ event.snapshot.protocol }} · {{ event.snapshot.endpoint }}</dd>
+        <dl v-show="activeTab === 'technical'" class="grid gap-3 sm:grid-cols-2 lg:grid-cols-3" role="tabpanel">
+          <div v-for="row in technicalRows(event)" :key="row.label" class="rounded-xl bg-gray-50 p-4 dark:bg-dark-900">
+            <dt class="text-xs font-bold uppercase tracking-wider text-gray-400">{{ row.label }}</dt>
+            <dd class="mt-1 break-all text-sm font-medium text-gray-900 dark:text-white">{{ row.value }}</dd>
+          </div>
         </dl>
       </div>
     </div>
+    <template #footer>
+      <button type="button" class="btn btn-secondary" data-test="event-detail-close" @click="$emit('close')">{{ t('common.close') }}</button>
+    </template>
   </BaseDialog>
 </template>
 
@@ -97,6 +102,12 @@ function displayPrompt(event: PromptAuditEvent): string {
   return event.snapshot.full_prompt || event.snapshot.redacted_preview || '—'
 }
 
+function decisionClass(decision: string): string {
+  if (decision === 'critical') return 'bg-red-100 text-red-700 dark:bg-red-950/50 dark:text-red-300'
+  if (decision === 'flag') return 'bg-amber-100 text-amber-700 dark:bg-amber-950/50 dark:text-amber-300'
+  return 'bg-emerald-100 text-emerald-700 dark:bg-emerald-950/50 dark:text-emerald-300'
+}
+
 function formatDecisionAction(decision: string, action: string): string {
   const decisionLabel = DECISIONS.has(decision) ? t(`admin.promptAudit.decisions.${decision}`) : decision
   const actionLabel = ACTIONS.has(action) ? t(`admin.promptAudit.actions.${action}`) : action
@@ -110,6 +121,32 @@ function translateCategory(category: string): string {
 function formatCategories(categories: string[]): string {
   if (!categories.length) return '—'
   return categories.map(translateCategory).join(', ')
+}
+
+function summaryRows(event: PromptAuditEvent): Array<{ label: string; value: string }> {
+  return [
+    { label: t('admin.promptAudit.events.decision'), value: formatDecisionAction(event.decision, event.action) },
+    { label: t('admin.promptAudit.events.user'), value: event.snapshot.username || '—' },
+    { label: t('admin.promptAudit.events.email'), value: event.snapshot.user_email || '—' },
+    { label: t('admin.promptAudit.events.apiKey'), value: event.snapshot.api_key_name || '—' },
+    { label: t('admin.promptAudit.events.group'), value: event.snapshot.group_name || '—' },
+    { label: t('admin.promptAudit.events.categories'), value: formatCategories(event.categories) },
+  ]
+}
+
+function technicalRows(event: PromptAuditEvent): Array<{ label: string; value: string }> {
+  return [
+    { label: t('admin.promptAudit.events.requestId'), value: event.snapshot.request_id || '—' },
+    { label: t('admin.promptAudit.events.promptHash'), value: event.snapshot.prompt_hash },
+    { label: t('admin.promptAudit.events.technical.scanner'), value: `${event.scanner_backend} · ${event.scanner_version}` },
+    { label: t('admin.promptAudit.events.technical.policy'), value: `${event.policy_id} · v${event.policy_version}` },
+    { label: t('admin.promptAudit.events.technical.guardEndpoint'), value: event.guard_endpoint_id || '—' },
+    { label: t('admin.promptAudit.events.technical.config'), value: `v${event.config_version}` },
+    { label: t('admin.promptAudit.events.technical.chunks'), value: String(event.chunk_total) },
+    { label: t('admin.promptAudit.events.technical.latency'), value: `${event.latency_ms} ms` },
+    { label: t('admin.promptAudit.events.stage'), value: event.snapshot.stage || 'http' },
+    { label: t('admin.promptAudit.events.technical.protocol'), value: `${event.snapshot.protocol} · ${event.snapshot.endpoint}` },
+  ]
 }
 function translateEvidence(value: string): string {
   const byId = SCANNER_CATALOG.find((scanner) => scanner.id === value)

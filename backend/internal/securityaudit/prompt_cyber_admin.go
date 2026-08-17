@@ -22,6 +22,7 @@ type CyberFeedbackPage struct {
 	Page          int                     `json:"page"`
 	PageSize      int                     `json:"page_size"`
 	ActiveRules   []CyberSupplementRule   `json:"active_rules"`
+	Rules         []CyberRuleAdminDTO     `json:"rules"`
 	ConfigVersion int64                   `json:"config_version"`
 }
 
@@ -97,8 +98,26 @@ type CyberFeedbackEvidenceAdminDTO struct {
 }
 
 type CyberRulesPage struct {
-	Items         []CyberSupplementRule `json:"items"`
-	ConfigVersion int64                 `json:"config_version"`
+	Items         []CyberRuleAdminDTO `json:"items"`
+	ActiveCount   int                 `json:"active_count"`
+	ConfigVersion int64               `json:"config_version"`
+	activeRules   []CyberSupplementRule
+}
+
+type CyberRuleAdminDTO struct {
+	ID                 string     `json:"id"`
+	RuleText           string     `json:"rule_text"`
+	SourceFeedbackID   int64      `json:"source_feedback_id"`
+	Status             string     `json:"status"`
+	RuleTextSource     string     `json:"rule_text_source"`
+	RecoveredCandidate bool       `json:"recovered_candidate"`
+	CreatedAt          time.Time  `json:"created_at"`
+	CreatedBy          int64      `json:"created_by"`
+	ReviewedAt         *time.Time `json:"reviewed_at,omitempty"`
+	ReviewedBy         *int64     `json:"reviewed_by,omitempty"`
+	StateUpdatedAt     *time.Time `json:"state_updated_at,omitempty"`
+	StateUpdatedBy     *int64     `json:"state_updated_by,omitempty"`
+	ConfigVersion      int64      `json:"config_version"`
 }
 
 type AdoptCyberFeedbackRequest struct {
@@ -114,15 +133,25 @@ type RevokeCyberRuleRequest struct {
 	ExpectedConfigVersion int64 `json:"expected_config_version" binding:"required"`
 }
 
+type RestoreCyberRuleRequest struct {
+	ExpectedConfigVersion int64 `json:"expected_config_version" binding:"required"`
+}
+
+type DeleteCyberRuleRequest struct {
+	ExpectedConfigVersion int64  `json:"expected_config_version" binding:"required"`
+	ConfirmRuleID         string `json:"confirm_rule_id" binding:"required"`
+}
+
 type CyberFeedbackActionResult struct {
 	Event         *CyberFeedbackAdminDTO `json:"event,omitempty"`
-	Rule          *CyberSupplementRule   `json:"rule,omitempty"`
+	Rule          *CyberRuleAdminDTO     `json:"rule,omitempty"`
 	ConfigVersion int64                  `json:"config_version"`
 }
 
 type CyberSupplementConfigStore interface {
 	Public() (PublicConfig, error)
 	SaveCyberSupplementRules(context.Context, int64, []CyberSupplementRule, int64) (PublicConfig, error)
+	WithCyberSupplementMutationLock(context.Context, func(context.Context) error) error
 }
 
 type PromptCyberAdminService interface {
@@ -133,6 +162,8 @@ type PromptCyberAdminService interface {
 	AdoptCyberFeedback(context.Context, int64, AdoptCyberFeedbackRequest, int64) (*CyberFeedbackActionResult, error)
 	RejectCyberFeedback(context.Context, int64, RejectCyberFeedbackRequest, int64) (*CyberFeedbackActionResult, error)
 	RevokeCyberRule(context.Context, string, RevokeCyberRuleRequest, int64) (*CyberFeedbackActionResult, error)
+	RestoreCyberRule(context.Context, string, RestoreCyberRuleRequest, int64) (*CyberFeedbackActionResult, error)
+	DeleteCyberRule(context.Context, string, DeleteCyberRuleRequest, int64) (*CyberFeedbackActionResult, error)
 	RegenerateCyberRuleDraft(context.Context, int64, int64) (*CyberFeedbackActionResult, error)
 }
 
@@ -170,6 +201,35 @@ func (s *PromptService) cyberSupplementConfig() (CyberSupplementConfigStore, err
 	return store, nil
 }
 
+type cyberSupplementMutationLockKey struct{}
+
+func cyberSupplementMutationLockHeld(ctx context.Context) bool {
+	value, _ := ctx.Value(cyberSupplementMutationLockKey{}).(bool)
+	return value
+}
+
+func (s *PromptService) withCyberSupplementMutationLock(
+	ctx context.Context,
+	operation func(context.Context) (*CyberFeedbackActionResult, error),
+) (*CyberFeedbackActionResult, error) {
+	s.cyberAdminMu.Lock()
+	defer s.cyberAdminMu.Unlock()
+	store, err := s.cyberSupplementConfig()
+	if err != nil {
+		return nil, err
+	}
+	var result *CyberFeedbackActionResult
+	err = store.WithCyberSupplementMutationLock(ctx, func(locked context.Context) error {
+		var operationErr error
+		result, operationErr = operation(context.WithValue(locked, cyberSupplementMutationLockKey{}, true))
+		return operationErr
+	})
+	if err != nil {
+		return nil, err
+	}
+	return result, nil
+}
+
 func (s *PromptService) ListCyberFeedbackAdmin(ctx context.Context, filter CyberFeedbackFilter, page, pageSize int) (*CyberFeedbackPage, error) {
 	repo, err := s.cyberFeedbackRepo()
 	if err != nil {
@@ -194,7 +254,7 @@ func (s *PromptService) ListCyberFeedbackAdmin(ctx context.Context, filter Cyber
 	if err != nil {
 		return nil, err
 	}
-	return &CyberFeedbackPage{Items: cyberFeedbackAdminDTOs(items), Total: total, Page: page, PageSize: pageSize, ActiveRules: rules.Items, ConfigVersion: rules.ConfigVersion}, nil
+	return &CyberFeedbackPage{Items: cyberFeedbackAdminDTOs(items), Total: total, Page: page, PageSize: pageSize, ActiveRules: rules.activeRules, Rules: rules.Items, ConfigVersion: rules.ConfigVersion}, nil
 }
 
 func (s *PromptService) GetCyberFeedbackAdmin(ctx context.Context, id int64) (*CyberFeedbackAdminDetailDTO, error) {
@@ -239,7 +299,7 @@ func (s *PromptService) GetCyberFeedbackEvidenceAdmin(ctx context.Context, id in
 	}, nil
 }
 
-func (s *PromptService) ListCyberRulesAdmin(_ context.Context) (*CyberRulesPage, error) {
+func (s *PromptService) ListCyberRulesAdmin(ctx context.Context) (*CyberRulesPage, error) {
 	store, err := s.cyberSupplementConfig()
 	if err != nil {
 		return nil, err
@@ -248,15 +308,33 @@ func (s *PromptService) ListCyberRulesAdmin(_ context.Context) (*CyberRulesPage,
 	if err != nil {
 		return nil, err
 	}
-	return &CyberRulesPage{Items: cloneCyberSupplementRules(config.CyberSupplementRules), ConfigVersion: config.ConfigVersion}, nil
+	repo, err := s.cyberFeedbackRepo()
+	if err != nil {
+		return nil, err
+	}
+	projections, err := repo.ListCyberRuleProjections(ctx)
+	if err != nil {
+		return nil, err
+	}
+	items := mergeCyberRuleAdminDTOs(config.CyberSupplementRules, projections)
+	activeCount := 0
+	for _, item := range items {
+		if item.Status == CyberRuleLifecycleActive {
+			activeCount++
+		}
+	}
+	return &CyberRulesPage{Items: items, ActiveCount: activeCount, ConfigVersion: config.ConfigVersion, activeRules: cloneCyberSupplementRules(config.CyberSupplementRules)}, nil
 }
 
 func (s *PromptService) AdoptCyberFeedback(ctx context.Context, id int64, request AdoptCyberFeedbackRequest, actorID int64) (*CyberFeedbackActionResult, error) {
 	if s == nil || id <= 0 || request.ExpectedConfigVersion < 1 {
 		return nil, infraerrors.BadRequest("prompt_audit_cyber_adopt_invalid", "CYB 反馈采纳请求无效")
 	}
-	s.cyberAdminMu.Lock()
-	defer s.cyberAdminMu.Unlock()
+	if !cyberSupplementMutationLockHeld(ctx) {
+		return s.withCyberSupplementMutationLock(ctx, func(locked context.Context) (*CyberFeedbackActionResult, error) {
+			return s.AdoptCyberFeedback(locked, id, request, actorID)
+		})
+	}
 	repo, err := s.cyberFeedbackRepo()
 	if err != nil {
 		return nil, err
@@ -290,7 +368,11 @@ func (s *PromptService) AdoptCyberFeedback(ctx context.Context, id int64, reques
 		if feedback.ReviewStatus != CyberReviewApproved || strings.TrimSpace(feedback.RuleID) != ruleID {
 			return nil, infraerrors.Conflict(ErrorCodeCyberFeedbackConflict, "CYB 反馈状态与已保存规则不一致")
 		}
-		copyRule := *existing
+		projection, projectionErr := ensureCyberRuleProjection(ctx, repo, *existing, CyberRuleLifecycleActive, actorID, config.ConfigVersion)
+		if projectionErr != nil {
+			return nil, projectionErr
+		}
+		copyRule := activeCyberRuleAdminDTO(*existing, &projection)
 		dto := cyberFeedbackAdminDTO(feedback)
 		return &CyberFeedbackActionResult{Event: &dto, Rule: &copyRule, ConfigVersion: config.ConfigVersion}, nil
 	}
@@ -332,16 +414,24 @@ func (s *PromptService) AdoptCyberFeedback(ctx context.Context, id int64, reques
 		return nil, err
 	}
 	rule.ConfigVersion = saved.ConfigVersion
+	projection, err := ensureCyberRuleProjection(ctx, repo, rule, CyberRuleLifecycleActive, actorID, saved.ConfigVersion)
+	if err != nil {
+		return nil, err
+	}
+	adminRule := activeCyberRuleAdminDTO(rule, &projection)
 	dto := cyberFeedbackAdminDTO(feedback)
-	return &CyberFeedbackActionResult{Event: &dto, Rule: &rule, ConfigVersion: saved.ConfigVersion}, nil
+	return &CyberFeedbackActionResult{Event: &dto, Rule: &adminRule, ConfigVersion: saved.ConfigVersion}, nil
 }
 
 func (s *PromptService) RejectCyberFeedback(ctx context.Context, id int64, request RejectCyberFeedbackRequest, actorID int64) (*CyberFeedbackActionResult, error) {
 	if s == nil || id <= 0 || len([]rune(strings.TrimSpace(request.Reason))) > 512 {
 		return nil, infraerrors.BadRequest("prompt_audit_cyber_reject_invalid", "CYB 反馈拒绝请求无效")
 	}
-	s.cyberAdminMu.Lock()
-	defer s.cyberAdminMu.Unlock()
+	if !cyberSupplementMutationLockHeld(ctx) {
+		return s.withCyberSupplementMutationLock(ctx, func(locked context.Context) (*CyberFeedbackActionResult, error) {
+			return s.RejectCyberFeedback(locked, id, request, actorID)
+		})
+	}
 	repo, err := s.cyberFeedbackRepo()
 	if err != nil {
 		return nil, err
@@ -385,10 +475,17 @@ func (s *PromptService) RejectCyberFeedback(ctx context.Context, id int64, reque
 func (s *PromptService) RevokeCyberRule(ctx context.Context, id string, request RevokeCyberRuleRequest, actorID int64) (*CyberFeedbackActionResult, error) {
 	id = strings.TrimSpace(id)
 	if s == nil || !validDeterministicCyberRuleID(id) || request.ExpectedConfigVersion < 1 {
-		return nil, infraerrors.BadRequest("prompt_audit_cyber_revoke_invalid", "CYB 规则撤销请求无效")
+		return nil, infraerrors.BadRequest("prompt_audit_cyber_revoke_invalid", "CYB 规则停用请求无效")
 	}
-	s.cyberAdminMu.Lock()
-	defer s.cyberAdminMu.Unlock()
+	if !cyberSupplementMutationLockHeld(ctx) {
+		return s.withCyberSupplementMutationLock(ctx, func(locked context.Context) (*CyberFeedbackActionResult, error) {
+			return s.RevokeCyberRule(locked, id, request, actorID)
+		})
+	}
+	repo, err := s.cyberFeedbackRepo()
+	if err != nil {
+		return nil, err
+	}
 	store, err := s.cyberSupplementConfig()
 	if err != nil {
 		return nil, err
@@ -397,29 +494,221 @@ func (s *PromptService) RevokeCyberRule(ctx context.Context, id string, request 
 	if err != nil {
 		return nil, err
 	}
-	index := -1
-	for i := range config.CyberSupplementRules {
-		if config.CyberSupplementRules[i].ID == id {
-			index = i
-			break
-		}
-	}
-	if index < 0 {
-		return &CyberFeedbackActionResult{ConfigVersion: config.ConfigVersion}, nil
-	}
 	if config.ConfigVersion != request.ExpectedConfigVersion {
 		return nil, infraerrors.Conflict(ErrorCodeConfigConflict, "提示词审计配置已被其他管理员更新")
 	}
-	revoked := config.CyberSupplementRules[index]
+	index := cyberRuleIndex(config.CyberSupplementRules, id)
+	if index < 0 {
+		projection, getErr := repo.GetCyberRuleProjection(ctx, cyberRuleFeedbackID(id))
+		if errors.Is(getErr, ErrCyberFeedbackNotFound) {
+			return &CyberFeedbackActionResult{ConfigVersion: config.ConfigVersion}, nil
+		}
+		if getErr != nil {
+			return nil, getErr
+		}
+		if projection.LifecycleStatus == CyberRuleLifecycleDeleted {
+			return &CyberFeedbackActionResult{ConfigVersion: config.ConfigVersion}, nil
+		}
+		if projection.LifecycleStatus != CyberRuleLifecycleDisabled || projection.LegacyUnprojected {
+			if err := repo.SaveCyberRuleProjection(ctx, projection.FeedbackID, id, projection.RuleText, CyberRuleLifecycleDisabled, projection.RuleTextSource, actorID, config.ConfigVersion); err != nil {
+				return nil, err
+			}
+			projection.LifecycleStatus = CyberRuleLifecycleDisabled
+			projection.StateConfigVersion = config.ConfigVersion
+		}
+		disabled := projectedCyberRuleAdminDTO(projection, CyberRuleLifecycleDisabled)
+		return &CyberFeedbackActionResult{Rule: &disabled, ConfigVersion: config.ConfigVersion}, nil
+	}
+	activeRule := config.CyberSupplementRules[index]
+	projection, projectionErr := repo.GetCyberRuleProjection(ctx, activeRule.SourceFeedbackID)
+	if projectionErr != nil && !errors.Is(projectionErr, ErrCyberFeedbackNotFound) {
+		return nil, projectionErr
+	}
+	terminalDeleted := projectionErr == nil && projection.LifecycleStatus == CyberRuleLifecycleDeleted
+	if !terminalDeleted {
+		projection, err = ensureCyberRuleProjection(ctx, repo, activeRule, CyberRuleLifecycleDisabled, actorID, request.ExpectedConfigVersion+1)
+		if errors.Is(err, ErrCyberRuleLifecycleConflict) {
+			// The exact active config is authoritative after a historical partial
+			// adoption or reject race. Reconcile the projection so disabling does
+			// not make the rule disappear and remains reversible. The earlier
+			// administrator action remains in the audit log.
+			projection, err = repo.ReconcileActiveCyberRuleProjection(
+				ctx, activeRule, CyberRuleLifecycleDisabled, actorID, request.ExpectedConfigVersion+1,
+			)
+			if errors.Is(err, ErrCyberRuleLifecycleDeleted) {
+				terminalDeleted = true
+			} else if err != nil {
+				return nil, err
+			}
+		} else if err != nil {
+			return nil, err
+		}
+	}
 	nextRules := cloneCyberSupplementRules(config.CyberSupplementRules)
 	nextRules = append(nextRules[:index], nextRules[index+1:]...)
 	saved, err := store.SaveCyberSupplementRules(ctx, request.ExpectedConfigVersion, nextRules, actorID)
 	if err != nil {
 		return nil, err
 	}
-	revoked.Status = "revoked"
-	revoked.ConfigVersion = saved.ConfigVersion
-	return &CyberFeedbackActionResult{Rule: &revoked, ConfigVersion: saved.ConfigVersion}, nil
+	if terminalDeleted {
+		deleted := projectedCyberRuleAdminDTO(projection, CyberRuleLifecycleDeleted)
+		deleted.RuleText = ""
+		deleted.RuleTextSource = ""
+		deleted.RecoveredCandidate = false
+		deleted.ConfigVersion = saved.ConfigVersion
+		return &CyberFeedbackActionResult{Rule: &deleted, ConfigVersion: saved.ConfigVersion}, nil
+	}
+	projection.LifecycleStatus = CyberRuleLifecycleDisabled
+	projection.StateConfigVersion = saved.ConfigVersion
+	disabled := projectedCyberRuleAdminDTO(projection, CyberRuleLifecycleDisabled)
+	disabled.ConfigVersion = saved.ConfigVersion
+	return &CyberFeedbackActionResult{Rule: &disabled, ConfigVersion: saved.ConfigVersion}, nil
+}
+
+func (s *PromptService) RestoreCyberRule(ctx context.Context, id string, request RestoreCyberRuleRequest, actorID int64) (*CyberFeedbackActionResult, error) {
+	id = strings.TrimSpace(id)
+	if s == nil || !validDeterministicCyberRuleID(id) || request.ExpectedConfigVersion < 1 {
+		return nil, infraerrors.BadRequest("prompt_audit_cyber_restore_invalid", "CYB 规则恢复请求无效")
+	}
+	if !cyberSupplementMutationLockHeld(ctx) {
+		return s.withCyberSupplementMutationLock(ctx, func(locked context.Context) (*CyberFeedbackActionResult, error) {
+			return s.RestoreCyberRule(locked, id, request, actorID)
+		})
+	}
+	repo, err := s.cyberFeedbackRepo()
+	if err != nil {
+		return nil, err
+	}
+	store, err := s.cyberSupplementConfig()
+	if err != nil {
+		return nil, err
+	}
+	config, err := store.Public()
+	if err != nil {
+		return nil, err
+	}
+	if config.ConfigVersion != request.ExpectedConfigVersion {
+		return nil, infraerrors.Conflict(ErrorCodeConfigConflict, "提示词审计配置已被其他管理员更新")
+	}
+	if existing := findCyberRule(config.CyberSupplementRules, id); existing != nil {
+		projection, projectionErr := ensureCyberRuleProjection(ctx, repo, *existing, CyberRuleLifecycleActive, actorID, config.ConfigVersion)
+		if projectionErr != nil {
+			return nil, projectionErr
+		}
+		active := activeCyberRuleAdminDTO(*existing, &projection)
+		return &CyberFeedbackActionResult{Rule: &active, ConfigVersion: config.ConfigVersion}, nil
+	}
+	projection, err := repo.GetCyberRuleProjection(ctx, cyberRuleFeedbackID(id))
+	if errors.Is(err, ErrCyberFeedbackNotFound) {
+		return nil, infraerrors.NotFound(ErrorCodeCyberFeedbackNotFound, "CYB 规则不存在")
+	}
+	if err != nil {
+		return nil, err
+	}
+	if projection.RuleID != id || projection.LifecycleStatus == CyberRuleLifecycleDeleted {
+		return nil, infraerrors.Conflict(ErrorCodeCyberFeedbackConflict, "CYB 规则已被永久删除，不能恢复")
+	}
+	ruleText := strings.TrimSpace(projection.RuleText)
+	if ruleText == "" || projection.RuleTextSource == CyberRuleTextSourceUnavailable {
+		return nil, infraerrors.Conflict(ErrorCodeCyberFeedbackConflict, "该历史规则没有可证明的规则文本，无法恢复")
+	}
+	createdAt := projection.CreatedAt
+	createdBy := actorID
+	reviewedAt := s.now()
+	reviewedBy := actorID
+	if projection.ReviewedAt != nil {
+		createdAt = *projection.ReviewedAt
+		reviewedAt = *projection.ReviewedAt
+	}
+	if projection.ReviewedBy != nil && *projection.ReviewedBy > 0 {
+		createdBy = *projection.ReviewedBy
+		reviewedBy = *projection.ReviewedBy
+	}
+	rule := CyberSupplementRule{
+		ID: id, RuleText: ruleText, SourceFeedbackID: projection.FeedbackID, Status: CyberRuleLifecycleActive,
+		CreatedAt: createdAt, CreatedBy: createdBy, ReviewedAt: reviewedAt, ReviewedBy: reviewedBy,
+		ConfigVersion: request.ExpectedConfigVersion + 1,
+	}
+	nextRules := append(cloneCyberSupplementRules(config.CyberSupplementRules), rule)
+	saved, err := store.SaveCyberSupplementRules(ctx, request.ExpectedConfigVersion, nextRules, actorID)
+	if err != nil {
+		return nil, err
+	}
+	rule.ConfigVersion = saved.ConfigVersion
+	if err := repo.SaveCyberRuleProjection(ctx, projection.FeedbackID, id, ruleText, CyberRuleLifecycleActive, projection.RuleTextSource, actorID, saved.ConfigVersion); err != nil {
+		return nil, err
+	}
+	projection.LifecycleStatus = CyberRuleLifecycleActive
+	projection.StateConfigVersion = saved.ConfigVersion
+	active := activeCyberRuleAdminDTO(rule, &projection)
+	return &CyberFeedbackActionResult{Rule: &active, ConfigVersion: saved.ConfigVersion}, nil
+}
+
+func (s *PromptService) DeleteCyberRule(ctx context.Context, id string, request DeleteCyberRuleRequest, actorID int64) (*CyberFeedbackActionResult, error) {
+	id = strings.TrimSpace(id)
+	if s == nil || !validDeterministicCyberRuleID(id) || request.ExpectedConfigVersion < 1 || strings.TrimSpace(request.ConfirmRuleID) != id {
+		return nil, infraerrors.BadRequest("prompt_audit_cyber_delete_confirmation_invalid", "必须输入完整规则 ID 确认永久删除")
+	}
+	if !cyberSupplementMutationLockHeld(ctx) {
+		return s.withCyberSupplementMutationLock(ctx, func(locked context.Context) (*CyberFeedbackActionResult, error) {
+			return s.DeleteCyberRule(locked, id, request, actorID)
+		})
+	}
+	repo, err := s.cyberFeedbackRepo()
+	if err != nil {
+		return nil, err
+	}
+	store, err := s.cyberSupplementConfig()
+	if err != nil {
+		return nil, err
+	}
+	config, err := store.Public()
+	if err != nil {
+		return nil, err
+	}
+	if config.ConfigVersion != request.ExpectedConfigVersion {
+		return nil, infraerrors.Conflict(ErrorCodeConfigConflict, "提示词审计配置已被其他管理员更新")
+	}
+	if findCyberRule(config.CyberSupplementRules, id) != nil {
+		return nil, infraerrors.Conflict(ErrorCodeCyberFeedbackConflict, "生效中的 CYB 规则必须先停用才能永久删除")
+	}
+	projection, err := repo.GetCyberRuleProjection(ctx, cyberRuleFeedbackID(id))
+	if errors.Is(err, ErrCyberFeedbackNotFound) {
+		return &CyberFeedbackActionResult{ConfigVersion: config.ConfigVersion}, nil
+	}
+	if err != nil {
+		return nil, err
+	}
+	if projection.LifecycleStatus == CyberRuleLifecycleDeleted {
+		return &CyberFeedbackActionResult{ConfigVersion: config.ConfigVersion}, nil
+	}
+	if projection.RuleID != id {
+		return nil, infraerrors.Conflict(ErrorCodeCyberFeedbackConflict, "CYB 规则状态与来源反馈不一致")
+	}
+	if projection.LifecycleStatus != CyberRuleLifecycleDisabled || projection.LegacyUnprojected {
+		// Config membership is authoritative. Repair a stale non-deleted
+		// projection before deletion so a crash after config removal cannot make
+		// the visible disabled rule impossible to delete.
+		if err := repo.SaveCyberRuleProjection(ctx, projection.FeedbackID, id, projection.RuleText, CyberRuleLifecycleDisabled, projection.RuleTextSource, actorID, config.ConfigVersion); err != nil {
+			return nil, err
+		}
+		projection.LifecycleStatus = CyberRuleLifecycleDisabled
+	}
+	// Saving the unchanged active set establishes an authoritative config CAS
+	// boundary against a concurrent restore on another process.
+	saved, err := store.SaveCyberSupplementRules(ctx, request.ExpectedConfigVersion, cloneCyberSupplementRules(config.CyberSupplementRules), actorID)
+	if err != nil {
+		return nil, err
+	}
+	if err := repo.DeleteCyberRuleProjection(ctx, projection.FeedbackID, id, actorID, saved.ConfigVersion); err != nil {
+		return nil, err
+	}
+	deleted := projectedCyberRuleAdminDTO(projection, CyberRuleLifecycleDeleted)
+	deleted.RuleText = ""
+	deleted.RuleTextSource = ""
+	deleted.RecoveredCandidate = false
+	deleted.ConfigVersion = saved.ConfigVersion
+	return &CyberFeedbackActionResult{Rule: &deleted, ConfigVersion: saved.ConfigVersion}, nil
 }
 
 func validDeterministicCyberRuleID(value string) bool {
@@ -491,6 +780,148 @@ func findCyberRule(rules []CyberSupplementRule, id string) *CyberSupplementRule 
 		}
 	}
 	return nil
+}
+
+func cyberRuleIndex(rules []CyberSupplementRule, id string) int {
+	for i := range rules {
+		if rules[i].ID == id {
+			return i
+		}
+	}
+	return -1
+}
+
+func cyberRuleFeedbackID(id string) int64 {
+	value, _ := strconv.ParseInt(strings.TrimPrefix(id, "cyb-feedback-"), 10, 64)
+	return value
+}
+
+func ensureCyberRuleProjection(
+	ctx context.Context,
+	repo CyberFeedbackRepository,
+	rule CyberSupplementRule,
+	status string,
+	actorID, configVersion int64,
+) (CyberRuleProjection, error) {
+	projection, err := repo.GetCyberRuleProjection(ctx, rule.SourceFeedbackID)
+	if err != nil && !errors.Is(err, ErrCyberFeedbackNotFound) {
+		return CyberRuleProjection{}, err
+	}
+	if errors.Is(err, ErrCyberFeedbackNotFound) {
+		feedback, feedbackErr := repo.GetCyberFeedback(ctx, rule.SourceFeedbackID)
+		if feedbackErr != nil {
+			return CyberRuleProjection{}, feedbackErr
+		}
+		if feedback.ReviewStatus == CyberReviewPending && strings.TrimSpace(feedback.RuleID) == "" {
+			feedback, feedbackErr = repo.ReviewCyberFeedback(
+				ctx, rule.SourceFeedbackID, CyberReviewApproved, actorID, rule.ID, configVersion,
+			)
+			if errors.Is(feedbackErr, ErrCyberFeedbackReviewConflict) {
+				feedback, feedbackErr = repo.GetCyberFeedback(ctx, rule.SourceFeedbackID)
+			}
+			if feedbackErr != nil {
+				return CyberRuleProjection{}, feedbackErr
+			}
+		}
+		if feedback.ReviewStatus != CyberReviewApproved || strings.TrimSpace(feedback.RuleID) != rule.ID {
+			return CyberRuleProjection{}, ErrCyberRuleLifecycleConflict
+		}
+		projection, err = repo.GetCyberRuleProjection(ctx, rule.SourceFeedbackID)
+		if err != nil {
+			return CyberRuleProjection{}, err
+		}
+	}
+	if projection.RuleID != rule.ID || projection.LifecycleStatus == CyberRuleLifecycleDeleted {
+		return CyberRuleProjection{}, ErrCyberRuleLifecycleConflict
+	}
+	source := strings.TrimSpace(projection.RuleTextSource)
+	if projection.LegacyUnprojected || source == "" || source == CyberRuleTextSourceUnavailable {
+		source = CyberRuleTextSourceReviewed
+	}
+	if err := repo.SaveCyberRuleProjection(ctx, rule.SourceFeedbackID, rule.ID, rule.RuleText, status, source, actorID, configVersion); err != nil {
+		return CyberRuleProjection{}, err
+	}
+	projection.RuleID = rule.ID
+	projection.RuleText = rule.RuleText
+	projection.LifecycleStatus = status
+	projection.RuleTextSource = source
+	projection.StateConfigVersion = configVersion
+	return projection, nil
+}
+
+func mergeCyberRuleAdminDTOs(activeRules []CyberSupplementRule, projections []CyberRuleProjection) []CyberRuleAdminDTO {
+	projectionByFeedbackID := make(map[int64]CyberRuleProjection, len(projections))
+	for _, projection := range projections {
+		projectionByFeedbackID[projection.FeedbackID] = projection
+	}
+	result := make([]CyberRuleAdminDTO, 0, len(activeRules)+len(projections))
+	consumedFeedbackIDs := make(map[int64]struct{}, len(activeRules))
+	for _, rule := range activeRules {
+		projection, ok := projectionByFeedbackID[rule.SourceFeedbackID]
+		if !ok {
+			projection = CyberRuleProjection{FeedbackID: rule.SourceFeedbackID, RuleID: rule.ID, RuleTextSource: CyberRuleTextSourceReviewed}
+		} else {
+			// Source feedback identity is authoritative for an active config rule.
+			// Consume even a stale/wrong projection ID so it cannot also appear as
+			// an unmanageable disabled ghost rule.
+			consumedFeedbackIDs[rule.SourceFeedbackID] = struct{}{}
+		}
+		result = append(result, activeCyberRuleAdminDTO(rule, &projection))
+	}
+	for _, projection := range projections {
+		if _, consumed := consumedFeedbackIDs[projection.FeedbackID]; consumed || projection.LifecycleStatus == CyberRuleLifecycleDeleted {
+			continue
+		}
+		if projection.RuleID != DeterministicCyberRuleID(projection.FeedbackID) {
+			// A non-active projection with a non-canonical ID cannot be addressed
+			// safely by the lifecycle endpoints. Hide it until an authoritative
+			// active config transition reconciles the row.
+			continue
+		}
+		// Runtime config membership is authoritative. A staged projection left by
+		// a failed config CAS is therefore displayed as disabled, never active.
+		result = append(result, projectedCyberRuleAdminDTO(projection, CyberRuleLifecycleDisabled))
+	}
+	return result
+}
+
+func activeCyberRuleAdminDTO(rule CyberSupplementRule, projection *CyberRuleProjection) CyberRuleAdminDTO {
+	reviewedAt := rule.ReviewedAt
+	reviewedBy := rule.ReviewedBy
+	result := CyberRuleAdminDTO{
+		ID: rule.ID, RuleText: rule.RuleText, SourceFeedbackID: rule.SourceFeedbackID,
+		Status: CyberRuleLifecycleActive, RuleTextSource: CyberRuleTextSourceReviewed,
+		CreatedAt: rule.CreatedAt, CreatedBy: rule.CreatedBy, ReviewedAt: &reviewedAt, ReviewedBy: &reviewedBy,
+		ConfigVersion: rule.ConfigVersion,
+	}
+	if projection != nil {
+		if source := strings.TrimSpace(projection.RuleTextSource); source != "" && !projection.LegacyUnprojected {
+			result.RuleTextSource = source
+		}
+		result.StateUpdatedAt = projection.StateUpdatedAt
+		result.StateUpdatedBy = projection.StateUpdatedBy
+	}
+	result.RecoveredCandidate = result.RuleTextSource == CyberRuleTextSourceRecoveredCandidate
+	return result
+}
+
+func projectedCyberRuleAdminDTO(projection CyberRuleProjection, status string) CyberRuleAdminDTO {
+	createdAt := projection.CreatedAt
+	createdBy := int64(0)
+	if projection.ReviewedAt != nil {
+		createdAt = *projection.ReviewedAt
+	}
+	if projection.ReviewedBy != nil {
+		createdBy = *projection.ReviewedBy
+	}
+	return CyberRuleAdminDTO{
+		ID: projection.RuleID, RuleText: projection.RuleText, SourceFeedbackID: projection.FeedbackID,
+		Status: status, RuleTextSource: projection.RuleTextSource,
+		RecoveredCandidate: projection.RuleTextSource == CyberRuleTextSourceRecoveredCandidate,
+		CreatedAt:          createdAt, CreatedBy: createdBy, ReviewedAt: projection.ReviewedAt, ReviewedBy: projection.ReviewedBy,
+		StateUpdatedAt: projection.StateUpdatedAt, StateUpdatedBy: projection.StateUpdatedBy,
+		ConfigVersion: projection.StateConfigVersion,
+	}
 }
 
 func cyberFeedbackAdminDTO(value CyberFeedback) CyberFeedbackAdminDTO {

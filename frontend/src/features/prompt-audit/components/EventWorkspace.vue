@@ -1,6 +1,6 @@
 <template>
-  <section aria-labelledby="prompt-events-title" class="py-6">
-    <div class="flex flex-wrap items-start justify-between gap-3">
+  <section aria-labelledby="prompt-events-title" class="card overflow-hidden">
+    <div class="card-header flex flex-wrap items-start justify-between gap-3">
       <div>
         <h2 id="prompt-events-title" class="text-base font-semibold text-gray-950 dark:text-white">{{ t('admin.promptAudit.events.title') }}</h2>
         <p class="mt-1 text-sm text-gray-500 dark:text-dark-300">{{ t('admin.promptAudit.events.description') }}</p>
@@ -15,7 +15,7 @@
       </div>
     </div>
 
-    <form class="mt-5 grid gap-3 sm:grid-cols-2 lg:grid-cols-4 xl:grid-cols-5" @submit.prevent="applyFilters">
+    <form class="m-5 grid gap-3 rounded-xl bg-gray-50 p-4 dark:bg-dark-900/50 sm:grid-cols-2 lg:grid-cols-4 xl:grid-cols-5" @submit.prevent="applyFilters">
       <label class="text-xs text-gray-600 dark:text-dark-200">
         <span>{{ t('admin.promptAudit.events.decision') }}</span>
         <select v-model="localFilters.decision" class="input mt-1 w-full" :aria-label="t('admin.promptAudit.events.decision')" @change="filtersChanged">
@@ -55,66 +55,62 @@
         <button type="button" class="btn btn-ghost btn-sm" @click="resetFilters">{{ t('common.reset') }}</button>
       </div>
     </form>
-    <div v-if="error" role="alert" class="mt-4 rounded-lg bg-red-50 px-4 py-3 text-sm text-red-700 dark:bg-red-950/30 dark:text-red-300">{{ error }}</div>
-    <div class="mt-5 overflow-x-auto rounded-xl border border-gray-200 dark:border-dark-700/60">
-      <table class="w-full min-w-[1368px] table-fixed text-left text-sm">
-        <thead class="bg-gray-50 text-xs uppercase tracking-wide text-gray-500 dark:bg-dark-900/70 dark:text-dark-400">
-          <tr>
-            <th class="w-10 px-3 py-3"><input type="checkbox" :checked="allSelected" :aria-label="t('admin.promptAudit.events.selectAll')" @change="toggleAll" /></th>
-            <th class="w-36 px-3 py-3 font-medium">{{ t('admin.promptAudit.events.time') }}</th>
-            <th class="w-64 px-3 py-3 font-medium">{{ t('admin.promptAudit.events.identity') }}</th>
-            <th class="w-32 px-3 py-3 font-medium">{{ t('admin.promptAudit.events.group') }}</th>
-            <th class="w-56 px-3 py-3 font-medium">{{ t('admin.promptAudit.events.route') }}</th>
-            <th class="w-44 px-3 py-3 font-medium">{{ t('admin.promptAudit.events.result') }}</th>
-            <th class="w-64 px-3 py-3 font-medium">{{ t('admin.promptAudit.events.preview') }}</th>
-            <th class="w-36 px-3 py-3 text-right font-medium">{{ t('admin.promptAudit.common.actions') }}</th>
-          </tr>
-        </thead>
-        <tbody class="divide-y divide-gray-100 bg-white dark:divide-dark-700 dark:bg-transparent">
-          <tr v-if="loading"><td colspan="8" class="px-4 py-12 text-center text-gray-500" aria-busy="true">{{ t('common.loading') }}</td></tr>
-          <tr v-else-if="events.length === 0"><td colspan="8" class="px-4 py-12 text-center text-gray-500">{{ t('admin.promptAudit.events.empty') }}</td></tr>
-          <tr v-for="event in events" v-else :key="event.id" :data-test="`event-${event.id}`" class="align-top hover:bg-gray-50/70 dark:hover:bg-dark-800/70">
-            <td class="px-3 py-3"><input type="checkbox" :checked="selectedIds.includes(event.id)" :aria-label="t('admin.promptAudit.events.selectEvent', { id: event.id })" @change="toggleOne(event.id)" /></td>
-            <td class="whitespace-nowrap px-3 py-3 text-xs text-gray-600 dark:text-dark-300">{{ formatDate(event.created_at) }}</td>
-            <td class="w-64 max-w-64 overflow-hidden px-3 py-3">
-              <div class="min-w-0 space-y-1.5" data-test="event-identity">
-                <div v-for="row in identityRows(event)" :key="row.key" class="grid min-w-0 grid-cols-[3.25rem_minmax(0,1fr)] items-center gap-x-2 text-xs">
-                  <span class="truncate text-[11px] font-medium text-gray-400 dark:text-dark-500">{{ row.label }}</span>
-                  <span class="flex min-w-0 items-center gap-1.5">
-                    <span class="min-w-0 flex-1 truncate text-gray-800 dark:text-dark-100" :title="row.displayValue">{{ row.displayValue }}</span>
-                    <button
-                      v-if="row.copyValue"
-                      type="button"
-                      class="shrink-0 rounded p-0.5 text-gray-400 hover:bg-gray-100 hover:text-primary-600 dark:hover:bg-dark-700 dark:hover:text-primary-300"
-                      :aria-label="`${t('common.copy')} ${row.label}`"
-                      @click="copyIdentityValue(row.copyValue)"
-                    >
-                      <svg aria-hidden="true" viewBox="0 0 20 20" fill="none" class="h-3.5 w-3.5" stroke="currentColor" stroke-width="1.6">
-                        <rect x="6.5" y="6.5" width="9" height="9" rx="1.5" />
-                        <path d="M13.5 6.5V5A1.5 1.5 0 0 0 12 3.5H5A1.5 1.5 0 0 0 3.5 5v7A1.5 1.5 0 0 0 5 13.5h1.5" />
-                      </svg>
-                    </button>
-                  </span>
-                </div>
-              </div>
-            </td>
-            <td class="px-3 py-3 text-gray-700 dark:text-dark-200">{{ event.snapshot.group_name || '—' }}</td>
-            <td class="px-3 py-3">
-              <p class="font-medium text-gray-900 dark:text-white">{{ event.snapshot.endpoint }}</p>
-              <p class="mt-1 text-xs text-gray-500">{{ event.snapshot.model }} · {{ event.snapshot.protocol }} · {{ event.snapshot.stage || 'http' }}</p>
-            </td>
-            <td class="px-3 py-3">
-              <span class="rounded-full px-2 py-0.5 text-xs font-medium" :class="decisionClass(event.decision)">{{ formatDecisionRisk(event.decision, event.risk_level) }}</span>
-              <p class="mt-2 max-w-48 truncate text-xs text-gray-500" :title="formatCategories(event.categories)">{{ formatCategories(event.categories) }}</p>
-            </td>
-            <td class="max-w-xs px-3 py-3"><p class="line-clamp-2 break-words text-gray-600 dark:text-dark-300">{{ event.snapshot.redacted_preview || '—' }}</p></td>
-            <td class="whitespace-nowrap px-3 py-3 text-right">
-              <button type="button" class="btn btn-ghost btn-sm" @click="$emit('view', event.id)">{{ t('common.view') }}</button>
-              <button type="button" class="btn btn-ghost btn-sm text-red-600" @click="$emit('delete', event.id)">{{ t('common.delete') }}</button>
-            </td>
-          </tr>
-        </tbody>
-      </table>
+    <div v-if="error" role="alert" class="mx-5 mb-5 rounded-lg bg-red-50 px-4 py-3 text-sm text-red-700 dark:bg-red-950/30 dark:text-red-300">{{ error }}</div>
+    <div class="border-t border-gray-200 bg-gray-50/60 p-3 dark:border-dark-700 dark:bg-dark-950/20 md:bg-transparent md:p-0" data-test="event-data-table">
+      <DataTable
+        :columns="eventColumns"
+        :data="events"
+        :loading="loading"
+        row-key="id"
+        selectable
+        :selected-keys="selectedIds"
+        :selection-label="eventSelectionLabel"
+        @update:selected-keys="updateSelection"
+      >
+        <template #cell-created_at="{ row }">
+          <span class="whitespace-nowrap text-xs text-gray-600 dark:text-dark-300">{{ formatDate(row.created_at) }}</span>
+        </template>
+        <template #cell-email="{ row }">
+          <div class="min-w-0 max-w-60" data-test="event-email">
+            <p class="truncate text-gray-800 dark:text-dark-100" :title="row.snapshot.user_email || undefined">{{ row.snapshot.user_email || '—' }}</p>
+          </div>
+        </template>
+        <template #cell-api_key="{ row }">
+          <div class="min-w-0 max-w-44" data-test="event-api-key">
+            <p class="truncate text-gray-800 dark:text-dark-100" :title="displayAPIKeyName(row)">{{ displayAPIKeyName(row) }}</p>
+            <p v-if="row.snapshot.api_key_id > 0" class="mt-1 font-mono text-xs text-gray-400 dark:text-dark-500">#{{ row.snapshot.api_key_id }}</p>
+          </div>
+        </template>
+        <template #cell-group="{ row }">
+          <span class="text-gray-700 dark:text-dark-200">{{ row.snapshot.group_name || '—' }}</span>
+        </template>
+        <template #cell-route="{ row }">
+          <div class="min-w-0 max-w-64">
+            <p class="truncate font-medium text-gray-900 dark:text-white" :title="row.snapshot.endpoint">{{ row.snapshot.endpoint }}</p>
+            <p class="mt-1 truncate text-xs text-gray-500" :title="`${row.snapshot.model} · ${row.snapshot.protocol} · ${row.snapshot.stage || 'http'}`">{{ row.snapshot.model }} · {{ row.snapshot.protocol }} · {{ row.snapshot.stage || 'http' }}</p>
+          </div>
+        </template>
+        <template #cell-result="{ row }">
+          <div class="min-w-0 max-w-48">
+            <span class="inline-flex rounded-full px-2 py-0.5 text-xs font-medium" :class="decisionClass(row.decision)">{{ formatDecisionRisk(row.decision, row.risk_level) }}</span>
+            <p class="mt-2 truncate text-xs text-gray-500" :title="formatCategories(row.categories)">{{ formatCategories(row.categories) }}</p>
+          </div>
+        </template>
+        <template #cell-preview="{ row }">
+          <p class="line-clamp-2 min-w-0 max-w-xs whitespace-normal break-words text-gray-600 dark:text-dark-300">{{ row.snapshot.redacted_preview || '—' }}</p>
+        </template>
+        <template #cell-actions="{ row }">
+          <div class="flex flex-wrap justify-end gap-1">
+            <button type="button" class="btn btn-ghost btn-sm" @click.stop="$emit('view', row.id)">{{ t('common.view') }}</button>
+            <button type="button" class="btn btn-ghost btn-sm text-red-600" @click.stop="$emit('delete', row.id)">{{ t('common.delete') }}</button>
+          </div>
+        </template>
+        <template #empty>
+          <p class="py-8 text-sm text-gray-500 dark:text-dark-400">{{ t('admin.promptAudit.events.empty') }}</p>
+        </template>
+      </DataTable>
+    </div>
+    <div data-test="event-pagination" class="border-t border-gray-200 dark:border-dark-700">
       <Pagination :total="total" :page="page" :page-size="pageSize" @update:page="$emit('page', $event)" @update:page-size="$emit('page-size', $event)" />
     </div>
   </section>
@@ -123,7 +119,9 @@
 <script setup lang="ts">
 import { computed, defineComponent, h, reactive, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
+import DataTable from '@/components/common/DataTable.vue'
 import Pagination from '@/components/common/Pagination.vue'
+import type { Column } from '@/components/common/types'
 import type { PromptAuditEvent, PromptEventFilters } from '../types'
 import { cloneData, emptyEventFilters, LOCALIZED_SCANNER_IDS } from '../viewModel'
 
@@ -145,7 +143,16 @@ const emit = defineEmits<{
 const { t, locale } = useI18n()
 const localFilters = reactive<PromptEventFilters>(cloneData(props.filters))
 watch(() => props.filters, (value) => Object.assign(localFilters, cloneData(value)), { deep: true })
-const allSelected = computed(() => props.events.length > 0 && props.events.every((event) => props.selectedIds.includes(event.id)))
+const eventColumns = computed<Column[]>(() => [
+  { key: 'created_at', label: t('admin.promptAudit.events.time'), class: 'min-w-36' },
+  { key: 'email', label: t('admin.promptAudit.events.email'), class: 'w-60 max-w-60' },
+  { key: 'api_key', label: t('admin.promptAudit.events.apiKey'), class: 'w-44 max-w-44' },
+  { key: 'group', label: t('admin.promptAudit.events.group'), class: 'min-w-32' },
+  { key: 'route', label: t('admin.promptAudit.events.route'), class: 'min-w-64' },
+  { key: 'result', label: t('admin.promptAudit.events.result'), class: 'min-w-48' },
+  { key: 'preview', label: t('admin.promptAudit.events.preview'), class: 'min-w-72 max-w-xs' },
+  { key: 'actions', label: t('admin.promptAudit.common.actions'), class: 'min-w-36 text-right' },
+])
 
 const FilterInput = defineComponent({
   props: { modelValue: { type: String, required: true }, label: { type: String, required: true }, type: { type: String, default: 'text' } },
@@ -174,14 +181,11 @@ function resetFilters() {
   Object.assign(localFilters, emptyEventFilters())
   applyFilters()
 }
-function toggleOne(id: number) {
-  const selected = new Set(props.selectedIds)
-  if (selected.has(id)) selected.delete(id)
-  else selected.add(id)
-  emit('selection', [...selected])
+function eventSelectionLabel(event: PromptAuditEvent): string {
+  return t('admin.promptAudit.events.selectEvent', { id: event.id })
 }
-function toggleAll() {
-  emit('selection', allSelected.value ? [] : props.events.map((event) => event.id))
+function updateSelection(keys: Array<string | number>) {
+  emit('selection', keys.filter((key): key is number => typeof key === 'number'))
 }
 function formatDate(value: string): string {
   return new Intl.DateTimeFormat(locale.value, { dateStyle: 'short', timeStyle: 'medium' }).format(new Date(value))
@@ -213,33 +217,15 @@ function formatCategories(categories: string[]): string {
   return categories.map(translateCategory).join(', ')
 }
 
-interface IdentityRow {
-  key: 'user' | 'email' | 'api-key'
-  label: string
-  displayValue: string
-  copyValue: string
-}
-
 function maskPotentialAPIKey(value: string): string {
   const normalized = value.trim()
   if (!/^sk-[A-Za-z0-9._-]{12,}$/.test(normalized)) return value
   return `${normalized.slice(0, 6)}…${normalized.slice(-4)}`
 }
 
-function identityRows(event: PromptAuditEvent): IdentityRow[] {
-  const apiKeyName = maskPotentialAPIKey(event.snapshot.api_key_name || '')
-  return [
-    { key: 'user', label: t('admin.promptAudit.events.userShort'), displayValue: event.snapshot.username || '—', copyValue: event.snapshot.username || '' },
-    { key: 'email', label: t('admin.promptAudit.events.emailShort'), displayValue: event.snapshot.user_email || '—', copyValue: event.snapshot.user_email || '' },
-    // The snapshot contract contains the key name, never the credential. If a
-    // legacy/custom record nevertheless looks like a secret, do not expose or
-    // copy the unmasked value from the list.
-    { key: 'api-key', label: t('admin.promptAudit.events.apiKeyShort'), displayValue: apiKeyName || '—', copyValue: apiKeyName },
-  ]
-}
-
-function copyIdentityValue(value: string) {
-  const result = navigator.clipboard?.writeText(value)
-  if (result) void result.catch(() => undefined)
+function displayAPIKeyName(event: PromptAuditEvent): string {
+  // The snapshot contract contains the key name, never the credential. If a
+  // legacy/custom record nevertheless looks like a secret, keep it masked.
+  return maskPotentialAPIKey(event.snapshot.api_key_name || '') || '—'
 }
 </script>

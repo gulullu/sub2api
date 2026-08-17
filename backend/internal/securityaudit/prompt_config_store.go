@@ -469,6 +469,39 @@ func (m *ConfigManager) SaveCyberSupplementRules(ctx context.Context, expectedVe
 	return m.Save(ctx, req, actorID)
 }
 
+// WithCyberSupplementMutationLock serializes CYB rule lifecycle transitions
+// across processes. It uses a distinct advisory lock because an operation may
+// call Save, which acquires promptAuditConfigLockKey on another transaction.
+// Every lifecycle path therefore uses the same lock order: rule, then config.
+func (m *ConfigManager) WithCyberSupplementMutationLock(ctx context.Context, operation func(context.Context) error) error {
+	if m == nil || m.db == nil || operation == nil {
+		return errors.New("prompt audit cyber rule lifecycle unavailable")
+	}
+	if m.db.Stats().MaxOpenConnections == 1 {
+		return infraerrors.ServiceUnavailable(
+			ErrorCodeConfigUnavailable,
+			"数据库连接池仅允许一个连接，无法安全执行 CYB 规则变更",
+		)
+	}
+	tx, err := m.db.BeginTx(ctx, &sql.TxOptions{Isolation: sql.LevelReadCommitted})
+	if err != nil {
+		return err
+	}
+	defer func() { _ = tx.Rollback() }()
+	if _, err := tx.ExecContext(ctx, `SELECT pg_advisory_xact_lock($1)`, promptAuditCyberRuleLockKey); err != nil {
+		return err
+	}
+	// Public is an in-process snapshot. Refresh while holding the distributed
+	// lifecycle lock so another instance cannot decide from a stale rule set.
+	if err := m.Reload(ctx); err != nil {
+		return err
+	}
+	if err := operation(ctx); err != nil {
+		return err
+	}
+	return tx.Commit()
+}
+
 func updateRequestFromStorage(storage storageConfig) UpdateConfigRequest {
 	riskIDs := append([]int64(nil), storage.RiskRouteAccountIDs...)
 	maxChars := storage.MaxTotalInputChars

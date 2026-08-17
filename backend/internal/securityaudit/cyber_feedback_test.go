@@ -49,6 +49,79 @@ func TestCyberPrepareTurnFailOpenStillKeepsSafeMetadata(t *testing.T) {
 	require.False(t, ok)
 }
 
+func TestCyberSupplementMutationLockFailsFastWithSingleConnectionPool(t *testing.T) {
+	db, mock, err := sqlmock.New()
+	require.NoError(t, err)
+	t.Cleanup(func() { _ = db.Close() })
+	db.SetMaxOpenConns(1)
+	manager := &ConfigManager{db: db}
+	called := false
+	err = manager.WithCyberSupplementMutationLock(context.Background(), func(context.Context) error {
+		called = true
+		return nil
+	})
+	require.Error(t, err)
+	require.False(t, called)
+	require.NoError(t, mock.ExpectationsWereMet(), "fail-fast must not consume the only database connection")
+}
+
+func TestCyberSupplementMutationLockReleasesAfterCallbackError(t *testing.T) {
+	db, mock, err := sqlmock.New()
+	require.NoError(t, err)
+	t.Cleanup(func() { _ = db.Close() })
+	manager := &ConfigManager{
+		db: db,
+		settings: staticSettingRepository{values: map[string]string{
+			SettingKeyPromptAuditConfig: "",
+			SettingKeyRiskControl:       "false",
+		}},
+		encryptor: prefixEncryptor{}, clock: realClock{},
+	}
+	sentinel := errors.New("injected lifecycle callback failure")
+	mock.ExpectBegin()
+	mock.ExpectExec(`SELECT pg_advisory_xact_lock`).WithArgs(promptAuditCyberRuleLockKey).
+		WillReturnResult(sqlmock.NewResult(0, 1))
+	mock.ExpectRollback()
+	err = manager.WithCyberSupplementMutationLock(context.Background(), func(context.Context) error { return sentinel })
+	require.ErrorIs(t, err, sentinel)
+
+	mock.ExpectBegin()
+	mock.ExpectExec(`SELECT pg_advisory_xact_lock`).WithArgs(promptAuditCyberRuleLockKey).
+		WillReturnResult(sqlmock.NewResult(0, 1))
+	mock.ExpectCommit()
+	require.NoError(t, manager.WithCyberSupplementMutationLock(context.Background(), func(context.Context) error { return nil }))
+	require.NoError(t, mock.ExpectationsWereMet(), "a callback failure must release the transaction-scoped lock")
+}
+
+func TestCyberSupplementMutationLockReleasesAfterContextCancellation(t *testing.T) {
+	db, mock, err := sqlmock.New()
+	require.NoError(t, err)
+	t.Cleanup(func() { _ = db.Close() })
+	manager := &ConfigManager{
+		db: db,
+		settings: staticSettingRepository{values: map[string]string{
+			SettingKeyPromptAuditConfig: "",
+			SettingKeyRiskControl:       "false",
+		}},
+		encryptor: prefixEncryptor{}, clock: realClock{},
+	}
+	mock.ExpectBegin()
+	mock.ExpectExec(`SELECT pg_advisory_xact_lock`).WithArgs(promptAuditCyberRuleLockKey).
+		WillReturnResult(sqlmock.NewResult(0, 1))
+	mock.ExpectRollback()
+	ctx, cancel := context.WithCancel(context.Background())
+	called := false
+	err = manager.WithCyberSupplementMutationLock(ctx, func(context.Context) error {
+		called = true
+		cancel()
+		return ctx.Err()
+	})
+	require.ErrorIs(t, err, context.Canceled)
+	require.True(t, called)
+	require.Eventually(t, func() bool { return mock.ExpectationsWereMet() == nil }, time.Second, 10*time.Millisecond,
+		"cancellation while holding the transaction must release the advisory lock")
+}
+
 type cyberFeedbackRepositoryStub struct {
 	confirmed []CyberConfirmInput
 }
@@ -79,6 +152,21 @@ func (*cyberFeedbackRepositoryStub) GetCyberFeedbackEvidence(context.Context, in
 }
 func (*cyberFeedbackRepositoryStub) ReviewCyberFeedback(context.Context, int64, string, int64, string, int64) (CyberFeedback, error) {
 	return CyberFeedback{}, nil
+}
+func (*cyberFeedbackRepositoryStub) ListCyberRuleProjections(context.Context) ([]CyberRuleProjection, error) {
+	return nil, nil
+}
+func (*cyberFeedbackRepositoryStub) GetCyberRuleProjection(context.Context, int64) (CyberRuleProjection, error) {
+	return CyberRuleProjection{}, ErrCyberFeedbackNotFound
+}
+func (*cyberFeedbackRepositoryStub) SaveCyberRuleProjection(context.Context, int64, string, string, string, string, int64, int64) error {
+	return nil
+}
+func (*cyberFeedbackRepositoryStub) ReconcileActiveCyberRuleProjection(context.Context, CyberSupplementRule, string, int64, int64) (CyberRuleProjection, error) {
+	return CyberRuleProjection{}, nil
+}
+func (*cyberFeedbackRepositoryStub) DeleteCyberRuleProjection(context.Context, int64, string, int64, int64) error {
+	return nil
 }
 func (*cyberFeedbackRepositoryStub) ResetCyberRuleGeneration(context.Context, int64) error {
 	return nil

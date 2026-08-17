@@ -1,5 +1,6 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { flushPromises, mount } from '@vue/test-utils'
+import DataTable from '@/components/common/DataTable.vue'
 import CyberLearningWorkspace from '../components/CyberLearningWorkspace.vue'
 import type { CyberFeedbackEvent, CyberFeedbackEvidence, CyberFeedbackPage } from '../types'
 
@@ -11,6 +12,8 @@ const mocks = vi.hoisted(() => ({
   rejectCyberEvent: vi.fn(),
   regenerateCyberCandidate: vi.fn(),
   revokeCyberRule: vi.fn(),
+  restoreCyberRule: vi.fn(),
+  deleteCyberRule: vi.fn(),
   showSuccess: vi.fn(),
   showError: vi.fn(),
 }))
@@ -25,7 +28,12 @@ vi.mock('vue-i18n', async () => {
 const BaseDialogStub = {
   props: ['show', 'title', 'width'],
   emits: ['close'],
-  template: '<div v-if="show" role="dialog"><slot /></div>',
+  template: '<div v-if="show" role="dialog"><slot /><footer><slot name="footer" /></footer></div>',
+}
+const ConfirmDialogStub = {
+  props: ['show', 'title', 'message', 'confirmText', 'danger'],
+  emits: ['confirm', 'cancel'],
+  template: '<div v-if="show" data-test="rule-confirm"><span>{{ message }}</span><button data-test="rule-confirm-action" @click="$emit(\'confirm\')">confirm</button></div>',
 }
 
 function event(overrides: Partial<CyberFeedbackEvent> = {}): CyberFeedbackEvent {
@@ -61,7 +69,7 @@ function event(overrides: Partial<CyberFeedbackEvent> = {}): CyberFeedbackEvent 
 function page(item: CyberFeedbackEvent = event()): CyberFeedbackPage {
   return {
     items: [item], total: 1, page: 1, page_size: 20, config_version: 30,
-    active_rules: [{ id: 'rule-alpha', rule_text: 'Existing abstract safety rule.', source_feedback_id: 3, status: 'active', created_at: '2026-08-16T00:00:00Z', created_by: 1, config_version: 29 }],
+    active_rules: [{ id: 'cyb-feedback-3', rule_text: 'Existing abstract safety rule.', source_feedback_id: 3, status: 'active', created_at: '2026-08-16T00:00:00Z', created_by: 1, config_version: 29 }],
   }
 }
 
@@ -95,7 +103,7 @@ function evidence(overrides: Partial<CyberFeedbackEvidence> = {}): CyberFeedback
 }
 
 function mountWorkspace() {
-  return mount(CyberLearningWorkspace, { global: { stubs: { BaseDialog: BaseDialogStub } } })
+  return mount(CyberLearningWorkspace, { global: { stubs: { BaseDialog: BaseDialogStub, ConfirmDialog: ConfirmDialogStub } } })
 }
 
 describe('CyberLearningWorkspace', () => {
@@ -108,6 +116,8 @@ describe('CyberLearningWorkspace', () => {
     mocks.rejectCyberEvent.mockResolvedValue({})
     mocks.regenerateCyberCandidate.mockResolvedValue({ event: event({ generation_status: 'pending', candidate_rule_text: '' }) })
     mocks.revokeCyberRule.mockResolvedValue({ config_version: 31 })
+    mocks.restoreCyberRule.mockResolvedValue({ config_version: 32 })
+    mocks.deleteCyberRule.mockResolvedValue({ config_version: 32 })
   })
 
   it('keeps raw content out of the list and fetches administrator evidence for review', async () => {
@@ -121,8 +131,10 @@ describe('CyberLearningWorkspace', () => {
     mocks.listCyberEvents.mockResolvedValue(page(unsafe))
     const wrapper = mountWorkspace()
     await flushPromises()
+    expect(wrapper.find('[data-test="cyber-rule-status-deleted"]').exists()).toBe(false)
 
     expect(mocks.listCyberEvents).toHaveBeenCalledWith('pending', 1, 20)
+    expect(wrapper.findComponent(DataTable).exists()).toBe(true)
     expect(wrapper.text()).toContain('[REDACTED] safe excerpt')
     expect(wrapper.html()).not.toContain('RAW_PROMPT_CANARY_DO_NOT_RENDER')
     expect(wrapper.html()).not.toContain('HASH_CANARY_DO_NOT_RENDER')
@@ -142,12 +154,13 @@ describe('CyberLearningWorkspace', () => {
   it('opens and highlights a safe deep-linked event detail', async () => {
     const wrapper = mount(CyberLearningWorkspace, {
       props: { initialEventId: 17 },
-      global: { stubs: { BaseDialog: BaseDialogStub } },
+      global: { stubs: { BaseDialog: BaseDialogStub, ConfirmDialog: ConfirmDialogStub } },
     })
     await flushPromises()
     expect(mocks.getCyberEvent).toHaveBeenCalledWith(17)
     expect(mocks.getCyberEvidence).toHaveBeenCalledWith(17)
     expect(wrapper.get('[data-test="cyber-event-row"]').attributes('data-highlighted')).toBe('true')
+    expect(wrapper.get('.cyber-highlighted-row').classes()).toContain('bg-primary-50/60')
     expect(wrapper.find('[role="dialog"]').exists()).toBe(true)
     expect(wrapper.get('[data-test="cyber-full-prompt"]').text()).toContain('RAW_PROMPT_CANARY_RENDER_IN_DETAIL')
   })
@@ -155,7 +168,7 @@ describe('CyberLearningWorkspace', () => {
   it('prefills the system candidate, allows an edit, and adopts with the current config version', async () => {
     const wrapper = mountWorkspace()
     await flushPromises()
-    await wrapper.get('[data-test="cyber-view-17"]').trigger('click')
+    await wrapper.get('[data-test="cyber-review-17"]').trigger('click')
     await flushPromises()
 
     const editor = wrapper.get('#cyber-rule-text')
@@ -174,7 +187,7 @@ describe('CyberLearningWorkspace', () => {
     mocks.getCyberEvent.mockResolvedValue({ event: failedEvent })
     const wrapper = mountWorkspace()
     await flushPromises()
-    await wrapper.get('[data-test="cyber-view-17"]').trigger('click')
+    await wrapper.get('[data-test="cyber-review-17"]').trigger('click')
     await flushPromises()
 
     expect(wrapper.get('[data-test="cyber-generation-failed"]').text()).toContain('candidate_timeout')
@@ -195,6 +208,7 @@ describe('CyberLearningWorkspace', () => {
     await flushPromises()
 
     expect(wrapper.get('[data-test="cyber-evidence-unavailable"]').exists()).toBe(true)
+    await wrapper.get('[data-test="cyber-detail-review"]').trigger('click')
     expect(wrapper.find('[data-test="cyber-regenerate"]').exists()).toBe(false)
 
     wrapper.getComponent(BaseDialogStub).vm.$emit('close')
@@ -206,22 +220,52 @@ describe('CyberLearningWorkspace', () => {
   it('rejects feedback without requiring a manual summary', async () => {
     const wrapper = mountWorkspace()
     await flushPromises()
-    await wrapper.get('[data-test="cyber-view-17"]').trigger('click')
+    await wrapper.get('[data-test="cyber-review-17"]').trigger('click')
     await flushPromises()
     await wrapper.get('[data-test="cyber-reject"]').trigger('click')
     await flushPromises()
     expect(mocks.rejectCyberEvent).toHaveBeenCalledWith(17, '')
   })
 
-  it('loads each review state independently and revokes string rule IDs with the current version', async () => {
+  it('loads review states and keeps disabled rules recoverable until a confirmed deletion', async () => {
+    const disabledRule = {
+      id: 'cyb-feedback-2', rule_text: 'Recovered abstract rule.', source_feedback_id: 2, status: 'disabled',
+      created_at: '2026-08-15T00:00:00Z', created_by: 1, config_version: 28,
+      rule_text_source: 'recovered_candidate', recovered_candidate: true,
+    }
+    const unavailableRule = {
+      id: 'cyb-feedback-1', rule_text: '', source_feedback_id: 1, status: 'disabled',
+      created_at: '2026-08-14T00:00:00Z', created_by: 1, config_version: 27,
+      rule_text_source: 'unavailable', recovered_candidate: false,
+    }
+    mocks.listCyberEvents.mockResolvedValue({
+      ...page(),
+      active_rules: [...page().active_rules, disabledRule, unavailableRule],
+    })
     const wrapper = mountWorkspace()
     await flushPromises()
     await wrapper.get('[data-test="cyber-status-rejected"]').trigger('click')
     await flushPromises()
     expect(mocks.listCyberEvents).toHaveBeenLastCalledWith('rejected', 1, 20)
 
-    await wrapper.get('[data-test="cyber-revoke-rule-alpha"]').trigger('click')
+    await wrapper.get('[data-test="cyber-revoke-cyb-feedback-3"]').trigger('click')
     await flushPromises()
-    expect(mocks.revokeCyberRule).toHaveBeenCalledWith('rule-alpha', 30)
+    expect(mocks.revokeCyberRule).toHaveBeenCalledWith('cyb-feedback-3', 30)
+
+    await wrapper.get('[data-test="cyber-rule-status-disabled"]').trigger('click')
+    expect(wrapper.get('[data-test="cyber-recovered-rule-warning"]').exists()).toBe(true)
+    expect(wrapper.get('[data-test="cyber-unrecoverable-rule-warning"]').exists()).toBe(true)
+    expect(wrapper.find('[data-test="cyber-restore-cyb-feedback-1"]').exists()).toBe(false)
+    await wrapper.get('[data-test="cyber-restore-cyb-feedback-2"]').trigger('click')
+    expect(wrapper.get('[data-test="rule-confirm"]').text()).toContain('admin.promptAudit.cyber.rules.restoreRecoveredConfirmMessage')
+    await wrapper.get('[data-test="rule-confirm-action"]').trigger('click')
+    await flushPromises()
+    expect(mocks.restoreCyberRule).toHaveBeenCalledWith('cyb-feedback-2', 30)
+
+    await wrapper.get('[data-test="cyber-delete-cyb-feedback-2"]').trigger('click')
+    expect(wrapper.get('[data-test="rule-confirm"]').text()).toContain('admin.promptAudit.cyber.rules.deleteConfirmMessage')
+    await wrapper.get('[data-test="rule-confirm-action"]').trigger('click')
+    await flushPromises()
+    expect(mocks.deleteCyberRule).toHaveBeenCalledWith('cyb-feedback-2', 30)
   })
 })

@@ -110,6 +110,8 @@ func promptAdminRouter(service PromptAdminService) *gin.Engine {
 	group.POST("/cyber/events/:id/regenerate", handler.RegenerateCyberRuleDraft)
 	group.GET("/cyber/rules", handler.ListCyberRules)
 	group.POST("/cyber/rules/:id/revoke", handler.RevokeCyberRule)
+	group.POST("/cyber/rules/:id/restore", handler.RestoreCyberRule)
+	group.DELETE("/cyber/rules/:id", handler.DeleteCyberRule)
 	return router
 }
 
@@ -122,6 +124,8 @@ type fakePromptCyberAdminService struct {
 	adopt       func(context.Context, int64, AdoptCyberFeedbackRequest, int64) (*CyberFeedbackActionResult, error)
 	reject      func(context.Context, int64, RejectCyberFeedbackRequest, int64) (*CyberFeedbackActionResult, error)
 	revoke      func(context.Context, string, RevokeCyberRuleRequest, int64) (*CyberFeedbackActionResult, error)
+	restore     func(context.Context, string, RestoreCyberRuleRequest, int64) (*CyberFeedbackActionResult, error)
+	deleteRule  func(context.Context, string, DeleteCyberRuleRequest, int64) (*CyberFeedbackActionResult, error)
 	regenerate  func(context.Context, int64, int64) (*CyberFeedbackActionResult, error)
 }
 
@@ -145,6 +149,12 @@ func (s *fakePromptCyberAdminService) RejectCyberFeedback(ctx context.Context, i
 }
 func (s *fakePromptCyberAdminService) RevokeCyberRule(ctx context.Context, id string, request RevokeCyberRuleRequest, actorID int64) (*CyberFeedbackActionResult, error) {
 	return s.revoke(ctx, id, request, actorID)
+}
+func (s *fakePromptCyberAdminService) RestoreCyberRule(ctx context.Context, id string, request RestoreCyberRuleRequest, actorID int64) (*CyberFeedbackActionResult, error) {
+	return s.restore(ctx, id, request, actorID)
+}
+func (s *fakePromptCyberAdminService) DeleteCyberRule(ctx context.Context, id string, request DeleteCyberRuleRequest, actorID int64) (*CyberFeedbackActionResult, error) {
+	return s.deleteRule(ctx, id, request, actorID)
 }
 func (s *fakePromptCyberAdminService) RegenerateCyberRuleDraft(ctx context.Context, id int64, actorID int64) (*CyberFeedbackActionResult, error) {
 	return s.regenerate(ctx, id, actorID)
@@ -323,7 +333,7 @@ func TestPromptCyberAdminRoutesBindCASAndNeverRequireRawCaseImport(t *testing.T)
 		require.Equal(t, int64(42), actorID)
 		require.Equal(t, int64(9), request.ExpectedConfigVersion)
 		require.Empty(t, request.RuleText, "empty adopts the separately generated candidate; no raw prompt field exists")
-		return &CyberFeedbackActionResult{ConfigVersion: 10, Rule: &CyberSupplementRule{ID: "cyb-feedback-51", Status: "active"}}, nil
+		return &CyberFeedbackActionResult{ConfigVersion: 10, Rule: &CyberRuleAdminDTO{ID: "cyb-feedback-51", Status: "active"}}, nil
 	}
 	service.getCyber = func(context.Context, int64) (*CyberFeedbackAdminDetailDTO, error) {
 		return &CyberFeedbackAdminDetailDTO{}, nil
@@ -332,7 +342,23 @@ func TestPromptCyberAdminRoutesBindCASAndNeverRequireRawCaseImport(t *testing.T)
 	service.reject = func(context.Context, int64, RejectCyberFeedbackRequest, int64) (*CyberFeedbackActionResult, error) {
 		return &CyberFeedbackActionResult{}, nil
 	}
-	service.revoke = func(context.Context, string, RevokeCyberRuleRequest, int64) (*CyberFeedbackActionResult, error) {
+	service.revoke = func(_ context.Context, id string, request RevokeCyberRuleRequest, actorID int64) (*CyberFeedbackActionResult, error) {
+		require.Equal(t, "cyb-feedback-51", id)
+		require.Equal(t, int64(10), request.ExpectedConfigVersion)
+		require.Equal(t, int64(42), actorID)
+		return &CyberFeedbackActionResult{}, nil
+	}
+	service.restore = func(_ context.Context, id string, request RestoreCyberRuleRequest, actorID int64) (*CyberFeedbackActionResult, error) {
+		require.Equal(t, "cyb-feedback-51", id)
+		require.Equal(t, int64(11), request.ExpectedConfigVersion)
+		require.Equal(t, int64(42), actorID)
+		return &CyberFeedbackActionResult{}, nil
+	}
+	service.deleteRule = func(_ context.Context, id string, request DeleteCyberRuleRequest, actorID int64) (*CyberFeedbackActionResult, error) {
+		require.Equal(t, "cyb-feedback-51", id)
+		require.Equal(t, int64(12), request.ExpectedConfigVersion)
+		require.Equal(t, id, request.ConfirmRuleID)
+		require.Equal(t, int64(42), actorID)
 		return &CyberFeedbackActionResult{}, nil
 	}
 	service.regenerate = func(context.Context, int64, int64) (*CyberFeedbackActionResult, error) {
@@ -351,4 +377,20 @@ func TestPromptCyberAdminRoutesBindCASAndNeverRequireRawCaseImport(t *testing.T)
 	})
 	require.Equal(t, http.StatusOK, adopted.Code)
 	require.NotContains(t, adopted.Body.String(), "must-be-ignored")
+
+	disabled := promptAdminRequest(t, router, http.MethodPost, "/admin/prompt-audit/cyber/rules/cyb-feedback-51/revoke", map[string]any{
+		"expected_config_version": 10,
+	})
+	require.Equal(t, http.StatusOK, disabled.Code)
+
+	restored := promptAdminRequest(t, router, http.MethodPost, "/admin/prompt-audit/cyber/rules/cyb-feedback-51/restore", map[string]any{
+		"expected_config_version": 11,
+	})
+	require.Equal(t, http.StatusOK, restored.Code)
+
+	deleted := promptAdminRequest(t, router, http.MethodDelete, "/admin/prompt-audit/cyber/rules/cyb-feedback-51", map[string]any{
+		"expected_config_version": 12,
+		"confirm_rule_id":         "cyb-feedback-51",
+	})
+	require.Equal(t, http.StatusOK, deleted.Code)
 }

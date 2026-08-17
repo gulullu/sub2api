@@ -73,6 +73,26 @@ func (*handlerCyberFeedbackRepo) ReviewCyberFeedback(context.Context, int64, str
 	return securityaudit.CyberFeedback{}, nil
 }
 
+func (*handlerCyberFeedbackRepo) ListCyberRuleProjections(context.Context) ([]securityaudit.CyberRuleProjection, error) {
+	return nil, nil
+}
+
+func (*handlerCyberFeedbackRepo) GetCyberRuleProjection(context.Context, int64) (securityaudit.CyberRuleProjection, error) {
+	return securityaudit.CyberRuleProjection{}, securityaudit.ErrCyberFeedbackNotFound
+}
+
+func (*handlerCyberFeedbackRepo) SaveCyberRuleProjection(context.Context, int64, string, string, string, string, int64, int64) error {
+	return nil
+}
+
+func (*handlerCyberFeedbackRepo) ReconcileActiveCyberRuleProjection(context.Context, securityaudit.CyberSupplementRule, string, int64, int64) (securityaudit.CyberRuleProjection, error) {
+	return securityaudit.CyberRuleProjection{}, nil
+}
+
+func (*handlerCyberFeedbackRepo) DeleteCyberRuleProjection(context.Context, int64, string, int64, int64) error {
+	return nil
+}
+
 func (*handlerCyberFeedbackRepo) ResetCyberRuleGeneration(context.Context, int64) error { return nil }
 
 func (*handlerCyberFeedbackRepo) CompleteCyberRuleGeneration(context.Context, int64, string, string) error {

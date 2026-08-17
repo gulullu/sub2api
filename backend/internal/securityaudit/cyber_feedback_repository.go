@@ -440,6 +440,195 @@ func (r *PostgreSQLRepository) ReviewCyberFeedback(ctx context.Context, id int64
 	return r.GetCyberFeedback(ctx, id)
 }
 
+func (r *PostgreSQLRepository) ListCyberRuleProjections(ctx context.Context) ([]CyberRuleProjection, error) {
+	if r == nil || r.db == nil {
+		return nil, errors.New("cyber feedback database unavailable")
+	}
+	rows, err := r.db.QueryContext(ctx, `
+		SELECT id, rule_id,
+			CASE WHEN rule_lifecycle_status='' THEN candidate_rule_text ELSE adopted_rule_text END,
+			CASE WHEN rule_lifecycle_status='' THEN 'disabled' ELSE rule_lifecycle_status END,
+			CASE WHEN rule_lifecycle_status='' THEN
+				CASE WHEN candidate_rule_text<>'' THEN 'recovered_candidate' ELSE 'unavailable' END
+			ELSE rule_text_source END,
+			(rule_lifecycle_status=''),
+			rule_state_config_version, rule_state_updated_at, rule_state_updated_by,
+			created_at, reviewed_at, reviewed_by
+		FROM prompt_audit_cyber_feedback
+		WHERE review_status='approved'
+			AND (rule_lifecycle_status IN ('active','disabled')
+				OR (rule_lifecycle_status='' AND rule_id<>''))
+		ORDER BY reviewed_at DESC NULLS LAST, id DESC`)
+	if err != nil {
+		return nil, err
+	}
+	defer func() { _ = rows.Close() }()
+	items := make([]CyberRuleProjection, 0)
+	for rows.Next() {
+		item, scanErr := scanCyberRuleProjection(rows)
+		if scanErr != nil {
+			return nil, scanErr
+		}
+		items = append(items, item)
+	}
+	return items, rows.Err()
+}
+
+func (r *PostgreSQLRepository) GetCyberRuleProjection(ctx context.Context, feedbackID int64) (CyberRuleProjection, error) {
+	if r == nil || r.db == nil {
+		return CyberRuleProjection{}, errors.New("cyber feedback database unavailable")
+	}
+	return scanCyberRuleProjection(r.db.QueryRowContext(ctx, `
+		SELECT id, rule_id,
+			CASE WHEN rule_lifecycle_status='' THEN candidate_rule_text ELSE adopted_rule_text END,
+			CASE WHEN rule_lifecycle_status='' THEN 'disabled' ELSE rule_lifecycle_status END,
+			CASE WHEN rule_lifecycle_status='' THEN
+				CASE WHEN candidate_rule_text<>'' THEN 'recovered_candidate' ELSE 'unavailable' END
+			ELSE rule_text_source END,
+			(rule_lifecycle_status=''),
+			rule_state_config_version, rule_state_updated_at, rule_state_updated_by,
+			created_at, reviewed_at, reviewed_by
+		FROM prompt_audit_cyber_feedback
+		WHERE id=$1 AND review_status='approved'`, feedbackID))
+}
+
+func (r *PostgreSQLRepository) SaveCyberRuleProjection(
+	ctx context.Context,
+	feedbackID int64,
+	ruleID, ruleText, lifecycleStatus, textSource string,
+	actorID, configVersion int64,
+) error {
+	if r == nil || r.db == nil {
+		return errors.New("cyber feedback database unavailable")
+	}
+	result, err := r.db.ExecContext(ctx, `
+		UPDATE prompt_audit_cyber_feedback
+		SET adopted_rule_text=$3, rule_lifecycle_status=$4, rule_text_source=$5,
+			rule_state_config_version=$6, rule_state_updated_at=NOW(),
+			rule_state_updated_by=NULLIF($7,0), updated_at=NOW()
+		WHERE id=$1 AND rule_id=$2 AND review_status='approved'
+			AND rule_lifecycle_status <> 'deleted'`, feedbackID, strings.TrimSpace(ruleID),
+		strings.TrimSpace(ruleText), strings.TrimSpace(lifecycleStatus), strings.TrimSpace(textSource),
+		configVersion, actorID)
+	if err != nil {
+		return err
+	}
+	rows, err := result.RowsAffected()
+	if err != nil {
+		return err
+	}
+	if rows > 0 {
+		return nil
+	}
+	var exists bool
+	if err := r.db.QueryRowContext(ctx, `SELECT EXISTS(SELECT 1 FROM prompt_audit_cyber_feedback WHERE id=$1)`, feedbackID).Scan(&exists); err != nil {
+		return err
+	}
+	if !exists {
+		return ErrCyberFeedbackNotFound
+	}
+	return ErrCyberRuleLifecycleConflict
+}
+
+// ReconcileActiveCyberRuleProjection repairs lifecycle metadata from an exact
+// rule that is already present in the runtime config. Config membership is the
+// authority for this exceptional path; an earlier reject or partial review is
+// still retained in the administrator audit log. A deletion tombstone remains
+// terminal and is never overwritten.
+func (r *PostgreSQLRepository) ReconcileActiveCyberRuleProjection(
+	ctx context.Context,
+	rule CyberSupplementRule,
+	lifecycleStatus string,
+	actorID, configVersion int64,
+) (CyberRuleProjection, error) {
+	if r == nil || r.db == nil {
+		return CyberRuleProjection{}, errors.New("cyber feedback database unavailable")
+	}
+	projection, err := scanCyberRuleProjection(r.db.QueryRowContext(ctx, `
+		UPDATE prompt_audit_cyber_feedback
+		SET review_status='approved', reviewed_by=NULLIF($6,0), reviewed_at=$5,
+			rule_id=$2, config_version=$8,
+			adopted_rule_text=$3, rule_lifecycle_status=$4, rule_text_source='reviewed',
+			rule_state_config_version=$8, rule_state_updated_at=NOW(),
+			rule_state_updated_by=NULLIF($7,0), updated_at=NOW()
+		WHERE id=$1 AND rule_lifecycle_status <> 'deleted'
+		RETURNING id, rule_id, adopted_rule_text, rule_lifecycle_status, rule_text_source,
+			FALSE,
+			rule_state_config_version, rule_state_updated_at, rule_state_updated_by,
+			created_at, reviewed_at, reviewed_by`,
+		rule.SourceFeedbackID, strings.TrimSpace(rule.ID), strings.TrimSpace(rule.RuleText),
+		strings.TrimSpace(lifecycleStatus), rule.ReviewedAt, rule.ReviewedBy,
+		actorID, configVersion,
+	))
+	if err == nil {
+		return projection, nil
+	}
+	if !errors.Is(err, ErrCyberFeedbackNotFound) {
+		return CyberRuleProjection{}, err
+	}
+	projection, getErr := scanCyberRuleProjection(r.db.QueryRowContext(ctx, `
+		SELECT id, rule_id, adopted_rule_text, rule_lifecycle_status, rule_text_source,
+			FALSE,
+			rule_state_config_version, rule_state_updated_at, rule_state_updated_by,
+			created_at, reviewed_at, reviewed_by
+		FROM prompt_audit_cyber_feedback WHERE id=$1`, rule.SourceFeedbackID))
+	if getErr != nil {
+		return CyberRuleProjection{}, getErr
+	}
+	if projection.LifecycleStatus == CyberRuleLifecycleDeleted {
+		return projection, ErrCyberRuleLifecycleDeleted
+	}
+	return projection, ErrCyberRuleLifecycleConflict
+}
+
+func (r *PostgreSQLRepository) DeleteCyberRuleProjection(ctx context.Context, feedbackID int64, ruleID string, actorID, configVersion int64) error {
+	if r == nil || r.db == nil {
+		return errors.New("cyber feedback database unavailable")
+	}
+	result, err := r.db.ExecContext(ctx, `
+		UPDATE prompt_audit_cyber_feedback
+		SET adopted_rule_text='', rule_lifecycle_status='deleted', rule_text_source='',
+			rule_state_config_version=$3, rule_state_updated_at=NOW(),
+			rule_state_updated_by=NULLIF($4,0), updated_at=NOW()
+		WHERE id=$1 AND rule_id=$2 AND review_status='approved'
+			AND rule_lifecycle_status='disabled'`, feedbackID, strings.TrimSpace(ruleID), configVersion, actorID)
+	if err != nil {
+		return err
+	}
+	rows, err := result.RowsAffected()
+	if err != nil {
+		return err
+	}
+	if rows > 0 {
+		return nil
+	}
+	projection, getErr := r.GetCyberRuleProjection(ctx, feedbackID)
+	if errors.Is(getErr, ErrCyberFeedbackNotFound) {
+		return getErr
+	}
+	if getErr != nil {
+		return getErr
+	}
+	if projection.RuleID == strings.TrimSpace(ruleID) && projection.LifecycleStatus == CyberRuleLifecycleDeleted {
+		return nil
+	}
+	return ErrCyberRuleLifecycleConflict
+}
+
+func scanCyberRuleProjection(row cyberFeedbackScanner) (CyberRuleProjection, error) {
+	var item CyberRuleProjection
+	err := row.Scan(
+		&item.FeedbackID, &item.RuleID, &item.RuleText, &item.LifecycleStatus, &item.RuleTextSource,
+		&item.LegacyUnprojected,
+		&item.StateConfigVersion, &item.StateUpdatedAt, &item.StateUpdatedBy,
+		&item.CreatedAt, &item.ReviewedAt, &item.ReviewedBy,
+	)
+	if errors.Is(err, sql.ErrNoRows) {
+		return CyberRuleProjection{}, ErrCyberFeedbackNotFound
+	}
+	return item, err
+}
+
 func (r *PostgreSQLRepository) CompleteCyberRuleGeneration(ctx context.Context, id int64, candidateRuleText, errorCode string) error {
 	status := CyberGenerationGenerated
 	if strings.TrimSpace(errorCode) != "" {

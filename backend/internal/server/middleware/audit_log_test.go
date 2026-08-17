@@ -141,7 +141,9 @@ func TestPromptAuditMutationAuditRoutesHaveStableActionsAndOmitBodies(t *testing
 		"POST /api/v1/admin/prompt-audit/cyber/events/:id/adopt":      "admin.prompt_audit.cyber.feedback.adopt",
 		"POST /api/v1/admin/prompt-audit/cyber/events/:id/reject":     "admin.prompt_audit.cyber.feedback.reject",
 		"POST /api/v1/admin/prompt-audit/cyber/events/:id/regenerate": "admin.prompt_audit.cyber.feedback.regenerate",
-		"POST /api/v1/admin/prompt-audit/cyber/rules/:id/revoke":      "admin.prompt_audit.cyber.rule.revoke",
+		"POST /api/v1/admin/prompt-audit/cyber/rules/:id/revoke":      "admin.prompt_audit.cyber.rule.disable",
+		"POST /api/v1/admin/prompt-audit/cyber/rules/:id/restore":     "admin.prompt_audit.cyber.rule.restore",
+		"DELETE /api/v1/admin/prompt-audit/cyber/rules/:id":           "admin.prompt_audit.cyber.rule.delete",
 	}
 	for route, action := range expected {
 		require.Equal(t, action, auditActionOverrides[route])

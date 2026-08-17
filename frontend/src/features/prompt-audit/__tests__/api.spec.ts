@@ -107,6 +107,17 @@ describe('Prompt Audit API', () => {
     expect(client.post).toHaveBeenCalledWith('/admin/prompt-audit/cyber/rules/cyb%2Frule%2017/revoke', {
       expected_config_version: 31,
     })
+
+    await promptAuditAPI.restoreCyberRule('cyb/rule 17', 31)
+    expect(client.post).toHaveBeenCalledWith('/admin/prompt-audit/cyber/rules/cyb%2Frule%2017/restore', {
+      expected_config_version: 31,
+    })
+
+    client.delete.mockResolvedValue({ data: { config_version: 32 } })
+    await promptAuditAPI.deleteCyberRule('cyb/rule 17', 31)
+    expect(client.delete).toHaveBeenCalledWith('/admin/prompt-audit/cyber/rules/cyb%2Frule%2017', {
+      data: { expected_config_version: 31, confirm_rule_id: 'cyb/rule 17' },
+    })
   })
 
   it.each([
@@ -123,6 +134,25 @@ describe('Prompt Audit API', () => {
       page_size: 20,
       config_version: 30,
     })
+  })
+
+  it('normalizes legacy CYB rule source metadata into the final DTO fields', async () => {
+    client.get.mockResolvedValue({
+      data: {
+        items: [], total: 0, page: 1, page_size: 20, config_version: 30,
+        active_rules: [{
+          id: 'legacy-rule', rule_text: 'Recovered rule.', source_feedback_id: 1, status: 'disabled',
+          created_at: '', created_by: 1, config_version: 29, text_source: 'recovered_candidate',
+        }],
+      },
+    })
+
+    const result = await promptAuditAPI.listCyberEvents('pending', 1, 20)
+    expect(result.active_rules[0]).toEqual(expect.objectContaining({
+      rule_text_source: 'recovered_candidate',
+      recovered_candidate: true,
+    }))
+    expect(result.active_rules[0]).not.toHaveProperty('text_source')
   })
 
   it('normalizes nullable CYB evidence without exposing undefined values to the view', async () => {

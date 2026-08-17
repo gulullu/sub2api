@@ -26,12 +26,25 @@ import { eventFilterPayload, eventQueryParams } from './viewModel'
 const basePath = '/admin/prompt-audit'
 const accountPageSize = 1000
 
-type CyberFeedbackPageWire = Omit<Partial<CyberFeedbackPage>, 'items' | 'active_rules'> & {
+type CyberPolicyRuleWire = CyberPolicyRule & { text_source?: string }
+
+type CyberFeedbackPageWire = Omit<Partial<CyberFeedbackPage>, 'items' | 'active_rules' | 'rules'> & {
   items?: CyberFeedbackEvent[] | null
-  active_rules?: CyberPolicyRule[] | null
+  active_rules?: CyberPolicyRuleWire[] | null
+  rules?: CyberPolicyRuleWire[] | null
 }
 
 type CyberFeedbackEvidenceWire = Partial<CyberFeedbackEvidence> | null | undefined
+
+function normalizeCyberPolicyRule(rule: CyberPolicyRuleWire): CyberPolicyRule {
+  const { text_source: legacyTextSource, ...normalized } = rule
+  const ruleTextSource = rule.rule_text_source || legacyTextSource || ''
+  return {
+    ...normalized,
+    rule_text_source: ruleTextSource,
+    recovered_candidate: rule.recovered_candidate === true || ruleTextSource === 'recovered_candidate',
+  }
+}
 
 function normalizeCyberFeedbackPage(data: CyberFeedbackPageWire | null | undefined): CyberFeedbackPage {
   return {
@@ -39,7 +52,8 @@ function normalizeCyberFeedbackPage(data: CyberFeedbackPageWire | null | undefin
     total: typeof data?.total === 'number' ? data.total : 0,
     page: typeof data?.page === 'number' ? data.page : 1,
     page_size: typeof data?.page_size === 'number' ? data.page_size : 20,
-    active_rules: Array.isArray(data?.active_rules) ? data.active_rules : [],
+    active_rules: Array.isArray(data?.active_rules) ? data.active_rules.map(normalizeCyberPolicyRule) : [],
+    rules: Array.isArray(data?.rules) ? data.rules.map(normalizeCyberPolicyRule) : undefined,
     config_version: typeof data?.config_version === 'number' ? data.config_version : 0,
   }
 }
@@ -170,6 +184,23 @@ export async function revokeCyberRule(id: string, expectedConfigVersion: number)
   return data
 }
 
+export async function restoreCyberRule(id: string, expectedConfigVersion: number): Promise<CyberFeedbackActionResult> {
+  const { data } = await apiClient.post<CyberFeedbackActionResult>(`${basePath}/cyber/rules/${encodeURIComponent(id)}/restore`, {
+    expected_config_version: expectedConfigVersion,
+  })
+  return data
+}
+
+export async function deleteCyberRule(id: string, expectedConfigVersion: number): Promise<CyberFeedbackActionResult> {
+  const { data } = await apiClient.delete<CyberFeedbackActionResult>(`${basePath}/cyber/rules/${encodeURIComponent(id)}`, {
+    data: {
+      expected_config_version: expectedConfigVersion,
+      confirm_rule_id: id,
+    },
+  })
+  return data
+}
+
 export async function deleteEvent(id: number): Promise<PromptDeleteResult> {
   const { data } = await apiClient.delete<PromptDeleteResult>(`${basePath}/events/${id}`)
   return data
@@ -263,6 +294,8 @@ export const promptAuditAPI = {
   rejectCyberEvent,
   regenerateCyberCandidate,
   revokeCyberRule,
+  restoreCyberRule,
+  deleteCyberRule,
   deleteEvent,
   batchDeleteEvents,
   previewDelete,

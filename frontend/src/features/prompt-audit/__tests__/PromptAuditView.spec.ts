@@ -197,14 +197,16 @@ describe('PromptAuditView', () => {
     expect(wrapper.get('[data-test="dialog-preview-state"]').text()).toBe('none')
   })
 
-  it('uses native labeled switches and a responsive fixed save surface', async () => {
+  it('uses native labeled switches and a responsive sticky save surface', async () => {
     const wrapper = mountView()
     await flushPromises()
     await wrapper.get('[data-test="tab-config"]').trigger('click')
     const switches = wrapper.findAll('[role="switch"]')
     expect(switches).toHaveLength(4)
     expect(switches.every((item) => Boolean(item.attributes('aria-label')))).toBe(true)
-    expect(wrapper.html()).toContain('fixed inset-x-0 bottom-0')
+    expect(wrapper.html()).toContain('sticky bottom-4')
+    expect(wrapper.html()).not.toContain('lg:left-64')
+    expect(wrapper.html()).not.toContain('max-w-[1600px]')
     expect(wrapper.html()).toContain('flex-wrap')
   })
 

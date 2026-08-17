@@ -146,7 +146,9 @@ var auditActionOverrides = map[string]string{
 	"POST /api/v1/admin/prompt-audit/cyber/events/:id/adopt":      "admin.prompt_audit.cyber.feedback.adopt",
 	"POST /api/v1/admin/prompt-audit/cyber/events/:id/reject":     "admin.prompt_audit.cyber.feedback.reject",
 	"POST /api/v1/admin/prompt-audit/cyber/events/:id/regenerate": "admin.prompt_audit.cyber.feedback.regenerate",
-	"POST /api/v1/admin/prompt-audit/cyber/rules/:id/revoke":      "admin.prompt_audit.cyber.rule.revoke",
+	"POST /api/v1/admin/prompt-audit/cyber/rules/:id/revoke":      "admin.prompt_audit.cyber.rule.disable",
+	"POST /api/v1/admin/prompt-audit/cyber/rules/:id/restore":     "admin.prompt_audit.cyber.rule.restore",
+	"DELETE /api/v1/admin/prompt-audit/cyber/rules/:id":           "admin.prompt_audit.cyber.rule.delete",
 }
 
 // auditBodyOmittedRoutes 请求体几乎整体由凭证构成的路由（如整块粘贴 auth JSON 的导入接口）。
@@ -166,6 +168,8 @@ var auditBodyOmittedRoutes = map[string]struct{}{
 	"POST /api/v1/admin/prompt-audit/cyber/events/:id/reject":     {},
 	"POST /api/v1/admin/prompt-audit/cyber/events/:id/regenerate": {},
 	"POST /api/v1/admin/prompt-audit/cyber/rules/:id/revoke":      {},
+	"POST /api/v1/admin/prompt-audit/cyber/rules/:id/restore":     {},
+	"DELETE /api/v1/admin/prompt-audit/cyber/rules/:id":           {},
 }
 
 // NewAuditLogMiddleware 创建审计中间件。

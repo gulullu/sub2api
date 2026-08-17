@@ -13,6 +13,7 @@ import (
 const (
 	promptAuditAdmissionLockKey int64 = 579147893221901921
 	promptAuditConfigLockKey    int64 = 579147893221901922
+	promptAuditCyberRuleLockKey int64 = 579147893221901923
 )
 
 var (

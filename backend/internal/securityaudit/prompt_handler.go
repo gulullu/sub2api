@@ -282,6 +282,56 @@ func (h *PromptAdminHandler) RevokeCyberRule(c *gin.Context) {
 	response.Success(c, result)
 }
 
+func (h *PromptAdminHandler) RestoreCyberRule(c *gin.Context) {
+	service, err := h.cyberService()
+	if err != nil {
+		response.ErrorFrom(c, err)
+		return
+	}
+	var request RestoreCyberRuleRequest
+	if err := c.ShouldBindJSON(&request); err != nil {
+		setPromptAdminAudit(c, "failed", "prompt_audit_cyber_restore_invalid", nil)
+		response.ErrorFrom(c, infraerrors.BadRequest("prompt_audit_cyber_restore_invalid", "CYB 规则恢复请求无效"))
+		return
+	}
+	id := strings.TrimSpace(c.Param("id"))
+	result, err := service.RestoreCyberRule(c.Request.Context(), id, request, adminID(c))
+	if err != nil {
+		setPromptAdminAudit(c, "failed", infraerrors.Reason(err), map[string]any{"rule_id": id, "expected_config_version": request.ExpectedConfigVersion})
+		response.ErrorFrom(c, err)
+		return
+	}
+	fields := cyberActionAuditFields(0, result)
+	fields["rule_id"] = id
+	setPromptAdminAudit(c, "success", "", fields)
+	response.Success(c, result)
+}
+
+func (h *PromptAdminHandler) DeleteCyberRule(c *gin.Context) {
+	service, err := h.cyberService()
+	if err != nil {
+		response.ErrorFrom(c, err)
+		return
+	}
+	var request DeleteCyberRuleRequest
+	if err := c.ShouldBindJSON(&request); err != nil {
+		setPromptAdminAudit(c, "failed", "prompt_audit_cyber_delete_confirmation_invalid", nil)
+		response.ErrorFrom(c, infraerrors.BadRequest("prompt_audit_cyber_delete_confirmation_invalid", "CYB 规则永久删除确认无效"))
+		return
+	}
+	id := strings.TrimSpace(c.Param("id"))
+	result, err := service.DeleteCyberRule(c.Request.Context(), id, request, adminID(c))
+	if err != nil {
+		setPromptAdminAudit(c, "failed", infraerrors.Reason(err), map[string]any{"rule_id": id, "expected_config_version": request.ExpectedConfigVersion})
+		response.ErrorFrom(c, err)
+		return
+	}
+	fields := cyberActionAuditFields(0, result)
+	fields["rule_id"] = id
+	setPromptAdminAudit(c, "success", "", fields)
+	response.Success(c, result)
+}
+
 func (h *PromptAdminHandler) ListEvents(c *gin.Context) {
 	page, err := positiveIntQuery(c, "page", 1, 0)
 	if err != nil {

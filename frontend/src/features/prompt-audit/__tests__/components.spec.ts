@@ -1,6 +1,7 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { defineComponent } from 'vue'
 import { mount } from '@vue/test-utils'
+import DataTable from '@/components/common/DataTable.vue'
 import EndpointPool from '../components/EndpointPool.vue'
 import PromptTemplatePanel from '../components/PromptTemplatePanel.vue'
 import DecisionPolicyPanel from '../components/DecisionPolicyPanel.vue'
@@ -274,19 +275,25 @@ describe('Prompt Audit components', () => {
     expect(wrapper.text()).not.toContain('Ungrouped')
   })
 
-  it('keeps identity fields separate, supports selection, and opens filter deletion from the toolbar', async () => {
+  it('shows standalone email and API Key columns without copy controls', async () => {
     const event: PromptAuditEvent = {
       id: 1, job_id: 1, decision: 'critical', risk_level: 'critical', action: 'Block', categories: ['pii'], matched_scanners: ['pii'], scanner_scores: { pii: 1 }, scanner_evidence: { pii: 'redacted' }, scanner_backend: 'qwen3guard-openai', scanner_version: '1', guard_endpoint_id: 'guard-1', policy_id: 'priority', policy_version: 1, config_version: 1, chunk_total: 1, latency_ms: 10, issue_summaries: [], created_at: '2026-07-16T00:00:00Z',
-      snapshot: { request_id: 'req-1', user_id: 1, username: 'alice', user_email: 'alice@example.test', api_key_id: 2, api_key_name: 'alice-key', group_id: 3, group_name: 'Alpha', provider: 'openai', endpoint: '/v1/chat/completions', protocol: 'openai_chat', model: 'gpt-test', prompt_hash: 'a'.repeat(64), redacted_preview: 'redacted preview', full_prompt: 'full prompt text', prompt_length: 10, message_count: 1, stage: 'http' },
+      snapshot: { request_id: 'req-1', user_id: 1, username: 'profile-only-user', user_email: 'alice@example.test', api_key_id: 2, api_key_name: 'alice-key', group_id: 3, group_name: 'Alpha', provider: 'openai', endpoint: '/v1/chat/completions', protocol: 'openai_chat', model: 'gpt-test', prompt_hash: 'a'.repeat(64), redacted_preview: 'redacted preview', full_prompt: 'full prompt text', prompt_length: 10, message_count: 1, stage: 'http' },
     }
     const wrapper = mount(EventWorkspace, {
       props: { events: [event], total: 1, page: 1, pageSize: 20, filters: emptyEventFilters(), selectedIds: [], loading: false, error: '' },
       global: { stubs: { Pagination: PaginationStub } },
     })
-    expect(wrapper.text()).toContain('alice')
     expect(wrapper.text()).toContain('alice@example.test')
     expect(wrapper.text()).toContain('alice-key')
-    expect(wrapper.get('[data-test="event-identity"]').classes()).toContain('min-w-0')
+    expect(wrapper.text()).not.toContain('profile-only-user')
+    expect(wrapper.findComponent(DataTable).exists()).toBe(true)
+    expect(wrapper.get('table [data-test="event-email"]').find('button').exists()).toBe(false)
+    expect(wrapper.get('table [data-test="event-api-key"]').find('button').exists()).toBe(false)
+    const pagination = wrapper.get('[data-test="event-pagination"]')
+    expect(pagination.find('[data-test="pagination"]').exists()).toBe(true)
+    expect(pagination.classes()).not.toContain('hidden')
+    expect(pagination.element.closest('.hidden')).toBeNull()
     expect(wrapper.text()).toContain('admin.promptAudit.decisions.critical · admin.promptAudit.riskLevels.critical')
     expect(wrapper.text()).toContain('admin.promptAudit.scanners.pii')
     expect(wrapper.get('[data-test="filter-delete"]').attributes()).not.toHaveProperty('disabled')
@@ -308,10 +315,13 @@ describe('Prompt Audit components', () => {
     })
     expect(wrapper.html()).not.toContain(secret)
     expect(wrapper.text()).toContain('sk-abc…7890')
-    expect(wrapper.get('table').classes()).toContain('min-w-[1368px]')
-    expect(wrapper.get('table').classes()).toContain('table-fixed')
-    expect(wrapper.get('[data-test="event-identity"]').findAll('.truncate')).toHaveLength(6)
-    expect(wrapper.get('table').element.parentElement?.classList.contains('overflow-x-auto')).toBe(true)
+    expect(wrapper.get('table').classes()).toContain('min-w-max')
+    expect(wrapper.get('table').classes()).not.toContain('table-fixed')
+    expect(wrapper.get('table [data-test="event-email"]').findAll('.truncate')).toHaveLength(1)
+    expect(wrapper.get('table [data-test="event-api-key"]').findAll('.truncate')).toHaveLength(1)
+    expect(wrapper.get('table [data-test="event-email"]').find('button').exists()).toBe(false)
+    expect(wrapper.get('table [data-test="event-api-key"]').find('button').exists()).toBe(false)
+    expect(wrapper.get('table').element.parentElement?.classList.contains('table-wrapper')).toBe(true)
   })
 
   it('resolves delete range presets to an epoch start and a cutoff end', () => {
@@ -444,7 +454,9 @@ describe('Prompt Audit components', () => {
 
     const riskTab = wrapper.findAll('[role="tab"]').find((tab) => tab.text().includes('admin.promptAudit.events.tabs.risks'))
     expect(riskTab).toBeTruthy()
+    expect(riskTab!.classes()).toContain('tab')
     await riskTab!.trigger('click')
+    expect(riskTab!.classes()).toContain('tab-active')
     expect(wrapper.get('[data-test="event-detail-tab-panel"]').classes()).toContain('h-[min(62vh,36rem)]')
     expect(wrapper.get('[data-test="risk-prompt-preview"]').text()).toContain('complete unmasked prompt body')
     expect(wrapper.get('[data-test="risk-prompt-preview"]').text()).not.toContain('redacted prompt body')
@@ -452,6 +464,8 @@ describe('Prompt Audit components', () => {
     expect(wrapper.get('[data-test="risk-guard-return"]').text()).toContain('"decision": "admin.promptAudit.decisions.critical"')
     expect(wrapper.get('[data-test="risk-guard-return"]').text()).toContain('admin.promptAudit.scanners.sexual_content_or_sexual_acts')
     expect(wrapper.get('[data-test="risk-issue"]').text()).toContain('admin.promptAudit.scanners.sexual_content_or_sexual_acts')
+    await wrapper.get('[data-test="event-detail-close"]').trigger('click')
+    expect(wrapper.emitted('close')).toHaveLength(1)
   })
 
   it('localizes confidence JSON risk summaries instead of showing backend labels or raw category keys', async () => {

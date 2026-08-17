@@ -307,7 +307,7 @@ export interface PromptAuditGroup {
 }
 
 export type CyberFeedbackStatus = 'pending' | 'approved' | 'rejected'
-export type CyberPolicyRuleStatus = 'active' | 'revoked' | string
+export type CyberPolicyRuleStatus = 'active' | 'disabled' | 'deleted' | 'revoked' | string
 
 // List responses deliberately expose only compact metadata. Administrator-only
 // detail and evidence are loaded from separate endpoints when the review dialog
@@ -382,6 +382,8 @@ export interface CyberPolicyRule {
   created_at: string
   created_by: number
   config_version: number
+  rule_text_source?: 'reviewed' | 'recovered_candidate' | 'unavailable' | string
+  recovered_candidate?: boolean
 }
 
 export interface CyberFeedbackPage {
@@ -390,6 +392,7 @@ export interface CyberFeedbackPage {
   page: number
   page_size: number
   active_rules: CyberPolicyRule[]
+  rules?: CyberPolicyRule[]
   config_version: number
 }
 

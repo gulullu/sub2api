@@ -145,6 +145,8 @@ func registerPromptAuditRoutes(admin *gin.RouterGroup, h *handler.Handlers) {
 		promptAudit.POST("/cyber/events/:id/regenerate", h.Admin.PromptAudit.RegenerateCyberRuleDraft)
 		promptAudit.GET("/cyber/rules", h.Admin.PromptAudit.ListCyberRules)
 		promptAudit.POST("/cyber/rules/:id/revoke", h.Admin.PromptAudit.RevokeCyberRule)
+		promptAudit.POST("/cyber/rules/:id/restore", h.Admin.PromptAudit.RestoreCyberRule)
+		promptAudit.DELETE("/cyber/rules/:id", h.Admin.PromptAudit.DeleteCyberRule)
 	}
 }
 
