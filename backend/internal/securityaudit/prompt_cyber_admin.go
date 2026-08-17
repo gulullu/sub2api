@@ -56,6 +56,46 @@ type CyberFeedbackAdminDTO struct {
 	UpdatedAt           time.Time  `json:"updated_at"`
 }
 
+// CyberFeedbackAdminDetailDTO is returned only by the administrator detail
+// endpoint. Large/raw evidence never appears in list responses or email.
+type CyberFeedbackAdminDetailDTO struct {
+	CyberFeedbackAdminDTO
+	AccountName           string `json:"account_name"`
+	CredentialAccountID   int64  `json:"credential_account_id"`
+	CredentialAccountName string `json:"credential_account_name"`
+	PromptLength          int    `json:"prompt_length"`
+	MessageCount          int    `json:"message_count"`
+	FullPromptTruncated   bool   `json:"truncated"`
+	UpstreamCode          string `json:"upstream_code"`
+	UpstreamMessage       string `json:"upstream_message"`
+}
+
+type CyberFeedbackEvidenceAdminDTO struct {
+	Available                    bool   `json:"available"`
+	FullPrompt                   string `json:"full_prompt"`
+	PromptLength                 int    `json:"prompt_length"`
+	MessageCount                 int    `json:"message_count"`
+	Truncated                    bool   `json:"truncated"`
+	UserID                       int64  `json:"user_id"`
+	Username                     string `json:"username"`
+	UserEmail                    string `json:"user_email"`
+	APIKeyID                     int64  `json:"api_key_id"`
+	APIKeyName                   string `json:"api_key_name"`
+	APIKeyPrefix                 string `json:"api_key_prefix"`
+	GroupID                      int64  `json:"group_id"`
+	GroupName                    string `json:"group_name"`
+	SelectedAccountID            int64  `json:"selected_account_id"`
+	SelectedAccountName          string `json:"selected_account_name"`
+	CredentialAccountID          int64  `json:"credential_account_id"`
+	CredentialAccountName        string `json:"credential_account_name"`
+	CredentialAccountEmail       string `json:"credential_account_email"`
+	CredentialAccountEmailSource string `json:"credential_account_email_source"`
+	IdentitySource               string `json:"identity_source"`
+	ClientRequestID              string `json:"client_request_id"`
+	ClientIP                     string `json:"client_ip"`
+	UserAgent                    string `json:"user_agent"`
+}
+
 type CyberRulesPage struct {
 	Items         []CyberSupplementRule `json:"items"`
 	ConfigVersion int64                 `json:"config_version"`
@@ -87,7 +127,8 @@ type CyberSupplementConfigStore interface {
 
 type PromptCyberAdminService interface {
 	ListCyberFeedbackAdmin(context.Context, CyberFeedbackFilter, int, int) (*CyberFeedbackPage, error)
-	GetCyberFeedbackAdmin(context.Context, int64) (*CyberFeedbackAdminDTO, error)
+	GetCyberFeedbackAdmin(context.Context, int64) (*CyberFeedbackAdminDetailDTO, error)
+	GetCyberFeedbackEvidenceAdmin(context.Context, int64) (*CyberFeedbackEvidenceAdminDTO, error)
 	ListCyberRulesAdmin(context.Context) (*CyberRulesPage, error)
 	AdoptCyberFeedback(context.Context, int64, AdoptCyberFeedbackRequest, int64) (*CyberFeedbackActionResult, error)
 	RejectCyberFeedback(context.Context, int64, RejectCyberFeedbackRequest, int64) (*CyberFeedbackActionResult, error)
@@ -156,7 +197,7 @@ func (s *PromptService) ListCyberFeedbackAdmin(ctx context.Context, filter Cyber
 	return &CyberFeedbackPage{Items: cyberFeedbackAdminDTOs(items), Total: total, Page: page, PageSize: pageSize, ActiveRules: rules.Items, ConfigVersion: rules.ConfigVersion}, nil
 }
 
-func (s *PromptService) GetCyberFeedbackAdmin(ctx context.Context, id int64) (*CyberFeedbackAdminDTO, error) {
+func (s *PromptService) GetCyberFeedbackAdmin(ctx context.Context, id int64) (*CyberFeedbackAdminDetailDTO, error) {
 	repo, err := s.cyberFeedbackRepo()
 	if err != nil {
 		return nil, err
@@ -168,8 +209,34 @@ func (s *PromptService) GetCyberFeedbackAdmin(ctx context.Context, id int64) (*C
 	if err != nil {
 		return nil, err
 	}
-	dto := cyberFeedbackAdminDTO(event)
+	dto := cyberFeedbackAdminDetailDTO(event)
 	return &dto, nil
+}
+
+func (s *PromptService) GetCyberFeedbackEvidenceAdmin(ctx context.Context, id int64) (*CyberFeedbackEvidenceAdminDTO, error) {
+	repo, err := s.cyberFeedbackRepo()
+	if err != nil {
+		return nil, err
+	}
+	evidence, err := repo.GetCyberFeedbackEvidence(ctx, id)
+	if errors.Is(err, ErrCyberFeedbackNotFound) {
+		return nil, infraerrors.NotFound(ErrorCodeCyberFeedbackNotFound, "CYB 反馈不存在")
+	}
+	if err != nil {
+		return nil, err
+	}
+	return &CyberFeedbackEvidenceAdminDTO{
+		Available: strings.TrimSpace(evidence.FullPrompt) != "", FullPrompt: evidence.FullPrompt,
+		PromptLength: evidence.PromptLength, MessageCount: evidence.MessageCount, Truncated: evidence.FullPromptTruncated,
+		UserID: evidence.UserID, Username: evidence.Username, UserEmail: evidence.UserEmail,
+		APIKeyID: evidence.APIKeyID, APIKeyName: evidence.APIKeyName, APIKeyPrefix: evidence.APIKeyPrefix,
+		GroupID: evidence.GroupID, GroupName: evidence.GroupName,
+		SelectedAccountID: evidence.SelectedAccountID, SelectedAccountName: evidence.SelectedAccountName,
+		CredentialAccountID: evidence.CredentialAccountID, CredentialAccountName: evidence.CredentialAccountName,
+		CredentialAccountEmail:       evidence.CredentialAccountEmail,
+		CredentialAccountEmailSource: evidence.CredentialAccountEmailSource, IdentitySource: evidence.IdentitySource,
+		ClientRequestID: evidence.ClientRequestID, ClientIP: evidence.ClientIP, UserAgent: evidence.UserAgent,
+	}, nil
 }
 
 func (s *PromptService) ListCyberRulesAdmin(_ context.Context) (*CyberRulesPage, error) {
@@ -381,6 +448,13 @@ func (s *PromptService) RegenerateCyberRuleDraft(ctx context.Context, id int64, 
 	if feedback.ReviewStatus != CyberReviewPending {
 		return nil, infraerrors.Conflict(ErrorCodeCyberFeedbackConflict, "CYB 反馈已被其他管理员处理")
 	}
+	evidence, err := repo.GetCyberFeedbackEvidence(ctx, id)
+	if err != nil {
+		return nil, err
+	}
+	if strings.TrimSpace(evidence.FullPrompt) == "" {
+		return nil, infraerrors.BadRequest("prompt_audit_cyber_evidence_unavailable", "该历史 CYB 反馈未保存准确触发正文，无法可靠重新生成规则草案")
+	}
 	if err := repo.ResetCyberRuleGeneration(ctx, id); err != nil {
 		if errors.Is(err, ErrCyberFeedbackGenerationConflict) {
 			return nil, infraerrors.Conflict(ErrorCodeCyberFeedbackConflict, "CYB 规则草案正在生成或反馈状态已变化")
@@ -390,7 +464,7 @@ func (s *PromptService) RegenerateCyberRuleDraft(ctx context.Context, id int64, 
 	snapshot := PromptSnapshot{
 		RequestID: feedback.RequestID, GroupID: &feedback.GroupID, Provider: "openai",
 		Endpoint: feedback.Endpoint, Protocol: feedback.Protocol, Model: feedback.Model,
-		RedactedPreview: feedback.RedactedPreview, ScanText: feedback.RedactedPreview,
+		RedactedPreview: feedback.RedactedPreview, ScanText: evidence.FullPrompt, FullPrompt: evidence.FullPrompt,
 	}
 	candidate, err := s.GenerateCyberRuleDraft(ctx, snapshot)
 	errorCode := ""
@@ -435,6 +509,16 @@ func cyberFeedbackAdminDTO(value CyberFeedback) CyberFeedbackAdminDTO {
 		CandidateRuleText: value.CandidateRuleText, Status: value.ReviewStatus,
 		ReviewedBy: value.ReviewedBy, ReviewedAt: value.ReviewedAt, RuleID: ruleID,
 		ConfigVersion: value.ConfigVersion, CreatedAt: value.CreatedAt, UpdatedAt: value.UpdatedAt,
+	}
+}
+
+func cyberFeedbackAdminDetailDTO(value CyberFeedback) CyberFeedbackAdminDetailDTO {
+	return CyberFeedbackAdminDetailDTO{
+		CyberFeedbackAdminDTO: cyberFeedbackAdminDTO(value),
+		AccountName:           value.AccountNameSnapshot, CredentialAccountID: value.CredentialAccountID,
+		CredentialAccountName: value.CredentialAccountName, PromptLength: value.PromptLength,
+		MessageCount: value.MessageCount, FullPromptTruncated: value.FullPromptTruncated,
+		UpstreamCode: value.UpstreamCode, UpstreamMessage: value.UpstreamMessage,
 	}
 }
 

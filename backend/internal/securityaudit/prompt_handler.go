@@ -144,6 +144,27 @@ func (h *PromptAdminHandler) GetCyberFeedback(c *gin.Context) {
 	response.Success(c, result)
 }
 
+func (h *PromptAdminHandler) GetCyberFeedbackEvidence(c *gin.Context) {
+	service, err := h.cyberService()
+	if err != nil {
+		response.ErrorFrom(c, err)
+		return
+	}
+	id, err := positiveCyberFeedbackID(c)
+	if err != nil {
+		response.ErrorFrom(c, err)
+		return
+	}
+	c.Header("Cache-Control", "private, no-store, max-age=0")
+	c.Header("Pragma", "no-cache")
+	result, err := service.GetCyberFeedbackEvidenceAdmin(c.Request.Context(), id)
+	if err != nil {
+		response.ErrorFrom(c, err)
+		return
+	}
+	response.Success(c, result)
+}
+
 func (h *PromptAdminHandler) ListCyberRules(c *gin.Context) {
 	service, err := h.cyberService()
 	if err != nil {

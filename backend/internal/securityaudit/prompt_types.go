@@ -70,20 +70,21 @@ const (
 )
 
 type Request struct {
-	RequestID  string
-	UserID     int64
-	Username   string
-	UserEmail  string
-	APIKeyID   int64
-	APIKeyName string
-	GroupID    *int64
-	GroupName  string
-	Provider   string
-	Endpoint   string
-	Protocol   string
-	Model      string
-	Body       []byte
-	Stage      string
+	RequestID    string
+	UserID       int64
+	Username     string
+	UserEmail    string
+	APIKeyID     int64
+	APIKeyName   string
+	APIKeyPrefix string
+	GroupID      *int64
+	GroupName    string
+	Provider     string
+	Endpoint     string
+	Protocol     string
+	Model        string
+	Body         []byte
+	Stage        string
 }
 
 func (r Request) Clone() Request {
@@ -96,26 +97,31 @@ func (r Request) Clone() Request {
 }
 
 type PromptSnapshot struct {
-	RequestID          string `json:"request_id"`
-	UserID             int64  `json:"user_id"`
-	UsernameSnapshot   string `json:"username"`
-	UserEmailSnapshot  string `json:"user_email"`
-	APIKeyID           int64  `json:"api_key_id"`
-	APIKeyNameSnapshot string `json:"api_key_name"`
-	GroupID            *int64 `json:"group_id,omitempty"`
-	GroupName          string `json:"group_name"`
-	Provider           string `json:"provider"`
-	Endpoint           string `json:"endpoint"`
-	Protocol           string `json:"protocol"`
-	Model              string `json:"model"`
-	PromptHash         string `json:"prompt_hash"`
-	RedactedPreview    string `json:"redacted_preview"`
-	FullPrompt         string `json:"full_prompt"`
-	PromptLength       int    `json:"prompt_length"`
-	MessageCount       int    `json:"message_count"`
-	Stage              string `json:"stage"`
+	RequestID            string `json:"request_id"`
+	UserID               int64  `json:"user_id"`
+	UsernameSnapshot     string `json:"username"`
+	UserEmailSnapshot    string `json:"user_email"`
+	APIKeyID             int64  `json:"api_key_id"`
+	APIKeyNameSnapshot   string `json:"api_key_name"`
+	APIKeyPrefixSnapshot string `json:"-"`
+	GroupID              *int64 `json:"group_id,omitempty"`
+	GroupName            string `json:"group_name"`
+	Provider             string `json:"provider"`
+	Endpoint             string `json:"endpoint"`
+	Protocol             string `json:"protocol"`
+	Model                string `json:"model"`
+	PromptHash           string `json:"prompt_hash"`
+	RedactedPreview      string `json:"redacted_preview"`
+	FullPrompt           string `json:"full_prompt"`
+	PromptLength         int    `json:"prompt_length"`
+	MessageCount         int    `json:"message_count"`
+	Stage                string `json:"stage"`
 
 	ScanText string `json:"-"`
+	// CyberEvidenceText preserves normalized conversation order and roles for
+	// the separate administrator-only evidence endpoint.
+	CyberEvidenceText      string `json:"-"`
+	CyberEvidenceTruncated bool   `json:"-"`
 
 	// cyberCanonicalDigest preserves role and segment boundaries for exact
 	// replay matching without changing the historical PromptHash contract.

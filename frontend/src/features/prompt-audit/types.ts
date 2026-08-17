@@ -309,9 +309,9 @@ export interface PromptAuditGroup {
 export type CyberFeedbackStatus = 'pending' | 'approved' | 'rejected'
 export type CyberPolicyRuleStatus = 'active' | 'revoked' | string
 
-// CYB feedback deliberately exposes only the minimum metadata needed for
-// administrator review. Raw prompts, hashes, user/key identity, and account
-// names are not part of this frontend contract.
+// List responses deliberately expose only compact metadata. Administrator-only
+// detail and evidence are loaded from separate endpoints when the review dialog
+// is opened, so raw evidence can never leak into the event list.
 export interface CyberFeedbackEvent {
   id: number
   request_id: string
@@ -342,6 +342,38 @@ export interface CyberFeedbackEvent {
   admin_alert_status?: string
 }
 
+export interface CyberFeedbackDetail extends CyberFeedbackEvent {
+  account_name?: string | null
+  upstream_code?: string | null
+  upstream_message?: string | null
+}
+
+export interface CyberFeedbackEvidence {
+  available: boolean
+  full_prompt: string
+  prompt_length: number
+  message_count: number
+  truncated: boolean
+  user_id: number | null
+  username: string
+  user_email: string
+  api_key_id: number | null
+  api_key_name: string
+  api_key_prefix: string
+  group_id: number | null
+  group_name: string
+  selected_account_id: number | null
+  selected_account_name: string
+  credential_account_id: number | null
+  credential_account_name: string
+  credential_account_email: string
+  credential_account_email_source: 'snapshot' | 'current' | 'unavailable' | string
+  identity_source: 'snapshot' | 'current' | 'unavailable' | string
+  client_ip: string
+  user_agent: string
+  client_request_id: string
+}
+
 export interface CyberPolicyRule {
   id: string
   rule_text: string
@@ -362,7 +394,7 @@ export interface CyberFeedbackPage {
 }
 
 export interface CyberFeedbackActionResult {
-  event?: CyberFeedbackEvent
+  event?: CyberFeedbackDetail
   rule?: CyberPolicyRule
   config_version?: number
 }

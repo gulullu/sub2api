@@ -1,11 +1,12 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { flushPromises, mount } from '@vue/test-utils'
 import CyberLearningWorkspace from '../components/CyberLearningWorkspace.vue'
-import type { CyberFeedbackEvent, CyberFeedbackPage } from '../types'
+import type { CyberFeedbackEvent, CyberFeedbackEvidence, CyberFeedbackPage } from '../types'
 
 const mocks = vi.hoisted(() => ({
   listCyberEvents: vi.fn(),
   getCyberEvent: vi.fn(),
+  getCyberEvidence: vi.fn(),
   adoptCyberEvent: vi.fn(),
   rejectCyberEvent: vi.fn(),
   regenerateCyberCandidate: vi.fn(),
@@ -64,6 +65,35 @@ function page(item: CyberFeedbackEvent = event()): CyberFeedbackPage {
   }
 }
 
+function evidence(overrides: Partial<CyberFeedbackEvidence> = {}): CyberFeedbackEvidence {
+  return {
+    available: true,
+    full_prompt: 'RAW_PROMPT_CANARY_RENDER_IN_DETAIL',
+    prompt_length: 53266,
+    message_count: 19,
+    truncated: false,
+    user_id: 42,
+    username: 'caller',
+    user_email: 'caller@example.test',
+    api_key_id: 73,
+    api_key_name: 'production key',
+    api_key_prefix: 'sk-safe',
+    group_id: 12,
+    group_name: 'codex-pro',
+    selected_account_id: 9,
+    selected_account_name: 'scheduled account',
+    credential_account_id: 8,
+    credential_account_name: 'oauth credential',
+    credential_account_email: 'oauth@example.test',
+    credential_account_email_source: 'snapshot',
+    identity_source: 'snapshot',
+    client_ip: '192.0.2.10',
+    user_agent: 'test-client/1.0',
+    client_request_id: 'client-request-17',
+    ...overrides,
+  }
+}
+
 function mountWorkspace() {
   return mount(CyberLearningWorkspace, { global: { stubs: { BaseDialog: BaseDialogStub } } })
 }
@@ -73,13 +103,14 @@ describe('CyberLearningWorkspace', () => {
     Object.values(mocks).forEach((mock) => mock.mockReset())
     mocks.listCyberEvents.mockResolvedValue(page())
     mocks.getCyberEvent.mockResolvedValue({ event: event() })
+    mocks.getCyberEvidence.mockResolvedValue(evidence())
     mocks.adoptCyberEvent.mockResolvedValue({ config_version: 31 })
     mocks.rejectCyberEvent.mockResolvedValue({})
     mocks.regenerateCyberCandidate.mockResolvedValue({ event: event({ generation_status: 'pending', candidate_rule_text: '' }) })
     mocks.revokeCyberRule.mockResolvedValue({ config_version: 31 })
   })
 
-  it('renders only the safe CYB contract even if an API object contains extra sensitive fields', async () => {
+  it('keeps raw content out of the list and fetches administrator evidence for review', async () => {
     const unsafe = {
       ...event(),
       full_prompt: 'RAW_PROMPT_CANARY_DO_NOT_RENDER',
@@ -99,8 +130,13 @@ describe('CyberLearningWorkspace', () => {
     expect(wrapper.html()).not.toContain('KEY_NAME_CANARY_DO_NOT_RENDER')
 
     await wrapper.get('[data-test="cyber-view-17"]').trigger('click')
-    expect(wrapper.get('[data-test="cyber-redacted-preview"]').text()).toContain('[REDACTED] safe excerpt')
+    await flushPromises()
+    expect(mocks.getCyberEvent).toHaveBeenCalledWith(17)
+    expect(mocks.getCyberEvidence).toHaveBeenCalledWith(17)
+    expect(wrapper.get('[data-test="cyber-full-prompt"]').text()).toContain('RAW_PROMPT_CANARY_RENDER_IN_DETAIL')
     expect(wrapper.html()).not.toContain('RAW_PROMPT_CANARY_DO_NOT_RENDER')
+    expect(wrapper.get('[data-test="cyber-review-metadata"]').text()).toContain('caller@example.test')
+    expect(wrapper.get('[data-test="cyber-review-metadata"]').text()).toContain('oauth@example.test')
   })
 
   it('opens and highlights a safe deep-linked event detail', async () => {
@@ -110,15 +146,17 @@ describe('CyberLearningWorkspace', () => {
     })
     await flushPromises()
     expect(mocks.getCyberEvent).toHaveBeenCalledWith(17)
+    expect(mocks.getCyberEvidence).toHaveBeenCalledWith(17)
     expect(wrapper.get('[data-test="cyber-event-row"]').attributes('data-highlighted')).toBe('true')
     expect(wrapper.find('[role="dialog"]').exists()).toBe(true)
-    expect(wrapper.get('[data-test="cyber-redacted-preview"]').text()).toContain('[REDACTED] safe excerpt')
+    expect(wrapper.get('[data-test="cyber-full-prompt"]').text()).toContain('RAW_PROMPT_CANARY_RENDER_IN_DETAIL')
   })
 
   it('prefills the system candidate, allows an edit, and adopts with the current config version', async () => {
     const wrapper = mountWorkspace()
     await flushPromises()
     await wrapper.get('[data-test="cyber-view-17"]').trigger('click')
+    await flushPromises()
 
     const editor = wrapper.get('#cyber-rule-text')
     expect((editor.element as HTMLTextAreaElement).value).toContain('prohibited credential automation')
@@ -131,10 +169,13 @@ describe('CyberLearningWorkspace', () => {
   })
 
   it('shows only a safe generation error code and can request regeneration', async () => {
-    mocks.listCyberEvents.mockResolvedValue(page(event({ generation_status: 'failed', generation_error_code: 'candidate_timeout', candidate_rule_text: '' })))
+    const failedEvent = event({ generation_status: 'failed', generation_error_code: 'candidate_timeout', candidate_rule_text: '' })
+    mocks.listCyberEvents.mockResolvedValue(page(failedEvent))
+    mocks.getCyberEvent.mockResolvedValue({ event: failedEvent })
     const wrapper = mountWorkspace()
     await flushPromises()
     await wrapper.get('[data-test="cyber-view-17"]').trigger('click')
+    await flushPromises()
 
     expect(wrapper.get('[data-test="cyber-generation-failed"]').text()).toContain('candidate_timeout')
     expect(wrapper.find('#cyber-rule-text').exists()).toBe(false)
@@ -143,10 +184,30 @@ describe('CyberLearningWorkspace', () => {
     expect(mocks.regenerateCyberCandidate).toHaveBeenCalledWith(17)
   })
 
+  it('explains unrecoverable historical evidence, disables regeneration, and clears raw evidence when closed', async () => {
+    const failedEvent = event({ generation_status: 'failed', generation_error_code: 'source_unavailable', candidate_rule_text: '' })
+    mocks.listCyberEvents.mockResolvedValue(page(failedEvent))
+    mocks.getCyberEvent.mockResolvedValue({ event: failedEvent })
+    mocks.getCyberEvidence.mockResolvedValue(evidence({ available: false, full_prompt: '', prompt_length: 0, message_count: 0 }))
+    const wrapper = mountWorkspace()
+    await flushPromises()
+    await wrapper.get('[data-test="cyber-view-17"]').trigger('click')
+    await flushPromises()
+
+    expect(wrapper.get('[data-test="cyber-evidence-unavailable"]').exists()).toBe(true)
+    expect(wrapper.find('[data-test="cyber-regenerate"]').exists()).toBe(false)
+
+    wrapper.getComponent(BaseDialogStub).vm.$emit('close')
+    await flushPromises()
+    expect(wrapper.find('[role="dialog"]').exists()).toBe(false)
+    expect(wrapper.html()).not.toContain('RAW_PROMPT_CANARY_RENDER_IN_DETAIL')
+  })
+
   it('rejects feedback without requiring a manual summary', async () => {
     const wrapper = mountWorkspace()
     await flushPromises()
     await wrapper.get('[data-test="cyber-view-17"]').trigger('click')
+    await flushPromises()
     await wrapper.get('[data-test="cyber-reject"]').trigger('click')
     await flushPromises()
     expect(mocks.rejectCyberEvent).toHaveBeenCalledWith(17, '')

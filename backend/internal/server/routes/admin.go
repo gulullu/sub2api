@@ -139,6 +139,7 @@ func registerPromptAuditRoutes(admin *gin.RouterGroup, h *handler.Handlers) {
 		promptAudit.POST("/events/delete-by-filter", h.Admin.PromptAudit.DeleteByFilter)
 		promptAudit.GET("/cyber/events", h.Admin.PromptAudit.ListCyberFeedback)
 		promptAudit.GET("/cyber/events/:id", h.Admin.PromptAudit.GetCyberFeedback)
+		promptAudit.GET("/cyber/events/:id/evidence", h.Admin.PromptAudit.GetCyberFeedbackEvidence)
 		promptAudit.POST("/cyber/events/:id/adopt", h.Admin.PromptAudit.AdoptCyberFeedback)
 		promptAudit.POST("/cyber/events/:id/reject", h.Admin.PromptAudit.RejectCyberFeedback)
 		promptAudit.POST("/cyber/events/:id/regenerate", h.Admin.PromptAudit.RegenerateCyberRuleDraft)

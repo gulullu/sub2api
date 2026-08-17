@@ -14,6 +14,8 @@ import type {
   PromptProbeResult,
   PromptAuditEndpointDraft,
   CyberFeedbackActionResult,
+  CyberFeedbackDetail,
+  CyberFeedbackEvidence,
   CyberFeedbackEvent,
   CyberFeedbackPage,
   CyberFeedbackStatus,
@@ -28,6 +30,8 @@ type CyberFeedbackPageWire = Omit<Partial<CyberFeedbackPage>, 'items' | 'active_
   items?: CyberFeedbackEvent[] | null
   active_rules?: CyberPolicyRule[] | null
 }
+
+type CyberFeedbackEvidenceWire = Partial<CyberFeedbackEvidence> | null | undefined
 
 function normalizeCyberFeedbackPage(data: CyberFeedbackPageWire | null | undefined): CyberFeedbackPage {
   return {
@@ -101,8 +105,40 @@ export async function listCyberEvents(
 }
 
 export async function getCyberEvent(id: number): Promise<CyberFeedbackActionResult> {
-  const { data } = await apiClient.get<CyberFeedbackActionResult | CyberFeedbackEvent>(`${basePath}/cyber/events/${id}`)
+  const { data } = await apiClient.get<CyberFeedbackActionResult | CyberFeedbackDetail>(`${basePath}/cyber/events/${id}`)
   return 'id' in data ? { event: data } : data
+}
+
+export async function getCyberEvidence(id: number): Promise<CyberFeedbackEvidence> {
+  const { data } = await apiClient.get<CyberFeedbackEvidenceWire | { evidence?: CyberFeedbackEvidenceWire }>(`${basePath}/cyber/events/${id}/evidence`)
+  let wire: CyberFeedbackEvidenceWire
+  if (data && typeof data === 'object' && 'evidence' in data) wire = data.evidence
+  else wire = data as CyberFeedbackEvidenceWire
+  return {
+    available: wire?.available === true,
+    full_prompt: typeof wire?.full_prompt === 'string' ? wire.full_prompt : '',
+    prompt_length: typeof wire?.prompt_length === 'number' ? wire.prompt_length : 0,
+    message_count: typeof wire?.message_count === 'number' ? wire.message_count : 0,
+    truncated: wire?.truncated === true,
+    user_id: typeof wire?.user_id === 'number' ? wire.user_id : null,
+    username: typeof wire?.username === 'string' ? wire.username : '',
+    user_email: typeof wire?.user_email === 'string' ? wire.user_email : '',
+    api_key_id: typeof wire?.api_key_id === 'number' ? wire.api_key_id : null,
+    api_key_name: typeof wire?.api_key_name === 'string' ? wire.api_key_name : '',
+    api_key_prefix: typeof wire?.api_key_prefix === 'string' ? wire.api_key_prefix : '',
+    group_id: typeof wire?.group_id === 'number' ? wire.group_id : null,
+    group_name: typeof wire?.group_name === 'string' ? wire.group_name : '',
+    selected_account_id: typeof wire?.selected_account_id === 'number' ? wire.selected_account_id : null,
+    selected_account_name: typeof wire?.selected_account_name === 'string' ? wire.selected_account_name : '',
+    credential_account_id: typeof wire?.credential_account_id === 'number' ? wire.credential_account_id : null,
+    credential_account_name: typeof wire?.credential_account_name === 'string' ? wire.credential_account_name : '',
+    credential_account_email: typeof wire?.credential_account_email === 'string' ? wire.credential_account_email : '',
+    credential_account_email_source: typeof wire?.credential_account_email_source === 'string' ? wire.credential_account_email_source : 'unavailable',
+    identity_source: typeof wire?.identity_source === 'string' ? wire.identity_source : 'unavailable',
+    client_ip: typeof wire?.client_ip === 'string' ? wire.client_ip : '',
+    user_agent: typeof wire?.user_agent === 'string' ? wire.user_agent : '',
+    client_request_id: typeof wire?.client_request_id === 'string' ? wire.client_request_id : '',
+  }
 }
 
 export async function adoptCyberEvent(
@@ -222,6 +258,7 @@ export const promptAuditAPI = {
   getEvent,
   listCyberEvents,
   getCyberEvent,
+  getCyberEvidence,
   adoptCyberEvent,
   rejectCyberEvent,
   regenerateCyberCandidate,

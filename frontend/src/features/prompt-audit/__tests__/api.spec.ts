@@ -80,6 +80,16 @@ describe('Prompt Audit API', () => {
     await promptAuditAPI.getCyberEvent(17)
     expect(client.get).toHaveBeenCalledWith('/admin/prompt-audit/cyber/events/17')
 
+    client.get.mockResolvedValue({ data: { available: true, full_prompt: 'raw', user_id: 9, truncated: false } })
+    await expect(promptAuditAPI.getCyberEvidence(17)).resolves.toEqual(expect.objectContaining({
+      available: true,
+      full_prompt: 'raw',
+      user_id: 9,
+      api_key_id: null,
+      identity_source: 'unavailable',
+    }))
+    expect(client.get).toHaveBeenCalledWith('/admin/prompt-audit/cyber/events/17/evidence')
+
     client.post.mockResolvedValue({ data: { config_version: 31 } })
     await promptAuditAPI.adoptCyberEvent(17, 'Detect abstract automation abuse patterns.', 30)
     expect(client.post).toHaveBeenCalledWith('/admin/prompt-audit/cyber/events/17/adopt', {
@@ -112,6 +122,35 @@ describe('Prompt Audit API', () => {
       page: 1,
       page_size: 20,
       config_version: 30,
+    })
+  })
+
+  it('normalizes nullable CYB evidence without exposing undefined values to the view', async () => {
+    client.get.mockResolvedValue({ data: { evidence: null } })
+    await expect(promptAuditAPI.getCyberEvidence(17)).resolves.toEqual({
+      available: false,
+      full_prompt: '',
+      prompt_length: 0,
+      message_count: 0,
+      truncated: false,
+      user_id: null,
+      username: '',
+      user_email: '',
+      api_key_id: null,
+      api_key_name: '',
+      api_key_prefix: '',
+      group_id: null,
+      group_name: '',
+      selected_account_id: null,
+      selected_account_name: '',
+      credential_account_id: null,
+      credential_account_name: '',
+      credential_account_email: '',
+      credential_account_email_source: 'unavailable',
+      identity_source: 'unavailable',
+      client_ip: '',
+      user_agent: '',
+      client_request_id: '',
     })
   })
 })

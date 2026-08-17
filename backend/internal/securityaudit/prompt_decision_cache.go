@@ -5,6 +5,7 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
+	"strings"
 	"sync"
 	"time"
 )
@@ -122,10 +123,14 @@ func promptDecisionCacheKey(cfg ActiveConfig, scanText string) string {
 		BlockHTTPStatus: cfg.BlockHTTPStatus, BlockMessage: cfg.BlockMessage,
 	}
 	for _, endpoint := range cfg.EnabledEndpoints() {
+		effectiveSystemPrompt := endpoint.SystemPrompt
+		if strings.EqualFold(strings.TrimSpace(endpoint.Adapter), AdapterConfidenceJSON) {
+			effectiveSystemPrompt = confidenceJSONSystemPrompt(effectiveSystemPrompt)
+		}
 		policy.Endpoints = append(policy.Endpoints, cacheEndpoint{
 			ID: endpoint.ID, Priority: endpoint.Priority, Adapter: endpoint.Adapter, BaseURL: endpoint.BaseURL, Model: endpoint.Model,
 			TimeoutMS: endpoint.TimeoutMS, InputLimit: endpoint.InputLimit,
-			PromptTemplateID: endpoint.PromptTemplateID, SystemPrompt: endpoint.SystemPrompt,
+			PromptTemplateID: endpoint.PromptTemplateID, SystemPrompt: effectiveSystemPrompt,
 			FlagThreshold: endpoint.FlagThreshold, BlockThreshold: endpoint.BlockThreshold,
 		})
 	}

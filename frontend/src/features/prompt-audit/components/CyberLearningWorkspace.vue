@@ -125,18 +125,34 @@
     <BaseDialog :show="selected !== null" :title="t('admin.promptAudit.cyber.detailTitle')" width="extra-wide" @close="closeEvent">
       <div v-if="selected" class="grid gap-6 lg:grid-cols-[minmax(0,1fr)_minmax(20rem,0.8fr)]">
         <div class="min-w-0">
-          <h4 class="text-sm font-medium text-gray-900 dark:text-white">{{ t('admin.promptAudit.cyber.safePreview') }}</h4>
-          <p class="mt-1 text-xs text-gray-500 dark:text-dark-400">{{ t('admin.promptAudit.cyber.safePreviewHint') }}</p>
-          <pre class="mt-3 max-h-[28rem] overflow-auto whitespace-pre-wrap break-words rounded-lg bg-gray-50 p-4 text-sm text-gray-700 dark:bg-dark-900 dark:text-dark-200" data-test="cyber-redacted-preview">{{ selected.redacted_preview || '—' }}</pre>
+          <h4 class="text-sm font-medium text-gray-900 dark:text-white">{{ t('admin.promptAudit.cyber.triggerContent') }}</h4>
+          <p class="mt-1 text-xs text-gray-500 dark:text-dark-400">{{ t('admin.promptAudit.cyber.triggerContentHint') }}</p>
+          <div v-if="detailLoading" class="mt-3 rounded-lg bg-gray-50 px-4 py-8 text-center text-sm text-gray-500 dark:bg-dark-900" data-test="cyber-detail-loading">
+            {{ t('common.loading') }}
+          </div>
+          <div v-else-if="evidenceError" role="alert" class="mt-3 rounded-lg bg-red-50 px-4 py-3 text-sm text-red-700 dark:bg-red-950/30 dark:text-red-300" data-test="cyber-evidence-error">
+            {{ evidenceError }}
+          </div>
+          <pre v-else-if="evidence?.available && evidence.full_prompt" class="mt-3 max-h-[36rem] overflow-auto whitespace-pre-wrap break-words rounded-lg bg-gray-50 p-4 text-sm text-gray-700 dark:bg-dark-900 dark:text-dark-200" data-test="cyber-full-prompt">{{ evidence.full_prompt }}</pre>
+          <div v-else class="mt-3 rounded-lg bg-amber-50 px-4 py-3 text-sm text-amber-800 dark:bg-amber-950/30 dark:text-amber-200" data-test="cyber-evidence-unavailable">
+            {{ t('admin.promptAudit.cyber.evidenceUnavailable') }}
+          </div>
+
+          <div class="mt-4 rounded-lg border border-amber-200 bg-amber-50/70 px-4 py-3 text-xs text-amber-900 dark:border-amber-900/60 dark:bg-amber-950/20 dark:text-amber-200">
+            {{ t('admin.promptAudit.cyber.providerExplanation') }}
+          </div>
         </div>
         <div class="min-w-0">
-          <h4 class="text-sm font-medium text-gray-900 dark:text-white">{{ t('admin.promptAudit.cyber.safeMetadata') }}</h4>
-          <dl class="mt-3 grid grid-cols-[auto_minmax(0,1fr)] gap-x-4 gap-y-2 text-sm" data-test="cyber-safe-metadata">
-            <template v-for="row in detailRows(selected)" :key="row.label">
+          <h4 class="text-sm font-medium text-gray-900 dark:text-white">{{ t('admin.promptAudit.cyber.reviewMetadata') }}</h4>
+          <dl class="mt-3 grid grid-cols-[auto_minmax(0,1fr)] gap-x-4 gap-y-2 text-sm" data-test="cyber-review-metadata">
+            <template v-for="row in detailRows(selected, evidence)" :key="row.label">
               <dt class="text-gray-500">{{ row.label }}</dt>
               <dd class="break-all text-gray-900 dark:text-dark-100">{{ row.value }}</dd>
             </template>
           </dl>
+          <p v-if="evidence?.identity_source === 'current'" class="mt-3 rounded-lg bg-amber-50 px-3 py-2 text-xs text-amber-800 dark:bg-amber-950/30 dark:text-amber-200" data-test="cyber-current-identity-warning">
+            {{ t('admin.promptAudit.cyber.currentIdentityWarning') }}
+          </p>
 
           <div v-if="selected.status === 'pending'" class="mt-6 space-y-4 border-t border-gray-200 pt-5 dark:border-dark-700">
             <div>
@@ -147,9 +163,10 @@
               <div v-else-if="selected.generation_status === 'failed'" class="mt-2 rounded-lg bg-red-50 px-3 py-2 text-sm text-red-700 dark:bg-red-950/30 dark:text-red-300" data-test="cyber-generation-failed">
                 <p>{{ t('admin.promptAudit.cyber.generation.failed') }}</p>
                 <p class="mt-1 font-mono text-xs">{{ safeGenerationError(selected.generation_error_code) }}</p>
-                <button type="button" class="btn btn-secondary btn-sm mt-3" :disabled="mutating" data-test="cyber-regenerate" @click="regenerateSelected">
+                <button v-if="canRegenerate" type="button" class="btn btn-secondary btn-sm mt-3" :disabled="mutating" data-test="cyber-regenerate" @click="regenerateSelected">
                   {{ t('admin.promptAudit.cyber.generation.regenerate') }}
                 </button>
+                <p v-else class="mt-2 text-xs">{{ t('admin.promptAudit.cyber.generation.unavailableWithoutEvidence') }}</p>
               </div>
               <textarea v-else id="cyber-rule-text" v-model="ruleText" rows="5" class="input mt-2 resize-y" :placeholder="t('admin.promptAudit.cyber.adopt.rulePlaceholder')" />
               <p class="mt-1 text-xs text-gray-500 dark:text-dark-400">{{ t('admin.promptAudit.cyber.adopt.ruleHint') }}</p>
@@ -178,7 +195,7 @@ import BaseDialog from '@/components/common/BaseDialog.vue'
 import { useAppStore } from '@/stores/app'
 import { extractApiErrorCode, extractApiErrorMessage } from '@/utils/apiError'
 import promptAuditAPI from '../api'
-import type { CyberFeedbackEvent, CyberFeedbackPage, CyberFeedbackStatus, CyberPolicyRule } from '../types'
+import type { CyberFeedbackDetail, CyberFeedbackEvent, CyberFeedbackEvidence, CyberFeedbackPage, CyberFeedbackStatus, CyberPolicyRule } from '../types'
 
 const { t, locale } = useI18n()
 const appStore = useAppStore()
@@ -188,12 +205,17 @@ const status = ref<CyberFeedbackStatus>('pending')
 const loading = ref(false)
 const mutating = ref(false)
 const error = ref('')
-const selected = ref<CyberFeedbackEvent | null>(null)
+const selected = ref<CyberFeedbackDetail | null>(null)
+const evidence = ref<CyberFeedbackEvidence | null>(null)
+const detailLoading = ref(false)
+const evidenceError = ref('')
 const ruleText = ref('')
 const rejectReason = ref('')
 const page = reactive<CyberFeedbackPage>({ items: [], total: 0, page: 1, page_size: 20, active_rules: [], config_version: 0 })
 const pageCount = computed(() => Math.max(1, Math.ceil(page.total / page.page_size)))
+const canRegenerate = computed(() => evidence.value?.available === true && evidence.value.full_prompt.length > 0)
 let deepLinkAttempted = false
+let detailRequestSequence = 0
 
 function operationError(errorValue: unknown, fallbackKey: string): string {
   const code = extractApiErrorCode(errorValue)
@@ -223,17 +245,7 @@ async function resolveDeepLink() {
   if (!eventID || deepLinkAttempted) return
   deepLinkAttempted = true
   const listed = page.items.find((item) => item.id === eventID)
-  try {
-    const result = await promptAuditAPI.getCyberEvent(eventID)
-    if (result.event) {
-      openEvent(result.event)
-      return
-    }
-  } catch {
-    // Older servers may not expose the detail route yet. The pending list is a
-    // safe fallback and still highlights/opens the event when it is present.
-  }
-  if (listed) openEvent(listed)
+  await openEventByID(eventID, listed ?? null)
 }
 
 function setStatus(value: CyberFeedbackStatus) {
@@ -250,13 +262,44 @@ function changePage(value: number) {
 }
 
 function openEvent(event: CyberFeedbackEvent) {
-  selected.value = event
-  ruleText.value = event.candidate_rule_text || ''
+  void openEventByID(event.id, event)
+}
+
+async function openEventByID(eventID: number, fallback: CyberFeedbackEvent | null) {
+  const requestSequence = ++detailRequestSequence
+  selected.value = fallback
+  evidence.value = null
+  evidenceError.value = ''
+  detailLoading.value = true
+  ruleText.value = fallback?.candidate_rule_text || ''
   rejectReason.value = ''
+
+  const [detailResult, evidenceResult] = await Promise.allSettled([
+    promptAuditAPI.getCyberEvent(eventID),
+    promptAuditAPI.getCyberEvidence(eventID),
+  ])
+  if (requestSequence !== detailRequestSequence) return
+
+  if (detailResult.status === 'fulfilled' && detailResult.value.event) {
+    selected.value = { ...(fallback ?? {}), ...detailResult.value.event }
+  } else if (!fallback) {
+    error.value = t('admin.promptAudit.cyber.errors.detail')
+  }
+  if (evidenceResult.status === 'fulfilled') {
+    evidence.value = evidenceResult.value
+  } else {
+    evidenceError.value = evidenceFailureMessage(evidenceResult.reason)
+  }
+  detailLoading.value = false
+  ruleText.value = selected.value?.candidate_rule_text || ''
 }
 
 function closeEvent() {
+  detailRequestSequence += 1
   selected.value = null
+  evidence.value = null
+  detailLoading.value = false
+  evidenceError.value = ''
   ruleText.value = ''
   rejectReason.value = ''
 }
@@ -299,7 +342,7 @@ async function regenerateSelected() {
     const result = await promptAuditAPI.regenerateCyberCandidate(eventID)
     await loadPage()
     const refreshed = result.event ?? page.items.find((item) => item.id === eventID)
-    if (refreshed) openEvent(refreshed)
+    if (refreshed) await openEventByID(refreshed.id, refreshed)
     appStore.showSuccess(t('admin.promptAudit.cyber.messages.regenerating'))
   } catch (errorValue) {
     await handleMutationError(errorValue, 'admin.promptAudit.cyber.errors.regenerate')
@@ -332,17 +375,34 @@ async function handleMutationError(errorValue: unknown, fallbackKey: string) {
   appStore.showError(operationError(errorValue, fallbackKey))
 }
 
-function detailRows(event: CyberFeedbackEvent): Array<{ label: string; value: string }> {
+function detailRows(event: CyberFeedbackDetail, source: CyberFeedbackEvidence | null): Array<{ label: string; value: string }> {
   return [
     { label: t('admin.promptAudit.cyber.fields.requestId'), value: event.request_id || '—' },
-    { label: t('admin.promptAudit.cyber.fields.accountId'), value: displayID(event.account_id) },
-    { label: t('admin.promptAudit.cyber.fields.groupId'), value: displayID(event.group_id) },
+    { label: t('admin.promptAudit.cyber.fields.userId'), value: displayID(source?.user_id) },
+    { label: t('admin.promptAudit.cyber.fields.username'), value: source?.username || '—' },
+    { label: t('admin.promptAudit.cyber.fields.userEmail'), value: source?.user_email || '—' },
+    { label: t('admin.promptAudit.cyber.fields.apiKeyId'), value: displayID(source?.api_key_id) },
+    { label: t('admin.promptAudit.cyber.fields.apiKeyName'), value: source?.api_key_name || '—' },
+    { label: t('admin.promptAudit.cyber.fields.apiKeyPrefix'), value: source?.api_key_prefix || '—' },
+    { label: t('admin.promptAudit.cyber.fields.group'), value: namedID(source?.group_id ?? event.group_id, source?.group_name) },
+    { label: t('admin.promptAudit.cyber.fields.selectedAccount'), value: namedID(source?.selected_account_id ?? event.account_id, source?.selected_account_name || event.account_name) },
+    { label: t('admin.promptAudit.cyber.fields.credentialAccount'), value: namedID(source?.credential_account_id, source?.credential_account_name) },
+    { label: t('admin.promptAudit.cyber.fields.credentialAccountEmail'), value: sourcedEmail(source) },
+    { label: t('admin.promptAudit.cyber.fields.identitySource'), value: identitySourceLabel(source?.identity_source) },
+    { label: t('admin.promptAudit.cyber.fields.clientIp'), value: source?.client_ip || '—' },
+    { label: t('admin.promptAudit.cyber.fields.userAgent'), value: source?.user_agent || '—' },
+    { label: t('admin.promptAudit.cyber.fields.clientRequestId'), value: source?.client_request_id || '—' },
     { label: t('admin.promptAudit.cyber.fields.model'), value: event.model || '—' },
     { label: t('admin.promptAudit.cyber.fields.endpoint'), value: event.endpoint || '—' },
     { label: t('admin.promptAudit.cyber.fields.protocol'), value: event.protocol || '—' },
     { label: t('admin.promptAudit.cyber.fields.stage'), value: event.stage || '—' },
     { label: t('admin.promptAudit.cyber.fields.transport'), value: event.transport || '—' },
     { label: t('admin.promptAudit.cyber.fields.upstreamStatus'), value: event.upstream_status == null ? '—' : String(event.upstream_status) },
+    { label: t('admin.promptAudit.cyber.fields.upstreamCode'), value: event.upstream_code || '—' },
+    { label: t('admin.promptAudit.cyber.fields.upstreamMessage'), value: event.upstream_message || '—' },
+    { label: t('admin.promptAudit.cyber.fields.promptLength'), value: String(source?.prompt_length ?? 0) },
+    { label: t('admin.promptAudit.cyber.fields.messageCount'), value: String(source?.message_count ?? 0) },
+    { label: t('admin.promptAudit.cyber.fields.truncated'), value: source?.truncated ? t('common.yes') : t('common.no') },
     { label: t('admin.promptAudit.cyber.fields.confirmCount'), value: String(event.confirm_count) },
     { label: t('admin.promptAudit.cyber.fields.similarCount'), value: String(event.similar_count ?? 1) },
     { label: t('admin.promptAudit.cyber.fields.firstConfirmed'), value: formatDate(event.first_confirmed_at || event.created_at) },
@@ -355,8 +415,32 @@ function detailRows(event: CyberFeedbackEvent): Array<{ label: string; value: st
   ]
 }
 
-function displayID(value: number | null): string {
+function displayID(value: number | null | undefined): string {
   return value == null || value <= 0 ? '—' : String(value)
+}
+
+function namedID(id: number | null | undefined, name: string | null | undefined): string {
+  const displayedID = displayID(id)
+  const displayedName = name?.trim() || ''
+  if (displayedID === '—') return displayedName || '—'
+  return displayedName ? `${displayedName} (#${displayedID})` : `#${displayedID}`
+}
+
+function sourcedEmail(source: CyberFeedbackEvidence | null): string {
+  if (!source?.credential_account_email) return '—'
+  return source.credential_account_email_source === 'current'
+    ? `${source.credential_account_email} (${t('admin.promptAudit.cyber.currentValue')})`
+    : source.credential_account_email
+}
+
+function identitySourceLabel(value: string | undefined): string {
+  if (value === 'snapshot') return t('admin.promptAudit.cyber.identitySnapshot')
+  if (value === 'current') return t('admin.promptAudit.cyber.identityCurrent')
+  return t('admin.promptAudit.cyber.identityUnavailable')
+}
+
+function evidenceFailureMessage(errorValue: unknown): string {
+  return operationError(errorValue, 'admin.promptAudit.cyber.errors.evidence')
 }
 
 function safeGenerationError(value: string): string {

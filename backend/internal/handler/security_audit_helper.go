@@ -238,6 +238,9 @@ func buildSecurityAuditRequest(c *gin.Context, apiKey *service.APIKey, subject m
 		GroupName: legacy.GroupName, Provider: legacy.Provider, Endpoint: legacy.Endpoint,
 		Protocol: legacy.Protocol, Model: legacy.Model, Body: body, Stage: strings.TrimSpace(stage),
 	}
+	if apiKey != nil && len(apiKey.Key) > 8 {
+		request.APIKeyPrefix = keyPrefix(apiKey.Key, 8)
+	}
 	if apiKey != nil && apiKey.User != nil {
 		request.Username = apiKey.User.Username
 		if request.UserEmail == "" {

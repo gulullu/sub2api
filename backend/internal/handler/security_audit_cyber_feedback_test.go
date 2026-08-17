@@ -65,6 +65,10 @@ func (*handlerCyberFeedbackRepo) GetCyberFeedback(context.Context, int64) (secur
 	return securityaudit.CyberFeedback{}, securityaudit.ErrCyberFeedbackNotFound
 }
 
+func (*handlerCyberFeedbackRepo) GetCyberFeedbackEvidence(context.Context, int64) (securityaudit.CyberFeedbackEvidence, error) {
+	return securityaudit.CyberFeedbackEvidence{}, securityaudit.ErrCyberFeedbackNotFound
+}
+
 func (*handlerCyberFeedbackRepo) ReviewCyberFeedback(context.Context, int64, string, int64, string, int64) (securityaudit.CyberFeedback, error) {
 	return securityaudit.CyberFeedback{}, nil
 }
@@ -166,8 +170,8 @@ func TestOpenAICyberReplayTracksEveryWebSocketTurnAndClearsEvidence(t *testing.T
 
 func TestRecordCyberPolicyConfirmsOnlyRealOpenAIOAuthMark(t *testing.T) {
 	groupID := int64(12)
-	apiKey := &service.APIKey{ID: 7, GroupID: &groupID, Group: &service.Group{ID: groupID, Platform: service.PlatformOpenAI}}
-	openAIOAuth := &service.Account{ID: 90, Platform: service.PlatformOpenAI, Type: service.AccountTypeOAuth}
+	apiKey := &service.APIKey{ID: 7, Key: "sk-safe-prefix-value", Name: "test-key", GroupID: &groupID, Group: &service.Group{ID: groupID, Platform: service.PlatformOpenAI}}
+	openAIOAuth := &service.Account{ID: 90, Name: "oauth-account", Platform: service.PlatformOpenAI, Type: service.AccountTypeOAuth, Credentials: map[string]any{"email": "oauth@example.test"}}
 
 	repo := &handlerCyberFeedbackRepo{confirmed: make(chan securityaudit.CyberConfirmInput, 2)}
 	h := &OpenAIGatewayHandler{cyberFeedbackService: newHandlerCyberService(t, repo, false)}
@@ -182,6 +186,11 @@ func TestRecordCyberPolicyConfirmsOnlyRealOpenAIOAuthMark(t *testing.T) {
 	case confirmed := <-repo.confirmed:
 		require.Equal(t, openAIOAuth.ID, confirmed.AccountID)
 		require.Equal(t, groupID, confirmed.GroupID)
+		require.Equal(t, "oauth-account", confirmed.AccountName)
+		require.Equal(t, openAIOAuth.ID, confirmed.CredentialAccountID)
+		require.Equal(t, "oauth@example.test", confirmed.CredentialAccountEmail)
+		require.Equal(t, "cyber_policy", confirmed.UpstreamCode)
+		require.Equal(t, "rejected", confirmed.UpstreamMessage)
 	case <-time.After(time.Second):
 		t.Fatal("expected OpenAI OAuth confirmation")
 	}
@@ -217,4 +226,20 @@ func TestRecordCyberPolicyConfirmsOnlyRealOpenAIOAuthMark(t *testing.T) {
 		t.Fatal("missing upstream mark must not confirm feedback")
 	case <-time.After(30 * time.Millisecond):
 	}
+}
+
+func TestCyberEvidenceKeyPrefixNeverExposesAnEntireShortKey(t *testing.T) {
+	groupID := int64(12)
+	c := newHandlerCyberContext("/v1/responses")
+	short := buildSecurityAuditRequest(c, &service.APIKey{
+		ID: 7, Key: "short", GroupID: &groupID,
+	}, middleware2.AuthSubject{UserID: 8}, service.ContentModerationProtocolOpenAIResponses,
+		"gpt-test", []byte(`{"input":"test"}`), "http")
+	require.Empty(t, short.APIKeyPrefix)
+
+	long := buildSecurityAuditRequest(c, &service.APIKey{
+		ID: 7, Key: "sk-long-secret-value", GroupID: &groupID,
+	}, middleware2.AuthSubject{UserID: 8}, service.ContentModerationProtocolOpenAIResponses,
+		"gpt-test", []byte(`{"input":"test"}`), "http")
+	require.Equal(t, "sk-long-", long.APIKeyPrefix)
 }

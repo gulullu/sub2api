@@ -44,6 +44,7 @@ func (c *cyberAdminTestConfig) SaveCyberSupplementRules(_ context.Context, expec
 type cyberAdminTestRepo struct {
 	mu          sync.Mutex
 	feedback    CyberFeedback
+	evidence    CyberFeedbackEvidence
 	transitions []string
 }
 
@@ -63,6 +64,14 @@ func (r *cyberAdminTestRepo) GetCyberFeedback(context.Context, int64) (CyberFeed
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	return r.feedback, nil
+}
+func (r *cyberAdminTestRepo) GetCyberFeedbackEvidence(context.Context, int64) (CyberFeedbackEvidence, error) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	if r.evidence.ID != 0 {
+		return r.evidence, nil
+	}
+	return CyberFeedbackEvidence{ID: r.feedback.ID, FullPrompt: r.feedback.FullPrompt}, nil
 }
 func (r *cyberAdminTestRepo) ReviewCyberFeedback(_ context.Context, _ int64, status string, actorID int64, ruleID string, configVersion int64) (CyberFeedback, error) {
 	r.mu.Lock()
@@ -215,6 +224,27 @@ func TestCyberFeedbackAdminDTOCannotLeakRepositorySecrets(t *testing.T) {
 	require.NotContains(t, payload, "signature-canary")
 	require.Contains(t, payload, "request-safe")
 	require.True(t, strings.Contains(payload, "candidate_rule_text"))
+}
+
+func TestCyberFeedbackEvidenceIsSeparatedFromOrdinaryDetail(t *testing.T) {
+	repo := &cyberAdminTestRepo{
+		feedback: CyberFeedback{ID: 5, RequestID: "req-5", AccountID: 20, AccountNameSnapshot: "shadow", CredentialAccountID: 10, CredentialAccountName: "parent", UpstreamMessage: "blocked"},
+		evidence: CyberFeedbackEvidence{ID: 5, FullPrompt: "[user]\nraw canary", UserEmail: "user@example.test", CredentialAccountEmail: "oauth@example.test", IdentitySource: "snapshot"},
+	}
+	service := &PromptService{cyberAdminRepo: repo}
+	detail, err := service.GetCyberFeedbackAdmin(context.Background(), 5)
+	require.NoError(t, err)
+	rawDetail, err := json.Marshal(detail)
+	require.NoError(t, err)
+	require.NotContains(t, string(rawDetail), "raw canary")
+	require.NotContains(t, string(rawDetail), "user@example.test")
+
+	evidence, err := service.GetCyberFeedbackEvidenceAdmin(context.Background(), 5)
+	require.NoError(t, err)
+	require.True(t, evidence.Available)
+	require.Equal(t, "[user]\nraw canary", evidence.FullPrompt)
+	require.Equal(t, "user@example.test", evidence.UserEmail)
+	require.Equal(t, "oauth@example.test", evidence.CredentialAccountEmail)
 }
 
 func TestCyberAdminMutationMutexSerializesAdoptAgainstReject(t *testing.T) {

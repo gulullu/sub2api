@@ -129,19 +129,23 @@ export default {
     },
     cyber: {
       title: 'CYB 反馈与规则学习',
-      description: '复核上游已确认的 CYB 信号，将安全、抽象的模式采纳为审核规则。本页面绝不展示原始提示词、Hash、用户、Key 或账号名称。',
+      description: '复核上游已确认的 CYB 信号，查看管理员判断所需的完整证据，并将安全、抽象的模式采纳为审核规则。',
       refresh: '刷新', statusLabel: 'CYB 复核状态', total: '共 {count} 条', empty: '当前状态下没有事件。', review: '复核', noPreview: '暂无安全预览。',
       previous: '上一页', next: '下一页', page: '第 {page} / {pages} 页', detailTitle: 'CYB 反馈详情',
-      safePreview: '脱敏预览', safePreviewHint: '仅显示服务端生成的脱敏片段；本页面不会返回原始输入或提示词 Hash。', safeMetadata: '安全元数据',
+      triggerContent: '未脱敏触发内容', triggerContentHint: '仅管理员可查看；显示本次请求按角色提取的未脱敏对话文本，不执行任何 HTML 或脚本，也不保存 Token、Cookie 或完整 Key。', reviewMetadata: '完整复核元数据',
+      evidenceUnavailable: '该历史事件在旧版本中未保存完整触发内容，且无法可靠恢复。为避免展示错误请求，不会从普通审计事件猜测回填。',
+      providerExplanation: 'OpenAI 上游只返回通用 cyber_policy 拒绝代码/消息，不会返回精确命中片段。候选规则是审核模型基于本次证据生成的抽象推断，需要管理员复核，不是 OpenAI 给出的确切原因。',
+      currentValue: '当前值，可能与触发时不同', identitySnapshot: '触发时快照', identityCurrent: '当前记录', identityUnavailable: '不可用',
+      currentIdentityWarning: '部分用户、Key 或账号身份来自当前数据记录，可能与请求触发时不同。',
       promptInjection: '{count} 条生效规则会自动加入审核提示词 · 配置版本 v{version}',
       promptInjectionHint: '采纳或撤销规则都会生成新配置版本；审核节点会自动使用已采纳的规则补充。',
       status: { pending: '待复核', approved: '已采纳', rejected: '已拒绝' },
       fields: {
-        requestId: 'Request ID', accountId: '账号 ID', groupId: '分组 ID', model: '模型', endpoint: '入口', protocol: '协议', stage: '阶段', transport: '传输方式', upstreamStatus: '上游状态码',
+        requestId: 'Request ID', accountId: '账号 ID', groupId: '分组 ID', userId: '调用用户 ID', username: '调用用户', userEmail: '用户邮箱', apiKeyId: 'API Key ID', apiKeyName: 'API Key 名称', apiKeyPrefix: 'API Key 安全前缀', group: '调用分组', selectedAccount: '调度账号', credentialAccount: '实际 OAuth 凭据账号', credentialAccountEmail: '凭据账号邮箱', identitySource: '身份来源', clientIp: '客户端 IP', userAgent: 'User-Agent', clientRequestId: '客户端 Request ID', model: '模型', endpoint: '入口', protocol: '协议', stage: '阶段', transport: '传输方式', upstreamStatus: '上游状态码', upstreamCode: '上游错误代码', upstreamMessage: '上游消息', promptLength: '字符数', messageCount: '消息数', truncated: '证据已截断',
         confirmCount: '确认次数', similarCount: '相似事件数', firstConfirmed: '首次确认', lastConfirmed: '最近确认', reviewedAt: '复核时间', reviewedBy: '复核管理员 ID', ruleId: '规则 ID', configVersion: '配置版本', adminAlert: '管理员告警',
       },
       generation: {
-        pending: '系统正在自动生成抽象候选规则，无需手工总结。', failed: '候选规则生成失败。', regenerate: '重新生成候选规则', unknownError: 'candidate_generation_failed',
+        pending: '系统正在自动生成中文抽象候选规则，无需手工总结。', failed: '候选规则生成失败。', regenerate: '重新生成候选规则', unavailableWithoutEvidence: '没有可靠的原始证据，无法重新生成；已有候选仍可直接编辑。', unknownError: 'candidate_generation_failed',
       },
       adopt: {
         ruleLabel: '系统生成的候选规则', rulePlaceholder: '等待系统自动生成抽象规则…',
@@ -151,7 +155,7 @@ export default {
       rules: { title: '生效规则', description: '当前已加入审核提示词的抽象规则。', empty: '暂无生效的 CYB 规则。', revoke: '撤销' },
       messages: { adopted: '规则已采纳，审核配置已更新到 v{version}。', rejected: '反馈已拒绝。', revoked: '规则已撤销，审核配置已更新到 v{version}。', regenerating: '已启动候选规则重新生成。' },
       errors: {
-        load: '无法加载 CYB 反馈。', adopt: '无法采纳此规则。', reject: '无法拒绝此反馈。', revoke: '无法撤销此规则。', regenerate: '无法重新生成候选规则。',
+        load: '无法加载 CYB 反馈。', detail: '无法加载 CYB 详情。', evidence: '无法加载未脱敏 CYB 证据。', adopt: '无法采纳此规则。', reject: '无法拒绝此反馈。', revoke: '无法撤销此规则。', regenerate: '无法重新生成候选规则。',
         configConflict: '其他会话已更新审核配置，页面已刷新到最新版本；请复核后重试。',
       },
     },

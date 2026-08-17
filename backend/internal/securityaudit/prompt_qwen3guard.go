@@ -218,10 +218,7 @@ func (s *OpenAICompatibleScanner) Scan(ctx context.Context, endpoint ActiveEndpo
 			"seed":        42,
 		}
 	case AdapterConfidenceJSON:
-		systemPrompt := strings.TrimSpace(endpoint.SystemPrompt)
-		if systemPrompt == "" {
-			systemPrompt = DefaultPromptAuditSystemPrompt
-		}
+		systemPrompt := confidenceJSONSystemPrompt(endpoint.SystemPrompt)
 		payload = map[string]any{
 			"model": endpoint.Model,
 			"messages": []map[string]string{

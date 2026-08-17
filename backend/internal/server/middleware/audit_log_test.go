@@ -150,6 +150,11 @@ func TestPromptAuditMutationAuditRoutesHaveStableActionsAndOmitBodies(t *testing
 	}
 }
 
+func TestPromptAuditCyberEvidenceReadIsAudited(t *testing.T) {
+	require.Equal(t, "admin.prompt_audit.cyber.evidence.read",
+		auditSensitiveReads["GET /api/v1/admin/prompt-audit/cyber/events/:id/evidence"])
+}
+
 func TestPasskeyLoginAuditUsesCanonicalLoginActionAndOmitsCredentialBody(t *testing.T) {
 	route := "POST /api/v1/auth/passkey/login/finish"
 	require.Equal(t, service.AuditActionLogin, auditActionOverrides[route])

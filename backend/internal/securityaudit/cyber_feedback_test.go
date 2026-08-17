@@ -6,6 +6,8 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"net/http"
+	"net/http/httptest"
 	"strings"
 	"sync"
 	"testing"
@@ -72,6 +74,9 @@ func (*cyberFeedbackRepositoryStub) ListCyberFeedback(context.Context, CyberFeed
 func (*cyberFeedbackRepositoryStub) GetCyberFeedback(context.Context, int64) (CyberFeedback, error) {
 	return CyberFeedback{}, ErrCyberFeedbackNotFound
 }
+func (*cyberFeedbackRepositoryStub) GetCyberFeedbackEvidence(context.Context, int64) (CyberFeedbackEvidence, error) {
+	return CyberFeedbackEvidence{}, ErrCyberFeedbackNotFound
+}
 func (*cyberFeedbackRepositoryStub) ReviewCyberFeedback(context.Context, int64, string, int64, string, int64) (CyberFeedback, error) {
 	return CyberFeedback{}, nil
 }
@@ -94,12 +99,43 @@ func TestConfirmRecordsMetadataWithoutFingerprint(t *testing.T) {
 	require.True(t, ok)
 	require.Empty(t, evidence.Scope.PromptSignature)
 
-	feedback, inserted, err := serviceUnderTest.ConfirmOpenAIOAuthCYB(context.Background(), evidence, 88, 400)
+	feedback, inserted, err := serviceUnderTest.ConfirmOpenAIOAuthCYB(context.Background(), evidence, CyberUpstreamConfirmation{AccountID: 88, UpstreamStatus: 400})
 	require.NoError(t, err)
 	require.True(t, inserted)
 	require.Equal(t, int64(1), feedback.ID)
 	require.Len(t, repo.confirmed, 1)
 	require.Empty(t, repo.confirmed[0].Scope.PromptSignature)
+}
+
+func TestConfirmSnapshotsAdminEvidenceAndUpstreamIdentity(t *testing.T) {
+	repo := &cyberFeedbackRepositoryStub{}
+	svc := NewCyberFeedbackService(repo, nil, &config.Config{}, nil, nil, nil)
+	groupID := int64(12)
+	evidence, ok := svc.PrepareTurn(Request{
+		RequestID: "req-evidence", UserID: 3, Username: "tester", UserEmail: "tester@example.test",
+		APIKeyID: 7, APIKeyName: "automation", APIKeyPrefix: "sk-safe1", GroupID: &groupID,
+		GroupName: "codex-pro", Provider: service.PlatformOpenAI, Protocol: "openai_chat_completions",
+		Body: []byte(`{"messages":[{"role":"user","content":"first"},{"role":"assistant","content":"reply"},{"role":"user","content":"second"}]}`),
+	}, 0)
+	require.True(t, ok)
+	_, inserted, err := svc.ConfirmOpenAIOAuthCYB(context.Background(), evidence, CyberUpstreamConfirmation{
+		AccountID: 20, AccountName: "shadow", CredentialAccountID: 10, CredentialAccountName: "oauth-parent",
+		CredentialAccountEmail: "oauth@example.test", ClientRequestID: "client-1", ClientIP: "192.0.2.10",
+		UserAgent: "test-agent", UpstreamStatus: 400, UpstreamCode: "cyber_policy", UpstreamMessage: "blocked",
+	})
+	require.NoError(t, err)
+	require.True(t, inserted)
+	require.Len(t, repo.confirmed, 1)
+	stored := repo.confirmed[0]
+	require.Equal(t, int64(3), stored.UserID)
+	require.Equal(t, "tester@example.test", stored.UserEmail)
+	require.Equal(t, "sk-safe1", stored.APIKeyPrefix)
+	require.Equal(t, int64(10), stored.CredentialAccountID)
+	require.Equal(t, "oauth@example.test", stored.CredentialAccountEmail)
+	require.Equal(t, "cyber_policy", stored.UpstreamCode)
+	require.Equal(t, "[user]\nfirst\n\n[assistant]\nreply\n\n[user]\nsecond", stored.FullPrompt)
+	require.Equal(t, len([]rune("second\n\nfirst\n\nreply")), stored.PromptLength)
+	require.Equal(t, 3, stored.MessageCount)
 }
 
 func TestResetCyberRuleGenerationUsesSingleWinnerCAS(t *testing.T) {
@@ -189,6 +225,42 @@ func TestBoundedCyberRuleSource(t *testing.T) {
 	require.Empty(t, evidence.snapshot.UsernameSnapshot)
 	require.Empty(t, evidence.snapshot.UserEmailSnapshot)
 	require.Zero(t, evidence.snapshot.APIKeyID)
+}
+
+func TestGenerateCyberRuleDraftSkipsEnglishAndReturnsChineseFromNextNode(t *testing.T) {
+	var englishCalls, chineseCalls int
+	english := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		englishCalls++
+		var payload struct {
+			Messages []struct {
+				Content string `json:"content"`
+			} `json:"messages"`
+		}
+		require.NoError(t, json.NewDecoder(r.Body).Decode(&payload))
+		require.Contains(t, payload.Messages[0].Content, "必须使用简体中文")
+		require.Contains(t, payload.Messages[1].Content, "简体中文的抽象规则")
+		_, _ = w.Write([]byte(`{"choices":[{"message":{"content":"{\"rule_text\":\"Reject requests seeking unauthorized access to third-party credentials\"}"}}]}`))
+	}))
+	defer english.Close()
+	chinese := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		chineseCalls++
+		_, _ = w.Write([]byte(`{"choices":[{"message":{"content":"{\"rule_text\":\"将针对第三方账号凭据的未授权获取或滥用请求判定为高风险\"}"}}]}`))
+	}))
+	defer chinese.Close()
+
+	cfg := ActiveConfig{Endpoints: []ActiveEndpoint{
+		{ID: "english", Priority: 1, Adapter: AdapterConfidenceJSON, BaseURL: english.URL, Model: "guard", TimeoutMS: 1000, InputLimit: 1000, Enabled: true},
+		{ID: "chinese", Priority: 2, Adapter: AdapterConfidenceJSON, BaseURL: chinese.URL, Model: "guard", TimeoutMS: 1000, InputLimit: 1000, Enabled: true},
+	}}
+	svc := &PromptService{config: &fakeConfigStore{cfg: cfg, active: true}, scanner: NewOpenAICompatibleScanner()}
+	candidate, err := svc.GenerateCyberRuleDraft(context.Background(), PromptSnapshot{ScanText: "confirmed abstract source"})
+	require.NoError(t, err)
+	require.Equal(t, "将针对第三方账号凭据的未授权获取或滥用请求判定为高风险", candidate)
+	require.Equal(t, 1, englishCalls)
+	require.Equal(t, 1, chineseCalls)
+	require.True(t, cyberRuleDraftUsesChinese(candidate))
+	require.False(t, cyberRuleDraftUsesChinese("Reject requests seeking unauthorized credential access 中"))
+	require.True(t, cyberRuleDraftUsesChinese("拒绝使用 OAuth 或 API 窃取他人账号凭据"))
 }
 
 type cyberReplayRepositoryStub struct {
@@ -420,6 +492,47 @@ func TestCyberCanonicalFingerprintPreservesRolesAndSegmentBoundaries(t *testing.
 	require.Equal(t, httpEvidence.Scope.PromptSignature, wsEvidence.Scope.PromptSignature)
 }
 
+func TestCyberEvidencePreservesConversationOrderRolesAndExactLimit(t *testing.T) {
+	segments := []promptSegment{
+		{role: "system", text: "follow policy"},
+		{role: "user", user: true, text: "first request"},
+		{role: "assistant", text: "first answer"},
+		{role: "user", user: true, text: "second request"},
+	}
+	evidence, truncated := buildCyberEvidenceText(segments, 65536)
+	require.False(t, truncated)
+	require.Equal(t, "[system]\nfollow policy\n\n[user]\nfirst request\n\n[assistant]\nfirst answer\n\n[user]\nsecond request", evidence)
+
+	exact, truncated := buildCyberEvidenceText([]promptSegment{{role: "user", text: strings.Repeat("x", MaxCyberEvidenceRunes-7)}}, MaxCyberEvidenceRunes)
+	require.False(t, truncated)
+	require.Len(t, []rune(exact), MaxCyberEvidenceRunes)
+	over, truncated := buildCyberEvidenceText([]promptSegment{{role: "user", text: strings.Repeat("x", MaxCyberEvidenceRunes-6)}}, MaxCyberEvidenceRunes)
+	require.True(t, truncated)
+	require.Len(t, []rune(over), MaxCyberEvidenceRunes)
+}
+
+func TestCyberEvidenceTextIsBuiltOnlyForConfirmedTurnCapturePath(t *testing.T) {
+	req := Request{Protocol: "openai_responses", Body: []byte(`{"input":"review this turn"}`)}
+	ordinary, err := ExtractPromptSnapshot(req)
+	require.NoError(t, err)
+	require.Empty(t, ordinary.CyberEvidenceText)
+
+	cyber, err := extractCyberPromptSnapshot(req)
+	require.NoError(t, err)
+	require.Equal(t, "[user]\nreview this turn", cyber.CyberEvidenceText)
+}
+
+func TestCyberListProjectionNeverSelectsEvidenceOrIdentitySecrets(t *testing.T) {
+	projection := strings.ToLower(cyberFeedbackListSelectColumns)
+	for _, forbidden := range []string{
+		"f.full_prompt,", "user_email_snapshot", "credential_account_email_snapshot",
+		"username_snapshot", "api_key_name_snapshot", "api_key_prefix_snapshot",
+		"client_ip_snapshot", "user_agent_snapshot", "upstream_message",
+	} {
+		require.NotContains(t, projection, forbidden)
+	}
+}
+
 func TestCyberEventNonceFallbackAndFeedbackJSONStaySafe(t *testing.T) {
 	original := cyberRandomRead
 	cyberRandomRead = func([]byte) (int, error) { return 0, errors.New("entropy unavailable") }
@@ -451,7 +564,7 @@ func TestCyberFeedbackPreviewWithholdsAllPromptText(t *testing.T) {
 	for _, forbidden := range []string{"Alice", "INTERNAL", "abcd1234"} {
 		require.NotContains(t, evidence.RedactedPreview, forbidden)
 	}
-	feedback, inserted, err := svc.ConfirmOpenAIOAuthCYB(context.Background(), evidence, 77, 400)
+	feedback, inserted, err := svc.ConfirmOpenAIOAuthCYB(context.Background(), evidence, CyberUpstreamConfirmation{AccountID: 77, UpstreamStatus: 400})
 	require.NoError(t, err)
 	require.True(t, inserted)
 	payload, err := json.Marshal(feedback)

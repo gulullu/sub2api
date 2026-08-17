@@ -82,7 +82,9 @@ func TestConfidenceJSONScannerUsesDeepSeekChatContract(t *testing.T) {
 		system := messages[0].(map[string]any)
 		user := messages[1].(map[string]any)
 		require.Equal(t, "system", system["role"])
-		require.Equal(t, "custom policy", system["content"])
+		require.Contains(t, system["content"], "custom policy")
+		require.Contains(t, system["content"], fixedMultilingualSemanticPolicy)
+		require.Equal(t, 1, strings.Count(system["content"].(string), fixedMultilingualSemanticPolicy))
 		require.Equal(t, "user", user["role"])
 		userContent := user["content"].(string)
 		require.Equal(t, 1, strings.Count(userContent, "</user_input>"))
@@ -97,6 +99,36 @@ func TestConfidenceJSONScannerUsesDeepSeekChatContract(t *testing.T) {
 	require.NoError(t, err)
 	require.Equal(t, EventFlag, result.Decision)
 	require.Equal(t, 0.55, result.Confidence)
+}
+
+func TestConfidenceJSONMultilingualPolicyAppliesToEveryFailoverNode(t *testing.T) {
+	var calls atomic.Int64
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		var payload struct {
+			Messages []struct {
+				Role    string `json:"role"`
+				Content string `json:"content"`
+			} `json:"messages"`
+		}
+		require.NoError(t, json.NewDecoder(r.Body).Decode(&payload))
+		require.Len(t, payload.Messages, 2)
+		require.Contains(t, payload.Messages[0].Content, fixedMultilingualSemanticPolicy)
+		require.Equal(t, 1, strings.Count(payload.Messages[0].Content, fixedMultilingualSemanticPolicy))
+		calls.Add(1)
+		_, _ = w.Write([]byte(`{"choices":[{"message":{"content":"{\"confidence\":0.05,\"reason\":\"\"}"}}]}`))
+	}))
+	defer server.Close()
+
+	scanner := NewOpenAICompatibleScanner()
+	for _, endpoint := range []ActiveEndpoint{
+		{ID: "confidence-primary", Adapter: AdapterConfidenceJSON, BaseURL: server.URL, Model: "guard-primary", TimeoutMS: 1000, SystemPrompt: "custom primary policy", FlagThreshold: 0.4, BlockThreshold: 0.7},
+		{ID: "confidence-secondary", Adapter: AdapterConfidenceJSON, BaseURL: server.URL, Model: "guard-secondary", TimeoutMS: 1000, SystemPrompt: "custom secondary policy", FlagThreshold: 0.4, BlockThreshold: 0.7},
+	} {
+		result, err := scanner.Scan(context.Background(), endpoint, "ጥቃት mixed %75%72%6c", AllScannerIDs)
+		require.NoError(t, err)
+		require.Equal(t, EventPass, result.Decision)
+	}
+	require.Equal(t, int64(2), calls.Load())
 }
 
 func TestOpenAICompatibleScannerFollowsRedirectAndRejectsOversize(t *testing.T) {

@@ -3245,8 +3245,22 @@ func (h *OpenAIGatewayHandler) recordCyberPolicyIfMarked(c *gin.Context, apiKey 
 	inboundEndpoint := GetInboundEndpoint(c)
 	upstreamEndpoint := ""
 	var accountID int64
+	var accountName string
+	var credentialAccountID int64
+	var credentialAccountName, credentialAccountEmail string
 	if account != nil {
 		accountID = account.ID
+		accountName = account.Name
+		credentialAccountID = account.ID
+		credentialAccountName = account.Name
+		credentialAccountEmail = account.GetCredential("email")
+		if account.ParentAccountID != nil && *account.ParentAccountID > 0 {
+			credentialAccountID = *account.ParentAccountID
+			// The selected shadow name is not the credential owner's name. The
+			// repository resolves the parent name by its exact ID when absent.
+			credentialAccountName = ""
+			credentialAccountEmail = ""
+		}
 		upstreamEndpoint = resolveOpenAIUpstreamEndpoint(c, account, nil)
 	}
 	stream := false
@@ -3330,7 +3344,14 @@ func (h *OpenAIGatewayHandler) recordCyberPolicyIfMarked(c *gin.Context, apiKey 
 		ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 		defer cancel()
 		if cyberSvc != nil && isOpenAIOAuth && hasCyberEvidence {
-			if _, _, err := cyberSvc.ConfirmOpenAIOAuthCYB(ctx, cyberEvidence, accountID, mark.UpstreamStatus); err != nil {
+			confirmation := securityaudit.CyberUpstreamConfirmation{
+				AccountID: accountID, AccountName: accountName,
+				CredentialAccountID: credentialAccountID, CredentialAccountName: credentialAccountName,
+				CredentialAccountEmail: credentialAccountEmail,
+				ClientRequestID:        clientRequestID, ClientIP: clientIPStr, UserAgent: userAgent,
+				UpstreamStatus: mark.UpstreamStatus, UpstreamCode: mark.Code, UpstreamMessage: mark.Message,
+			}
+			if _, _, err := cyberSvc.ConfirmOpenAIOAuthCYB(ctx, cyberEvidence, confirmation); err != nil {
 				logger.L().Warn("openai OAuth cyber feedback confirmation failed", zap.Int64("account_id", accountID), zap.Error(err))
 			}
 		}

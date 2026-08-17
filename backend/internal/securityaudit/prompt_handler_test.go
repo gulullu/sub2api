@@ -104,6 +104,7 @@ func promptAdminRouter(service PromptAdminService) *gin.Engine {
 	group.POST("/events/delete-by-filter", handler.DeleteByFilter)
 	group.GET("/cyber/events", handler.ListCyberFeedback)
 	group.GET("/cyber/events/:id", handler.GetCyberFeedback)
+	group.GET("/cyber/events/:id/evidence", handler.GetCyberFeedbackEvidence)
 	group.POST("/cyber/events/:id/adopt", handler.AdoptCyberFeedback)
 	group.POST("/cyber/events/:id/reject", handler.RejectCyberFeedback)
 	group.POST("/cyber/events/:id/regenerate", handler.RegenerateCyberRuleDraft)
@@ -114,20 +115,24 @@ func promptAdminRouter(service PromptAdminService) *gin.Engine {
 
 type fakePromptCyberAdminService struct {
 	*fakePromptAdminService
-	listCyber  func(context.Context, CyberFeedbackFilter, int, int) (*CyberFeedbackPage, error)
-	getCyber   func(context.Context, int64) (*CyberFeedbackAdminDTO, error)
-	listRules  func(context.Context) (*CyberRulesPage, error)
-	adopt      func(context.Context, int64, AdoptCyberFeedbackRequest, int64) (*CyberFeedbackActionResult, error)
-	reject     func(context.Context, int64, RejectCyberFeedbackRequest, int64) (*CyberFeedbackActionResult, error)
-	revoke     func(context.Context, string, RevokeCyberRuleRequest, int64) (*CyberFeedbackActionResult, error)
-	regenerate func(context.Context, int64, int64) (*CyberFeedbackActionResult, error)
+	listCyber   func(context.Context, CyberFeedbackFilter, int, int) (*CyberFeedbackPage, error)
+	getCyber    func(context.Context, int64) (*CyberFeedbackAdminDetailDTO, error)
+	getEvidence func(context.Context, int64) (*CyberFeedbackEvidenceAdminDTO, error)
+	listRules   func(context.Context) (*CyberRulesPage, error)
+	adopt       func(context.Context, int64, AdoptCyberFeedbackRequest, int64) (*CyberFeedbackActionResult, error)
+	reject      func(context.Context, int64, RejectCyberFeedbackRequest, int64) (*CyberFeedbackActionResult, error)
+	revoke      func(context.Context, string, RevokeCyberRuleRequest, int64) (*CyberFeedbackActionResult, error)
+	regenerate  func(context.Context, int64, int64) (*CyberFeedbackActionResult, error)
 }
 
 func (s *fakePromptCyberAdminService) ListCyberFeedbackAdmin(ctx context.Context, filter CyberFeedbackFilter, page, pageSize int) (*CyberFeedbackPage, error) {
 	return s.listCyber(ctx, filter, page, pageSize)
 }
-func (s *fakePromptCyberAdminService) GetCyberFeedbackAdmin(ctx context.Context, id int64) (*CyberFeedbackAdminDTO, error) {
+func (s *fakePromptCyberAdminService) GetCyberFeedbackAdmin(ctx context.Context, id int64) (*CyberFeedbackAdminDetailDTO, error) {
 	return s.getCyber(ctx, id)
+}
+func (s *fakePromptCyberAdminService) GetCyberFeedbackEvidenceAdmin(ctx context.Context, id int64) (*CyberFeedbackEvidenceAdminDTO, error) {
+	return s.getEvidence(ctx, id)
 }
 func (s *fakePromptCyberAdminService) ListCyberRulesAdmin(ctx context.Context) (*CyberRulesPage, error) {
 	return s.listRules(ctx)
@@ -196,6 +201,21 @@ func TestPromptAdminConfigRequiresVersionMapsConflictAndNeverEchoesToken(t *test
 		require.NotContains(t, body, `"token":`)
 		require.Contains(t, body, `"has_token":true`)
 	})
+}
+
+func TestPromptAdminCyberEvidenceResponseIsNoStore(t *testing.T) {
+	base := &fakePromptAdminService{}
+	service := &fakePromptCyberAdminService{
+		fakePromptAdminService: base,
+		getEvidence: func(context.Context, int64) (*CyberFeedbackEvidenceAdminDTO, error) {
+			return &CyberFeedbackEvidenceAdminDTO{Available: true, FullPrompt: "[user]\ncanary"}, nil
+		},
+	}
+	recorder := promptAdminRequest(t, promptAdminRouter(service), http.MethodGet, "/admin/prompt-audit/cyber/events/9/evidence", nil)
+	require.Equal(t, http.StatusOK, recorder.Code)
+	require.Equal(t, "private, no-store, max-age=0", recorder.Header().Get("Cache-Control"))
+	require.Equal(t, "no-cache", recorder.Header().Get("Pragma"))
+	require.Contains(t, recorder.Body.String(), "canary")
 }
 
 func TestPromptAdminGetConfigReturnsSecretFreeUnavailableError(t *testing.T) {
@@ -305,7 +325,9 @@ func TestPromptCyberAdminRoutesBindCASAndNeverRequireRawCaseImport(t *testing.T)
 		require.Empty(t, request.RuleText, "empty adopts the separately generated candidate; no raw prompt field exists")
 		return &CyberFeedbackActionResult{ConfigVersion: 10, Rule: &CyberSupplementRule{ID: "cyb-feedback-51", Status: "active"}}, nil
 	}
-	service.getCyber = func(context.Context, int64) (*CyberFeedbackAdminDTO, error) { return &CyberFeedbackAdminDTO{}, nil }
+	service.getCyber = func(context.Context, int64) (*CyberFeedbackAdminDetailDTO, error) {
+		return &CyberFeedbackAdminDetailDTO{}, nil
+	}
 	service.listRules = func(context.Context) (*CyberRulesPage, error) { return &CyberRulesPage{}, nil }
 	service.reject = func(context.Context, int64, RejectCyberFeedbackRequest, int64) (*CyberFeedbackActionResult, error) {
 		return &CyberFeedbackActionResult{}, nil

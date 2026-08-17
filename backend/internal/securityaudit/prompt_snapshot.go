@@ -31,23 +31,34 @@ type promptSegment struct {
 }
 
 func ExtractPromptSnapshot(req Request) (PromptSnapshot, error) {
-	return extractPromptSnapshot(req, false)
+	return extractPromptSnapshot(req, false, false)
 }
 
 // ExtractBlockingPromptSnapshot builds the narrow, low-latency blocking input
 // when configured. Asynchronous auditing always uses ExtractPromptSnapshot so
 // the complete client-controlled transcript is retained for review.
 func ExtractBlockingPromptSnapshot(req Request, latestTurnOnly bool) (PromptSnapshot, error) {
-	return extractPromptSnapshot(req, latestTurnOnly)
+	return extractPromptSnapshot(req, latestTurnOnly, false)
 }
 
-func extractPromptSnapshot(req Request, latestTurnOnly bool) (PromptSnapshot, error) {
+func extractCyberPromptSnapshot(req Request) (PromptSnapshot, error) {
+	return extractPromptSnapshot(req, false, true)
+}
+
+func extractPromptSnapshot(req Request, latestTurnOnly, includeCyberEvidence bool) (PromptSnapshot, error) {
 	var document any
 	if err := json.Unmarshal(req.Body, &document); err != nil {
 		return PromptSnapshot{}, errors.New("prompt audit request JSON is invalid")
 	}
 	extracted := extractProtocolSegments(req.Protocol, document)
-	canonicalDigest := cyberCanonicalPromptDigest(normalizedPromptSegments(extracted))
+	normalized := normalizedPromptSegments(extracted)
+	var canonicalDigest []byte
+	cyberEvidenceText := ""
+	cyberEvidenceTruncated := false
+	if includeCyberEvidence {
+		canonicalDigest = cyberCanonicalPromptDigest(normalized)
+		cyberEvidenceText, cyberEvidenceTruncated = buildCyberEvidenceText(normalized, MaxCyberEvidenceRunes)
+	}
 	segments := normalizeSegmentsLatestUserFirst(extracted)
 	if latestTurnOnly {
 		segments = blockingSegmentsLatestUserAndPreviousOutput(extracted)
@@ -64,13 +75,45 @@ func extractPromptSnapshot(req Request, latestTurnOnly bool) (PromptSnapshot, er
 	return PromptSnapshot{
 		RequestID: req.RequestID, UserID: req.UserID, UsernameSnapshot: req.Username,
 		UserEmailSnapshot: req.UserEmail, APIKeyID: req.APIKeyID, APIKeyNameSnapshot: req.APIKeyName,
-		GroupID: cloneInt64Ptr(req.GroupID), GroupName: req.GroupName, Provider: req.Provider,
+		APIKeyPrefixSnapshot: req.APIKeyPrefix,
+		GroupID:              cloneInt64Ptr(req.GroupID), GroupName: req.GroupName, Provider: req.Provider,
 		Endpoint: req.Endpoint, Protocol: req.Protocol, Model: req.Model,
 		PromptHash: hex.EncodeToString(digest[:]), RedactedPreview: BuildPromptPreview(metadataText, DefaultPromptPreviewMaxRunes),
 		FullPrompt:   BuildFullPrompt(metadataText, DefaultFullPromptMaxRunes),
 		PromptLength: utf8.RuneCountInString(metadataText), MessageCount: len(segments), Stage: stage,
-		ScanText: scanText, cyberCanonicalDigest: canonicalDigest,
+		ScanText: scanText, CyberEvidenceText: cyberEvidenceText,
+		CyberEvidenceTruncated: cyberEvidenceTruncated, cyberCanonicalDigest: canonicalDigest,
 	}, nil
+}
+
+// buildCyberEvidenceText formats the normalized conversation in original
+// order with explicit roles. It stores only extracted text, never the inbound
+// JSON envelope, tool credentials, headers, or other request metadata.
+func buildCyberEvidenceText(segments []promptSegment, maxRunes int) (string, bool) {
+	if maxRunes < 1 {
+		maxRunes = MaxCyberEvidenceRunes
+	}
+	parts := make([]string, 0, len(segments))
+	for _, segment := range segments {
+		role := strings.ToLower(strings.TrimSpace(segment.role))
+		if role == "" {
+			if segment.user {
+				role = "user"
+			} else {
+				role = "unknown"
+			}
+		}
+		text := strings.TrimSpace(strings.ReplaceAll(segment.text, "\x00", ""))
+		if text != "" {
+			parts = append(parts, "["+role+"]\n"+text)
+		}
+	}
+	value := strings.Join(parts, "\n\n")
+	runes := []rune(value)
+	if len(runes) <= maxRunes {
+		return value, false
+	}
+	return string(runes[:maxRunes]), true
 }
 
 func cyberCanonicalPromptDigest(segments []promptSegment) []byte {
@@ -104,6 +147,11 @@ const DefaultPromptPreviewMaxRunes = 96
 // on an audit event for admin review. It is deliberately generous so realistic
 // prompts are kept intact while bounding per-row storage.
 const DefaultFullPromptMaxRunes = 65536
+
+// MaxCyberEvidenceRunes matches the largest accepted prompt-audit input. CYB
+// confirmations are rare, and keeping the complete normalized conversation is
+// more useful to administrators than applying the ordinary audit-event cap.
+const MaxCyberEvidenceRunes = 400000
 
 func extractProtocolSegments(protocol string, document any) []promptSegment {
 	root, _ := document.(map[string]any)

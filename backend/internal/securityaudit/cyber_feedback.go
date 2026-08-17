@@ -72,55 +72,136 @@ type CyberTurnEvidence struct {
 }
 
 type CyberConfirmInput struct {
-	Scope           CyberFingerprintScope
-	EventKey        string
-	RequestID       string
-	TurnNumber      int
-	APIKeyID        int64
-	GroupID         int64
-	AccountID       int64
-	Model           string
-	Endpoint        string
-	Protocol        string
-	Transport       string
-	Stage           string
-	UpstreamStatus  int
-	RedactedPreview string
-	ExpiresAt       time.Time
+	Scope                  CyberFingerprintScope
+	EventKey               string
+	RequestID              string
+	TurnNumber             int
+	APIKeyID               int64
+	UserID                 int64
+	Username               string
+	UserEmail              string
+	APIKeyName             string
+	APIKeyPrefix           string
+	GroupID                int64
+	GroupName              string
+	AccountID              int64
+	AccountName            string
+	CredentialAccountID    int64
+	CredentialAccountName  string
+	CredentialAccountEmail string
+	ClientRequestID        string
+	ClientIP               string
+	UserAgent              string
+	Model                  string
+	Endpoint               string
+	Protocol               string
+	Transport              string
+	Stage                  string
+	UpstreamStatus         int
+	UpstreamCode           string
+	UpstreamMessage        string
+	RedactedPreview        string
+	FullPrompt             string
+	PromptLength           int
+	MessageCount           int
+	FullPromptTruncated    bool
+	ExpiresAt              time.Time
+}
+
+type CyberUpstreamConfirmation struct {
+	AccountID              int64
+	AccountName            string
+	CredentialAccountID    int64
+	CredentialAccountName  string
+	CredentialAccountEmail string
+	ClientRequestID        string
+	ClientIP               string
+	UserAgent              string
+	UpstreamStatus         int
+	UpstreamCode           string
+	UpstreamMessage        string
 }
 
 // CyberFeedback is safe for admin APIs. The HMAC and its version are repository
 // internals and are deliberately excluded from JSON.
 type CyberFeedback struct {
-	ID                    int64      `json:"id"`
-	SignatureID           int64      `json:"-"`
-	SignatureVersion      string     `json:"-"`
-	PromptSignature       []byte     `json:"-"`
-	RequestID             string     `json:"request_id"`
-	TurnNumber            int        `json:"turn_number"`
-	APIKeyID              *int64     `json:"-"`
-	GroupID               int64      `json:"group_id"`
-	AccountID             int64      `json:"account_id"`
-	Model                 string     `json:"model"`
-	Endpoint              string     `json:"endpoint"`
-	Protocol              string     `json:"protocol"`
-	Transport             string     `json:"transport"`
-	Stage                 string     `json:"stage"`
-	UpstreamStatus        int        `json:"upstream_status"`
-	RedactedPreview       string     `json:"redacted_preview"`
-	SignatureConfirmCount int64      `json:"signature_confirm_count"`
-	FirstConfirmedAt      *time.Time `json:"first_confirmed_at,omitempty"`
-	LastConfirmedAt       *time.Time `json:"last_confirmed_at,omitempty"`
-	GenerationStatus      string     `json:"generation_status"`
-	GenerationErrorCode   string     `json:"generation_error_code,omitempty"`
-	CandidateRuleText     string     `json:"candidate_rule_text,omitempty"`
-	ReviewStatus          string     `json:"review_status"`
-	ReviewedBy            *int64     `json:"reviewed_by,omitempty"`
-	ReviewedAt            *time.Time `json:"reviewed_at,omitempty"`
-	RuleID                string     `json:"rule_id,omitempty"`
-	ConfigVersion         int64      `json:"config_version"`
-	CreatedAt             time.Time  `json:"created_at"`
-	UpdatedAt             time.Time  `json:"updated_at"`
+	ID                     int64      `json:"id"`
+	SignatureID            int64      `json:"-"`
+	SignatureVersion       string     `json:"-"`
+	PromptSignature        []byte     `json:"-"`
+	RequestID              string     `json:"request_id"`
+	TurnNumber             int        `json:"turn_number"`
+	APIKeyID               *int64     `json:"-"`
+	UserID                 int64      `json:"-"`
+	UsernameSnapshot       string     `json:"-"`
+	UserEmailSnapshot      string     `json:"-"`
+	APIKeyNameSnapshot     string     `json:"-"`
+	APIKeyPrefixSnapshot   string     `json:"-"`
+	GroupID                int64      `json:"group_id"`
+	GroupNameSnapshot      string     `json:"-"`
+	AccountID              int64      `json:"account_id"`
+	AccountNameSnapshot    string     `json:"-"`
+	CredentialAccountID    int64      `json:"-"`
+	CredentialAccountName  string     `json:"-"`
+	CredentialAccountEmail string     `json:"-"`
+	ClientRequestID        string     `json:"-"`
+	ClientIP               string     `json:"-"`
+	UserAgent              string     `json:"-"`
+	Model                  string     `json:"model"`
+	Endpoint               string     `json:"endpoint"`
+	Protocol               string     `json:"protocol"`
+	Transport              string     `json:"transport"`
+	Stage                  string     `json:"stage"`
+	UpstreamStatus         int        `json:"upstream_status"`
+	UpstreamCode           string     `json:"-"`
+	UpstreamMessage        string     `json:"-"`
+	RedactedPreview        string     `json:"redacted_preview"`
+	FullPrompt             string     `json:"-"`
+	PromptLength           int        `json:"-"`
+	MessageCount           int        `json:"-"`
+	FullPromptTruncated    bool       `json:"-"`
+	SignatureConfirmCount  int64      `json:"signature_confirm_count"`
+	FirstConfirmedAt       *time.Time `json:"first_confirmed_at,omitempty"`
+	LastConfirmedAt        *time.Time `json:"last_confirmed_at,omitempty"`
+	GenerationStatus       string     `json:"generation_status"`
+	GenerationErrorCode    string     `json:"generation_error_code,omitempty"`
+	CandidateRuleText      string     `json:"candidate_rule_text,omitempty"`
+	ReviewStatus           string     `json:"review_status"`
+	ReviewedBy             *int64     `json:"reviewed_by,omitempty"`
+	ReviewedAt             *time.Time `json:"reviewed_at,omitempty"`
+	RuleID                 string     `json:"rule_id,omitempty"`
+	ConfigVersion          int64      `json:"config_version"`
+	CreatedAt              time.Time  `json:"created_at"`
+	UpdatedAt              time.Time  `json:"updated_at"`
+}
+
+// CyberFeedbackEvidence is loaded only for the administrator evidence
+// endpoint. It is intentionally separate from list/detail metadata so
+// ordinary queries cannot accidentally select raw prompt or identity fields.
+type CyberFeedbackEvidence struct {
+	ID                           int64
+	FullPrompt                   string
+	PromptLength                 int
+	MessageCount                 int
+	FullPromptTruncated          bool
+	UserID                       int64
+	Username                     string
+	UserEmail                    string
+	APIKeyID                     int64
+	APIKeyName                   string
+	APIKeyPrefix                 string
+	GroupID                      int64
+	GroupName                    string
+	SelectedAccountID            int64
+	SelectedAccountName          string
+	CredentialAccountID          int64
+	CredentialAccountName        string
+	CredentialAccountEmail       string
+	CredentialAccountEmailSource string
+	IdentitySource               string
+	ClientRequestID              string
+	ClientIP                     string
+	UserAgent                    string
 }
 
 // CyberActiveSignature is the bounded database-to-Redis warmup projection.
@@ -145,6 +226,7 @@ type CyberFeedbackRepository interface {
 	ListActiveSignatures(ctx context.Context, groupID int64, signatureVersion string, afterID int64, limit int) ([]CyberActiveSignature, error)
 	ListCyberFeedback(ctx context.Context, filter CyberFeedbackFilter, page, pageSize int) ([]CyberFeedback, int64, error)
 	GetCyberFeedback(ctx context.Context, id int64) (CyberFeedback, error)
+	GetCyberFeedbackEvidence(ctx context.Context, id int64) (CyberFeedbackEvidence, error)
 	ReviewCyberFeedback(ctx context.Context, id int64, status string, actorID int64, ruleID string, configVersion int64) (CyberFeedback, error)
 	ResetCyberRuleGeneration(ctx context.Context, id int64) error
 	CompleteCyberRuleGeneration(ctx context.Context, id int64, candidateRuleText, errorCode string) error
@@ -230,7 +312,7 @@ func (s *CyberFeedbackService) PrepareTurn(req Request, turnNumber int) (CyberTu
 		Endpoint: req.Endpoint, Transport: transport, Stage: stage, TurnNumber: turnNumber,
 		EventNonce: newCyberEventNonce(),
 	}
-	snapshot, err := ExtractPromptSnapshot(req)
+	snapshot, err := extractCyberPromptSnapshot(req)
 	if err != nil {
 		return evidence, true
 	}
@@ -281,17 +363,41 @@ func (s *CyberFeedbackService) IsReplay(ctx context.Context, evidence CyberTurnE
 	return s.replayMemberActive(ctx, zsetKey, member)
 }
 
-func (s *CyberFeedbackService) ConfirmOpenAIOAuthCYB(ctx context.Context, evidence CyberTurnEvidence, accountID int64, upstreamStatus int) (CyberFeedback, bool, error) {
-	if s == nil || s.repo == nil || accountID <= 0 {
+func (s *CyberFeedbackService) ConfirmOpenAIOAuthCYB(
+	ctx context.Context,
+	evidence CyberTurnEvidence,
+	confirmation CyberUpstreamConfirmation,
+) (CyberFeedback, bool, error) {
+	if s == nil || s.repo == nil || confirmation.AccountID <= 0 {
 		return CyberFeedback{}, false, errors.New("cyber feedback service unavailable")
+	}
+	if confirmation.CredentialAccountID <= 0 {
+		confirmation.CredentialAccountID = confirmation.AccountID
 	}
 	now := s.clock.Now()
 	input := CyberConfirmInput{
-		Scope: evidence.Scope, EventKey: cyberEventKey(evidence, accountID), RequestID: evidence.RequestID,
-		TurnNumber: evidence.TurnNumber, APIKeyID: evidence.APIKeyID, GroupID: evidence.Scope.GroupID,
-		AccountID: accountID, Model: evidence.Model, Endpoint: evidence.Endpoint, Protocol: evidence.Scope.Protocol,
-		Transport: evidence.Transport, Stage: evidence.Scope.Stage, UpstreamStatus: upstreamStatus,
-		RedactedPreview: evidence.RedactedPreview, ExpiresAt: now.Add(CyberSignatureTTL),
+		Scope: evidence.Scope, EventKey: cyberEventKey(evidence, confirmation.AccountID), RequestID: evidence.RequestID,
+		TurnNumber: evidence.TurnNumber, APIKeyID: evidence.APIKeyID,
+		UserID: evidence.snapshot.UserID, Username: boundedCyberEvidenceText(evidence.snapshot.UsernameSnapshot, 320),
+		UserEmail:    boundedCyberEvidenceText(evidence.snapshot.UserEmailSnapshot, 512),
+		APIKeyName:   boundedCyberEvidenceText(evidence.snapshot.APIKeyNameSnapshot, 320),
+		APIKeyPrefix: boundedCyberEvidenceText(evidence.snapshot.APIKeyPrefixSnapshot, 32),
+		GroupID:      evidence.Scope.GroupID, GroupName: boundedCyberEvidenceText(evidence.snapshot.GroupName, 320),
+		AccountID: confirmation.AccountID, AccountName: boundedCyberEvidenceText(confirmation.AccountName, 320),
+		CredentialAccountID:    confirmation.CredentialAccountID,
+		CredentialAccountName:  boundedCyberEvidenceText(confirmation.CredentialAccountName, 320),
+		CredentialAccountEmail: boundedCyberEvidenceText(confirmation.CredentialAccountEmail, 512),
+		ClientRequestID:        boundedCyberEvidenceText(confirmation.ClientRequestID, 320),
+		ClientIP:               boundedCyberEvidenceText(confirmation.ClientIP, 128),
+		UserAgent:              boundedCyberEvidenceText(confirmation.UserAgent, 1024),
+		Model:                  evidence.Model, Endpoint: evidence.Endpoint, Protocol: evidence.Scope.Protocol,
+		Transport: evidence.Transport, Stage: evidence.Scope.Stage, UpstreamStatus: confirmation.UpstreamStatus,
+		UpstreamCode:    boundedCyberEvidenceText(confirmation.UpstreamCode, 128),
+		UpstreamMessage: boundedCyberEvidenceText(confirmation.UpstreamMessage, 4000),
+		RedactedPreview: evidence.RedactedPreview, FullPrompt: evidence.snapshot.CyberEvidenceText,
+		PromptLength: evidence.snapshot.PromptLength, MessageCount: evidence.snapshot.MessageCount,
+		FullPromptTruncated: evidence.snapshot.CyberEvidenceTruncated,
+		ExpiresAt:           now.Add(CyberSignatureTTL),
 	}
 	feedback, inserted, err := s.repo.Confirm(ctx, input)
 	if err != nil {
@@ -609,10 +715,28 @@ func (s *CyberFeedbackService) clearWarmFailure(signatureVersion string) {
 func minimalCyberGenerationSnapshot(snapshot PromptSnapshot) PromptSnapshot {
 	return PromptSnapshot{
 		RequestID: snapshot.RequestID, GroupID: cloneInt64Ptr(snapshot.GroupID),
-		Provider: snapshot.Provider, Endpoint: snapshot.Endpoint, Protocol: snapshot.Protocol,
+		UserID: snapshot.UserID, UsernameSnapshot: snapshot.UsernameSnapshot,
+		UserEmailSnapshot: snapshot.UserEmailSnapshot, APIKeyID: snapshot.APIKeyID,
+		APIKeyNameSnapshot: snapshot.APIKeyNameSnapshot, APIKeyPrefixSnapshot: snapshot.APIKeyPrefixSnapshot,
+		GroupName: snapshot.GroupName,
+		Provider:  snapshot.Provider, Endpoint: snapshot.Endpoint, Protocol: snapshot.Protocol,
 		Model: snapshot.Model, RedactedPreview: cyberContentWithheldSummary(snapshot), Stage: snapshot.Stage,
-		ScanText: boundedCyberRuleSource(snapshot.ScanText),
+		ScanText:     boundedCyberRuleSource(snapshot.ScanText),
+		PromptLength: snapshot.PromptLength, MessageCount: snapshot.MessageCount,
+		CyberEvidenceText: snapshot.CyberEvidenceText, CyberEvidenceTruncated: snapshot.CyberEvidenceTruncated,
 	}
+}
+
+func boundedCyberEvidenceText(value string, maxRunes int) string {
+	value = strings.TrimSpace(strings.ReplaceAll(value, "\x00", ""))
+	if maxRunes < 1 {
+		return ""
+	}
+	runes := []rune(value)
+	if len(runes) <= maxRunes {
+		return value
+	}
+	return string(runes[:maxRunes])
 }
 
 func cyberContentWithheldSummary(snapshot PromptSnapshot) string {
