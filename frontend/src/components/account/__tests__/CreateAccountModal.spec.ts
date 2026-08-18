@@ -145,6 +145,17 @@ async function openCodexImportStep(toggleClicks = 0) {
   return wrapper
 }
 
+describe('CreateAccountModal Grok API key defaults', () => {
+  it('renders the official xAI endpoint and key placeholder', async () => {
+    const wrapper = mountModal()
+    await selectButtonByText(wrapper, 'Grok')
+    await selectButtonByText(wrapper, 'API Key')
+
+    expect(wrapper.find('input[placeholder="https://api.x.ai/v1"]').exists()).toBe(true)
+    expect(wrapper.find('input[type="password"][placeholder="xai-..."]').exists()).toBe(true)
+  })
+})
+
 describe('CreateAccountModal OpenAI long-context billing', () => {
   beforeEach(() => {
     createAccountMock.mockReset().mockResolvedValue({ id: 42, platform: 'openai', type: 'apikey' })
