@@ -147,6 +147,54 @@ func TestParseConfidenceJSONPreservesCompleteSanitizedReason(t *testing.T) {
 	require.Equal(t, result.Reason, result.ScannerEvidence[confidenceScoreKey])
 }
 
+func TestParseOpenAIModerationUsesFlaggedAsAuthoritativeBlock(t *testing.T) {
+	body := []byte(`{"results":[{"flagged":true,"categories":{"violence":true,"illicit/violent":true,"sexual":false,"self-harm/instructions":true,"harassment":true},"category_scores":{"violence":0.12,"illicit/violent":0.22,"sexual":0.99,"self-harm/instructions":0.31,"harassment":0.41}}]}`)
+	result, err := ParseOpenAIModeration(body, ActiveEndpoint{Model: DefaultOpenAIModerationModel, FlagThreshold: 0.99, BlockThreshold: 1}, AllScannerIDs)
+	require.NoError(t, err)
+	require.Equal(t, EventCritical, result.Decision)
+	require.Equal(t, ActionBlock, result.Action)
+	require.Equal(t, []string{"violent", "suicide_and_self_harm", "unethical_acts"}, result.Categories)
+	require.Equal(t, result.Categories, result.MatchedScanners)
+	require.Equal(t, 0.22, result.ScannerScores["violent"])
+	require.Equal(t, 0.99, result.ScannerScores["sexual_content_or_sexual_acts"], "scores are evidence even when that category is not flagged")
+	require.Contains(t, result.Reason, "暴力或暴力型违法风险")
+	require.NotContains(t, result.Reason, "user input")
+	require.Equal(t, "openai-moderation", result.ScannerBackend)
+}
+
+func TestParseOpenAIModerationFlaggedFalseAlwaysPassesDespiteScores(t *testing.T) {
+	result, err := ParseOpenAIModeration([]byte(`{"results":[{"flagged":false,"categories":{"sexual":false},"category_scores":{"sexual":0.999}}]}`), ActiveEndpoint{}, AllScannerIDs)
+	require.NoError(t, err)
+	require.Equal(t, EventPass, result.Decision)
+	require.Equal(t, ActionAllow, result.Action)
+	require.Empty(t, result.Reason)
+	require.Equal(t, 0.999, result.Confidence)
+
+	for _, invalid := range []string{
+		`{}`,
+		`{"results":[]}`,
+		`{"results":[{"categories":{},"category_scores":{}}]}`,
+		`{"results":[{"flagged":true,"categories":{},"category_scores":{"violence":1.2}}]}`,
+	} {
+		_, err := ParseOpenAIModeration([]byte(invalid), ActiveEndpoint{}, AllScannerIDs)
+		require.Error(t, err)
+	}
+}
+
+func TestParseOpenAIModerationHonorsDisabledMappedScanners(t *testing.T) {
+	body := []byte(`{"results":[{"flagged":true,"categories":{"violence":true},"category_scores":{"violence":0.91}}]}`)
+	result, err := ParseOpenAIModeration(body, ActiveEndpoint{}, []string{"pii"})
+	require.NoError(t, err)
+	require.Equal(t, "Unsafe", result.Safety)
+	require.Equal(t, EventFlag, result.Decision)
+	require.Equal(t, ActionWarn, result.Action)
+	require.Empty(t, result.MatchedScanners)
+	require.Equal(t, []string{"violent"}, result.Categories)
+
+	_, err = ParseOpenAIModeration([]byte(`{"results":[{"flagged":true,"categories":{},"category_scores":{}}]}`), ActiveEndpoint{}, AllScannerIDs)
+	require.Error(t, err, "a flagged response without a mapped issue must fail over instead of silently blocking")
+}
+
 func TestAggregateAndIssueSummaryPreserveCompleteConfidenceReason(t *testing.T) {
 	reason := strings.Repeat("完整审核原因。", 40) + "\n保留换行和最后一句。"
 	result, err := AggregateResults([]*NormalizedResult{{

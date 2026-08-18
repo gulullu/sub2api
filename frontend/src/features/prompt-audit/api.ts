@@ -78,6 +78,7 @@ export async function probeEndpoint(endpoint: PromptAuditEndpointDraft): Promise
       base_url: endpoint.base_url,
       model: endpoint.model,
       token: endpoint.token || undefined,
+      credential_source: endpoint.credential_source || undefined,
       timeout_ms: endpoint.timeout_ms,
       input_limit: endpoint.input_limit,
       enabled: endpoint.enabled,

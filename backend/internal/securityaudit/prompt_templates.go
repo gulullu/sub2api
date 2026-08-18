@@ -8,6 +8,7 @@ import (
 const (
 	AdapterQwen3Guard          = "qwen3guard"
 	AdapterConfidenceJSON      = "confidence_json"
+	AdapterOpenAIModeration    = "openai_moderation"
 	DefaultPromptTemplateID    = "relaybases-cyber-safety-v1"
 	DefaultFlagThreshold       = 0.4
 	DefaultBlockThreshold      = 0.7
@@ -120,11 +121,18 @@ func activePromptTemplate(templates []PromptTemplate, id string) PromptTemplate 
 
 func validPromptAdapter(value string) bool {
 	switch strings.TrimSpace(value) {
-	case AdapterQwen3Guard, AdapterConfidenceJSON:
+	case AdapterQwen3Guard, AdapterConfidenceJSON, AdapterOpenAIModeration:
 		return true
 	default:
 		return false
 	}
+}
+
+func defaultModelForPromptAdapter(adapter string) string {
+	if strings.TrimSpace(adapter) == AdapterOpenAIModeration {
+		return DefaultOpenAIModerationModel
+	}
+	return DefaultGuardModel
 }
 
 func normalizePromptTemplates(values []PromptTemplate) []PromptTemplate {

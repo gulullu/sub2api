@@ -6,6 +6,7 @@ import EndpointPool from '../components/EndpointPool.vue'
 import PromptTemplatePanel from '../components/PromptTemplatePanel.vue'
 import DecisionPolicyPanel from '../components/DecisionPolicyPanel.vue'
 import RiskRouteAccountSelector from '../components/RiskRouteAccountSelector.vue'
+import CyberFeedbackScopePanel from '../components/CyberFeedbackScopePanel.vue'
 import PolicyPanel from '../components/PolicyPanel.vue'
 import EventWorkspace from '../components/EventWorkspace.vue'
 import EventDetailDialog from '../components/EventDetailDialog.vue'
@@ -74,6 +75,7 @@ describe('Prompt Audit components', () => {
       enabled: true, blocking_enabled: false, blocking_latest_turn_only: false, store_pass_events: false, effective_mode: 'async_audit', strategy: 'priority',
       worker_count: 4, queue_capacity: 100, scanners: SCANNER_CATALOG.map((item) => item.id), all_groups: false, group_ids: [1, 99],
       risk_route_account_ids: [],
+      cyber_feedback_account_ids: [],
       prompt_templates: [{ id: 'builtin', name: 'Built-in', system_prompt: 'Review input', builtin: true }], active_prompt_template_id: 'builtin',
       flag_threshold: 0.4, block_threshold: 0.7, block_http_status: 403, block_message: DEFAULT_BLOCK_MESSAGE,
       max_total_input_chars: 40000,
@@ -114,6 +116,26 @@ describe('Prompt Audit components', () => {
     await timeout.setValue('40000')
     await inputLimit.setValue('400000')
     expect(wrapper.get('[data-test="save-endpoint"]').attributes()).not.toHaveProperty('disabled')
+  })
+
+  it('keeps a new moderation node disabled at priority 3 and locks imported credential routing', async () => {
+    const wrapper = mount(EndpointPool, {
+      props: { endpoints: [], probeResults: {}, probingIds: [] },
+      global: { stubs: { BaseDialog: DialogStub } },
+    })
+    await wrapper.get('[data-test="add-endpoint"]').trigger('click')
+    await wrapper.get<HTMLSelectElement>('[aria-label="admin.promptAudit.pool.adapter"]').setValue('openai_moderation')
+
+    expect(wrapper.get<HTMLInputElement>('[data-test="endpoint-priority"]').element.value).toBe('3')
+    expect(wrapper.get<HTMLInputElement>('[aria-label="admin.promptAudit.pool.baseUrl"]').attributes()).toHaveProperty('disabled')
+    expect(wrapper.get<HTMLInputElement>('[aria-label="admin.promptAudit.pool.model"]').attributes()).toHaveProperty('disabled')
+    expect(wrapper.get<HTMLInputElement>('[aria-label="admin.promptAudit.pool.apiKey"]').attributes()).toHaveProperty('disabled')
+    await wrapper.get('[data-test="save-endpoint"]').trigger('click')
+
+    const updated = wrapper.emitted('update:endpoints')?.at(-1)?.[0] as PromptAuditEndpointDraft[]
+    expect(updated[0]).toMatchObject({
+      adapter: 'openai_moderation', priority: 3, enabled: false, credential_source: 'content_moderation',
+    })
   })
 
   it('shows stable failover order, accepts explicit priority, and warns without changing timeouts', async () => {
@@ -273,6 +295,30 @@ describe('Prompt Audit components', () => {
     await wrapper.get('[aria-label="admin.promptAudit.riskRoute.search"]').setValue('Dedicated Risk')
     expect(wrapper.text()).toContain('Risk One')
     expect(wrapper.text()).not.toContain('Ungrouped')
+  })
+
+  it('selects extra CYB feedback accounts independently from audit groups and account type', async () => {
+    const draft = configToDraft({
+      enabled: false, blocking_enabled: false, blocking_latest_turn_only: false, store_pass_events: false, effective_mode: 'off', strategy: 'priority',
+      worker_count: 4, queue_capacity: 100, scanners: [], all_groups: false, group_ids: [12], cyber_feedback_account_ids: [99], endpoints: [],
+      config_version: 1, updated_at: '', updated_by: 0, change_summary: '',
+    })
+    const wrapper = mount(CyberFeedbackScopePanel, {
+      props: {
+        draft,
+        accounts: [{ id: 91, name: 'Selected API account', platform: 'openai', type: 'apikey', status: 'active', groups: [] }],
+        accountsLoaded: true,
+        loading: false,
+        error: '',
+      },
+    })
+    expect(wrapper.get('[data-test="cyber-scope-independent-hint"]').text()).toContain('admin.promptAudit.cyberScope.independentHint')
+    expect(wrapper.text()).toContain('admin.promptAudit.cyberScope.missingAccounts')
+
+    await wrapper.get<HTMLInputElement>('input[type="checkbox"]').setValue(true)
+    const updated = wrapper.emitted('update:draft')?.at(-1)?.[0] as PromptAuditDraft
+    expect(updated.cyber_feedback_account_ids).toEqual([91, 99])
+    expect(updated.group_ids).toEqual([12])
   })
 
   it('shows standalone email and API Key columns without copy controls', async () => {

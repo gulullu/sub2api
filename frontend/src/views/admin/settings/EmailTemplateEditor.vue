@@ -391,7 +391,7 @@ const eventDisplayMeta: Record<string, EventDisplayMeta> = {
     categoryLabel: "风控",
   },
   "security.openai_oauth_cyb_admin_alert": {
-    label: "OpenAI OAuth CYB 管理员告警",
+    label: "上游 CYB 管理员告警",
     timing: "真实上游 CYB 首次确认时发送给管理员，不含请求正文或账号名称，不可退订。",
     categoryLabel: "安全告警",
   },
@@ -459,7 +459,7 @@ const eventDisplayMetaEn: Record<string, EventDisplayMeta> = {
     categoryLabel: "Risk Control",
   },
   "security.openai_oauth_cyb_admin_alert": {
-    label: "OpenAI OAuth CYB Admin Alert",
+    label: "Upstream CYB Admin Alert",
     timing: "Sent to administrators when a real upstream CYB signal is confirmed for the first time. It contains no request body or account name and cannot be unsubscribed.",
     categoryLabel: "Security Alert",
   },

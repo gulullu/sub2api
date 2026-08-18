@@ -6,8 +6,9 @@ import (
 )
 
 const (
-	SettingKeyPromptAuditConfig = "prompt_audit_config"
-	SettingKeyRiskControl       = "risk_control_enabled"
+	SettingKeyPromptAuditConfig       = "prompt_audit_config"
+	SettingKeyRiskControl             = "risk_control_enabled"
+	CredentialSourceContentModeration = "content_moderation"
 
 	ConfigInvalidationChannel = "sub2api:prompt_guard:config:invalidate"
 	PayloadKeyPrefix          = "sub2api:prompt_audit:payload:"
@@ -21,9 +22,10 @@ const (
 	ErrorCodeEncryptionKeyRequired = "prompt_audit_encryption_key_required"
 	ErrorCodeRequiresEnabled       = "prompt_guard_requires_audit_enabled"
 
-	DefaultGuardModel         = "sileader/qwen3guard:0.6b"
-	inputTooLargeScannerID    = "input_too_large"
-	auditUnavailableScannerID = "audit_unavailable"
+	DefaultGuardModel            = "sileader/qwen3guard:0.6b"
+	DefaultOpenAIModerationModel = "omni-moderation-latest"
+	inputTooLargeScannerID       = "input_too_large"
+	auditUnavailableScannerID    = "audit_unavailable"
 )
 
 type Mode string

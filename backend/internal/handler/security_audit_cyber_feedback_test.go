@@ -24,6 +24,16 @@ type handlerCyberFeedbackRepo struct {
 	confirmed chan securityaudit.CyberConfirmInput
 }
 
+type handlerCyberScopeProvider struct{ cfg securityaudit.ActiveConfig }
+
+func (p handlerCyberScopeProvider) IncludesCyberFeedbackSource(accountID int64, platform, accountType string) bool {
+	return p.cfg.IncludesCyberFeedbackSource(accountID, platform, accountType)
+}
+
+func (handlerCyberScopeProvider) GenerateCyberRuleDraft(context.Context, securityaudit.PromptSnapshot) (string, error) {
+	return "", nil
+}
+
 func (r *handlerCyberFeedbackRepo) Confirm(_ context.Context, input securityaudit.CyberConfirmInput) (securityaudit.CyberFeedback, bool, error) {
 	if r.confirmed != nil {
 		r.confirmed <- input
@@ -99,7 +109,7 @@ func (*handlerCyberFeedbackRepo) CompleteCyberRuleGeneration(context.Context, in
 	return nil
 }
 
-func newHandlerCyberService(t *testing.T, repo *handlerCyberFeedbackRepo, withRedis bool) *securityaudit.CyberFeedbackService {
+func newHandlerCyberService(t *testing.T, repo *handlerCyberFeedbackRepo, withRedis bool, scopes ...securityaudit.ActiveConfig) *securityaudit.CyberFeedbackService {
 	t.Helper()
 	var client *redis.Client
 	if withRedis {
@@ -107,8 +117,15 @@ func newHandlerCyberService(t *testing.T, repo *handlerCyberFeedbackRepo, withRe
 		client = redis.NewClient(&redis.Options{Addr: mr.Addr(), MaxRetries: -1})
 		t.Cleanup(func() { _ = client.Close() })
 	}
+	var generator securityaudit.CyberRuleDraftGenerator
+	var scope securityaudit.CyberFeedbackScopeProvider
+	if len(scopes) > 0 {
+		provider := handlerCyberScopeProvider{cfg: scopes[0]}
+		generator = provider
+		scope = provider
+	}
 	return securityaudit.NewCyberFeedbackService(
-		repo, client, &config.Config{JWT: config.JWTConfig{Secret: "handler-test-stable-key"}}, nil, nil, nil,
+		repo, client, &config.Config{JWT: config.JWTConfig{Secret: "handler-test-stable-key"}}, nil, nil, generator, scope,
 	)
 }
 
@@ -188,7 +205,7 @@ func TestOpenAICyberReplayTracksEveryWebSocketTurnAndClearsEvidence(t *testing.T
 	require.False(t, ok)
 }
 
-func TestRecordCyberPolicyConfirmsOnlyRealOpenAIOAuthMark(t *testing.T) {
+func TestRecordCyberPolicyDefaultScopeConfirmsOnlyRealOpenAIOAuthMark(t *testing.T) {
 	groupID := int64(12)
 	apiKey := &service.APIKey{ID: 7, Key: "sk-safe-prefix-value", Name: "test-key", GroupID: &groupID, Group: &service.Group{ID: groupID, Platform: service.PlatformOpenAI}}
 	openAIOAuth := &service.Account{ID: 90, Name: "oauth-account", Platform: service.PlatformOpenAI, Type: service.AccountTypeOAuth, Credentials: map[string]any{"email": "oauth@example.test"}}
@@ -245,6 +262,38 @@ func TestRecordCyberPolicyConfirmsOnlyRealOpenAIOAuthMark(t *testing.T) {
 	case <-noMarkRepo.confirmed:
 		t.Fatal("missing upstream mark must not confirm feedback")
 	case <-time.After(30 * time.Millisecond):
+	}
+}
+
+func TestRecordCyberPolicyConfiguredScopeCapturesNonOAuthOutsideAuditGroups(t *testing.T) {
+	requestGroupID := int64(44)
+	apiKey := &service.APIKey{ID: 7, Key: "sk-safe-prefix-value", Name: "test-key", GroupID: &requestGroupID, Group: &service.Group{ID: requestGroupID, Platform: service.PlatformOpenAI}}
+	apiKeyAccount := &service.Account{ID: 91, Name: "api-account", Platform: service.PlatformOpenAI, Type: service.AccountTypeAPIKey}
+	repo := &handlerCyberFeedbackRepo{confirmed: make(chan securityaudit.CyberConfirmInput, 1)}
+	scope := securityaudit.ActiveConfig{
+		Enabled: false, AllGroups: false, GroupIDs: []int64{12},
+		CyberFeedbackAccountIDs: []int64{91},
+	}
+	cyberService := newHandlerCyberService(t, repo, false, scope)
+	h := &OpenAIGatewayHandler{cyberFeedbackService: cyberService}
+	c := newHandlerCyberContext("/v1/responses")
+	evidence, ok := cyberService.PrepareTurn(securityaudit.Request{
+		RequestID: "request-non-oauth", APIKeyID: apiKey.ID, GroupID: &requestGroupID, Provider: service.PlatformOpenAI,
+		Protocol: service.ContentModerationProtocolOpenAIResponses, Model: "gpt-test", Endpoint: "/v1/responses",
+		Body: []byte(`{"input":[{"role":"user","content":"complete evidence outside audit scope"}]}`), Stage: "http",
+	}, 0)
+	require.True(t, ok)
+	c.Set(securityAuditCyberTurnEvidenceContextKey, evidence)
+	service.MarkOpsCyberPolicy(c, service.CyberPolicyMark{Message: "rejected", UpstreamStatus: 400})
+	h.recordCyberPolicyIfMarked(c, apiKey, apiKeyAccount, nil, "gpt-test", true, "", service.ChannelUsageFields{}, "")
+	select {
+	case confirmed := <-repo.confirmed:
+		require.Equal(t, apiKeyAccount.ID, confirmed.AccountID)
+		require.Equal(t, requestGroupID, confirmed.GroupID)
+		require.Contains(t, confirmed.FullPrompt, "complete evidence outside audit scope")
+		require.Positive(t, confirmed.PromptLength)
+	case <-time.After(time.Second):
+		t.Fatal("expected configured non-OAuth CYB confirmation")
 	}
 }
 

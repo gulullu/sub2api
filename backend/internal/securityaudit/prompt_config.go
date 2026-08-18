@@ -11,6 +11,7 @@ import (
 	"time"
 
 	infraerrors "github.com/Wei-Shaw/sub2api/internal/pkg/errors"
+	"github.com/Wei-Shaw/sub2api/internal/service"
 )
 
 const (
@@ -71,30 +72,31 @@ type StorageEndpoint struct {
 }
 
 type storageConfig struct {
-	Enabled                bool                  `json:"enabled"`
-	BlockingEnabled        bool                  `json:"blocking_enabled"`
-	BlockingLatestTurnOnly bool                  `json:"blocking_latest_turn_only"`
-	StorePassEvents        bool                  `json:"store_pass_events"`
-	Strategy               string                `json:"strategy"`
-	WorkerCount            int                   `json:"worker_count"`
-	QueueCapacity          int                   `json:"queue_capacity"`
-	Scanners               []string              `json:"scanners"`
-	AllGroups              bool                  `json:"all_groups"`
-	GroupIDs               []int64               `json:"group_ids"`
-	RiskRouteAccountIDs    []int64               `json:"risk_route_account_ids"`
-	MaxTotalInputChars     int                   `json:"max_total_input_chars"`
-	PromptTemplates        []PromptTemplate      `json:"prompt_templates"`
-	ActivePromptTemplateID string                `json:"active_prompt_template_id"`
-	CyberSupplementRules   []CyberSupplementRule `json:"cyber_supplement_rules"`
-	FlagThreshold          *float64              `json:"flag_threshold"`
-	BlockThreshold         *float64              `json:"block_threshold"`
-	BlockHTTPStatus        int                   `json:"block_http_status"`
-	BlockMessage           string                `json:"block_message"`
-	Endpoints              []StorageEndpoint     `json:"endpoints"`
-	ConfigVersion          int64                 `json:"config_version"`
-	UpdatedAt              time.Time             `json:"updated_at"`
-	UpdatedBy              int64                 `json:"updated_by"`
-	ChangeSummary          string                `json:"change_summary"`
+	Enabled                 bool                  `json:"enabled"`
+	BlockingEnabled         bool                  `json:"blocking_enabled"`
+	BlockingLatestTurnOnly  bool                  `json:"blocking_latest_turn_only"`
+	StorePassEvents         bool                  `json:"store_pass_events"`
+	Strategy                string                `json:"strategy"`
+	WorkerCount             int                   `json:"worker_count"`
+	QueueCapacity           int                   `json:"queue_capacity"`
+	Scanners                []string              `json:"scanners"`
+	AllGroups               bool                  `json:"all_groups"`
+	GroupIDs                []int64               `json:"group_ids"`
+	RiskRouteAccountIDs     []int64               `json:"risk_route_account_ids"`
+	CyberFeedbackAccountIDs []int64               `json:"cyber_feedback_account_ids"`
+	MaxTotalInputChars      int                   `json:"max_total_input_chars"`
+	PromptTemplates         []PromptTemplate      `json:"prompt_templates"`
+	ActivePromptTemplateID  string                `json:"active_prompt_template_id"`
+	CyberSupplementRules    []CyberSupplementRule `json:"cyber_supplement_rules"`
+	FlagThreshold           *float64              `json:"flag_threshold"`
+	BlockThreshold          *float64              `json:"block_threshold"`
+	BlockHTTPStatus         int                   `json:"block_http_status"`
+	BlockMessage            string                `json:"block_message"`
+	Endpoints               []StorageEndpoint     `json:"endpoints"`
+	ConfigVersion           int64                 `json:"config_version"`
+	UpdatedAt               time.Time             `json:"updated_at"`
+	UpdatedBy               int64                 `json:"updated_by"`
+	ChangeSummary           string                `json:"change_summary"`
 }
 
 type ActiveEndpoint struct {
@@ -123,31 +125,32 @@ type ActiveEndpoint struct {
 }
 
 type ActiveConfig struct {
-	RiskControlEnabled     bool
-	Enabled                bool
-	BlockingEnabled        bool
-	BlockingLatestTurnOnly bool
-	StorePassEvents        bool
-	Strategy               string
-	WorkerCount            int
-	QueueCapacity          int
-	Scanners               []string
-	AllGroups              bool
-	GroupIDs               []int64
-	RiskRouteAccountIDs    []int64
-	MaxTotalInputChars     int
-	PromptTemplates        []PromptTemplate
-	ActivePromptTemplateID string
-	CyberSupplementRules   []CyberSupplementRule
-	FlagThreshold          float64
-	BlockThreshold         float64
-	BlockHTTPStatus        int
-	BlockMessage           string
-	Endpoints              []ActiveEndpoint
-	ConfigVersion          int64
-	UpdatedAt              time.Time
-	UpdatedBy              int64
-	ChangeSummary          string
+	RiskControlEnabled      bool
+	Enabled                 bool
+	BlockingEnabled         bool
+	BlockingLatestTurnOnly  bool
+	StorePassEvents         bool
+	Strategy                string
+	WorkerCount             int
+	QueueCapacity           int
+	Scanners                []string
+	AllGroups               bool
+	GroupIDs                []int64
+	RiskRouteAccountIDs     []int64
+	CyberFeedbackAccountIDs []int64
+	MaxTotalInputChars      int
+	PromptTemplates         []PromptTemplate
+	ActivePromptTemplateID  string
+	CyberSupplementRules    []CyberSupplementRule
+	FlagThreshold           float64
+	BlockThreshold          float64
+	BlockHTTPStatus         int
+	BlockMessage            string
+	Endpoints               []ActiveEndpoint
+	ConfigVersion           int64
+	UpdatedAt               time.Time
+	UpdatedBy               int64
+	ChangeSummary           string
 }
 
 type PublicEndpoint struct {
@@ -168,69 +171,74 @@ type PublicEndpoint struct {
 }
 
 type PublicConfig struct {
-	Enabled                bool                  `json:"enabled"`
-	BlockingEnabled        bool                  `json:"blocking_enabled"`
-	BlockingLatestTurnOnly bool                  `json:"blocking_latest_turn_only"`
-	StorePassEvents        bool                  `json:"store_pass_events"`
-	EffectiveMode          Mode                  `json:"effective_mode"`
-	Strategy               string                `json:"strategy"`
-	WorkerCount            int                   `json:"worker_count"`
-	QueueCapacity          int                   `json:"queue_capacity"`
-	Scanners               []string              `json:"scanners"`
-	AllGroups              bool                  `json:"all_groups"`
-	GroupIDs               []int64               `json:"group_ids"`
-	RiskRouteAccountIDs    []int64               `json:"risk_route_account_ids"`
-	MaxTotalInputChars     int                   `json:"max_total_input_chars"`
-	PromptTemplates        []PromptTemplate      `json:"prompt_templates"`
-	ActivePromptTemplateID string                `json:"active_prompt_template_id"`
-	CyberSupplementRules   []CyberSupplementRule `json:"cyber_supplement_rules"`
-	FlagThreshold          float64               `json:"flag_threshold"`
-	BlockThreshold         float64               `json:"block_threshold"`
-	BlockHTTPStatus        int                   `json:"block_http_status"`
-	BlockMessage           string                `json:"block_message"`
-	Endpoints              []PublicEndpoint      `json:"endpoints"`
-	ConfigVersion          int64                 `json:"config_version"`
-	UpdatedAt              time.Time             `json:"updated_at"`
-	UpdatedBy              int64                 `json:"updated_by"`
-	ChangeSummary          string                `json:"change_summary"`
+	Enabled                 bool                  `json:"enabled"`
+	BlockingEnabled         bool                  `json:"blocking_enabled"`
+	BlockingLatestTurnOnly  bool                  `json:"blocking_latest_turn_only"`
+	StorePassEvents         bool                  `json:"store_pass_events"`
+	EffectiveMode           Mode                  `json:"effective_mode"`
+	Strategy                string                `json:"strategy"`
+	WorkerCount             int                   `json:"worker_count"`
+	QueueCapacity           int                   `json:"queue_capacity"`
+	Scanners                []string              `json:"scanners"`
+	AllGroups               bool                  `json:"all_groups"`
+	GroupIDs                []int64               `json:"group_ids"`
+	RiskRouteAccountIDs     []int64               `json:"risk_route_account_ids"`
+	CyberFeedbackAccountIDs []int64               `json:"cyber_feedback_account_ids"`
+	MaxTotalInputChars      int                   `json:"max_total_input_chars"`
+	PromptTemplates         []PromptTemplate      `json:"prompt_templates"`
+	ActivePromptTemplateID  string                `json:"active_prompt_template_id"`
+	CyberSupplementRules    []CyberSupplementRule `json:"cyber_supplement_rules"`
+	FlagThreshold           float64               `json:"flag_threshold"`
+	BlockThreshold          float64               `json:"block_threshold"`
+	BlockHTTPStatus         int                   `json:"block_http_status"`
+	BlockMessage            string                `json:"block_message"`
+	Endpoints               []PublicEndpoint      `json:"endpoints"`
+	ConfigVersion           int64                 `json:"config_version"`
+	UpdatedAt               time.Time             `json:"updated_at"`
+	UpdatedBy               int64                 `json:"updated_by"`
+	ChangeSummary           string                `json:"change_summary"`
 }
 
 type UpdateEndpoint struct {
-	ID         string `json:"id" binding:"required"`
-	Name       string `json:"name" binding:"required"`
-	Priority   int    `json:"priority"`
-	Protocol   string `json:"protocol"`
-	Adapter    string `json:"adapter"`
-	BaseURL    string `json:"base_url" binding:"required"`
-	Model      string `json:"model"`
-	Token      string `json:"token,omitempty"`
-	ClearToken bool   `json:"clear_token"`
-	TimeoutMS  int    `json:"timeout_ms"`
-	InputLimit int    `json:"input_limit"`
-	Enabled    bool   `json:"enabled"`
+	ID       string `json:"id" binding:"required"`
+	Name     string `json:"name" binding:"required"`
+	Priority int    `json:"priority"`
+	Protocol string `json:"protocol"`
+	Adapter  string `json:"adapter"`
+	BaseURL  string `json:"base_url" binding:"required"`
+	Model    string `json:"model"`
+	Token    string `json:"token,omitempty"`
+	// CredentialSource is an administrator-only one-shot import instruction.
+	// It is resolved in memory and is never persisted or returned by PublicConfig.
+	CredentialSource string `json:"credential_source,omitempty"`
+	ClearToken       bool   `json:"clear_token"`
+	TimeoutMS        int    `json:"timeout_ms"`
+	InputLimit       int    `json:"input_limit"`
+	Enabled          bool   `json:"enabled"`
 }
 
 type UpdateConfigRequest struct {
-	ExpectedConfigVersion  int64             `json:"expected_config_version" binding:"required"`
-	Enabled                bool              `json:"enabled"`
-	BlockingEnabled        bool              `json:"blocking_enabled"`
-	BlockingLatestTurnOnly bool              `json:"blocking_latest_turn_only"`
-	StorePassEvents        bool              `json:"store_pass_events"`
-	Strategy               string            `json:"strategy"`
-	WorkerCount            int               `json:"worker_count"`
-	QueueCapacity          int               `json:"queue_capacity"`
-	Scanners               []string          `json:"scanners"`
-	AllGroups              bool              `json:"all_groups"`
-	GroupIDs               []int64           `json:"group_ids"`
-	RiskRouteAccountIDs    *[]int64          `json:"risk_route_account_ids,omitempty"`
-	MaxTotalInputChars     *int              `json:"max_total_input_chars,omitempty"`
-	PromptTemplates        *[]PromptTemplate `json:"prompt_templates,omitempty"`
-	ActivePromptTemplateID *string           `json:"active_prompt_template_id,omitempty"`
-	FlagThreshold          *float64          `json:"flag_threshold,omitempty"`
-	BlockThreshold         *float64          `json:"block_threshold,omitempty"`
-	BlockHTTPStatus        *int              `json:"block_http_status,omitempty"`
-	BlockMessage           *string           `json:"block_message,omitempty"`
-	Endpoints              []UpdateEndpoint  `json:"endpoints"`
+	ExpectedConfigVersion   int64             `json:"expected_config_version" binding:"required"`
+	Enabled                 bool              `json:"enabled"`
+	BlockingEnabled         bool              `json:"blocking_enabled"`
+	BlockingLatestTurnOnly  bool              `json:"blocking_latest_turn_only"`
+	StorePassEvents         bool              `json:"store_pass_events"`
+	Strategy                string            `json:"strategy"`
+	WorkerCount             int               `json:"worker_count"`
+	QueueCapacity           int               `json:"queue_capacity"`
+	Scanners                []string          `json:"scanners"`
+	AllGroups               bool              `json:"all_groups"`
+	GroupIDs                []int64           `json:"group_ids"`
+	RiskRouteAccountIDs     *[]int64          `json:"risk_route_account_ids,omitempty"`
+	CyberFeedbackAccountIDs *[]int64          `json:"cyber_feedback_account_ids,omitempty"`
+	MaxTotalInputChars      *int              `json:"max_total_input_chars,omitempty"`
+	PromptTemplates         *[]PromptTemplate `json:"prompt_templates,omitempty"`
+	ActivePromptTemplateID  *string           `json:"active_prompt_template_id,omitempty"`
+	FlagThreshold           *float64          `json:"flag_threshold,omitempty"`
+	BlockThreshold          *float64          `json:"block_threshold,omitempty"`
+	BlockHTTPStatus         *int              `json:"block_http_status,omitempty"`
+	BlockMessage            *string           `json:"block_message,omitempty"`
+	Endpoints               []UpdateEndpoint  `json:"endpoints"`
 	// cyberSupplementRules is intentionally not part of the ordinary config
 	// API. Rules may only be changed through reviewed CYB feedback actions.
 	cyberSupplementRules *[]CyberSupplementRule `json:"-"`
@@ -240,27 +248,28 @@ func DefaultStorageConfig() storageConfig {
 	flagThreshold := DefaultFlagThreshold
 	blockThreshold := DefaultBlockThreshold
 	return storageConfig{
-		Enabled:                false,
-		BlockingEnabled:        false,
-		BlockingLatestTurnOnly: false,
-		StorePassEvents:        false,
-		Strategy:               "priority",
-		WorkerCount:            DefaultWorkerCount,
-		QueueCapacity:          DefaultQueueCapacity,
-		Scanners:               append([]string(nil), AllScannerIDs...),
-		AllGroups:              true,
-		GroupIDs:               []int64{},
-		RiskRouteAccountIDs:    []int64{},
-		MaxTotalInputChars:     DefaultMaxTotalInputChars,
-		PromptTemplates:        []PromptTemplate{DefaultPromptTemplate()},
-		ActivePromptTemplateID: DefaultPromptTemplateID,
-		CyberSupplementRules:   []CyberSupplementRule{},
-		FlagThreshold:          &flagThreshold,
-		BlockThreshold:         &blockThreshold,
-		BlockHTTPStatus:        DefaultBlockHTTPStatus,
-		BlockMessage:           DefaultBlockMessage,
-		Endpoints:              []StorageEndpoint{},
-		ConfigVersion:          1,
+		Enabled:                 false,
+		BlockingEnabled:         false,
+		BlockingLatestTurnOnly:  false,
+		StorePassEvents:         false,
+		Strategy:                "priority",
+		WorkerCount:             DefaultWorkerCount,
+		QueueCapacity:           DefaultQueueCapacity,
+		Scanners:                append([]string(nil), AllScannerIDs...),
+		AllGroups:               true,
+		GroupIDs:                []int64{},
+		RiskRouteAccountIDs:     []int64{},
+		CyberFeedbackAccountIDs: []int64{},
+		MaxTotalInputChars:      DefaultMaxTotalInputChars,
+		PromptTemplates:         []PromptTemplate{DefaultPromptTemplate()},
+		ActivePromptTemplateID:  DefaultPromptTemplateID,
+		CyberSupplementRules:    []CyberSupplementRule{},
+		FlagThreshold:           &flagThreshold,
+		BlockThreshold:          &blockThreshold,
+		BlockHTTPStatus:         DefaultBlockHTTPStatus,
+		BlockMessage:            DefaultBlockMessage,
+		Endpoints:               []StorageEndpoint{},
+		ConfigVersion:           1,
 	}
 }
 
@@ -301,6 +310,7 @@ func normalizeStorageConfig(cfg *storageConfig) {
 	cfg.Scanners = canonicalScannerIDs(cfg.Scanners)
 	cfg.GroupIDs = canonicalInt64s(cfg.GroupIDs)
 	cfg.RiskRouteAccountIDs = canonicalInt64s(cfg.RiskRouteAccountIDs)
+	cfg.CyberFeedbackAccountIDs = canonicalInt64s(cfg.CyberFeedbackAccountIDs)
 	if cfg.MaxTotalInputChars == 0 {
 		cfg.MaxTotalInputChars = DefaultMaxTotalInputChars
 	}
@@ -350,7 +360,7 @@ func normalizeStorageConfig(cfg *storageConfig) {
 		ep.BaseURL = strings.TrimSpace(ep.BaseURL)
 		ep.Model = strings.TrimSpace(ep.Model)
 		if ep.Model == "" {
-			ep.Model = DefaultGuardModel
+			ep.Model = defaultModelForPromptAdapter(ep.Adapter)
 		}
 		if ep.TimeoutMS == 0 {
 			ep.TimeoutMS = DefaultTimeoutMS
@@ -378,6 +388,9 @@ func validateStorageConfig(cfg storageConfig) error {
 		return infraerrors.BadRequest("prompt_audit_groups_required", "指定分组模式至少需要选择一个分组")
 	}
 	if err := validatePositiveIDs(cfg.RiskRouteAccountIDs, "prompt_audit_invalid_risk_route_account", "高风险分流账号 ID 无效"); err != nil {
+		return err
+	}
+	if err := validatePositiveIDs(cfg.CyberFeedbackAccountIDs, "prompt_audit_invalid_cyber_feedback_account", "CYB 反馈账号 ID 无效"); err != nil {
 		return err
 	}
 	if cfg.MaxTotalInputChars < MinMaxTotalInputChars || cfg.MaxTotalInputChars > MaxMaxTotalInputChars {
@@ -463,6 +476,11 @@ func validateUpdateConfigRequest(req UpdateConfigRequest) error {
 			return err
 		}
 	}
+	if req.CyberFeedbackAccountIDs != nil {
+		if err := validatePositiveIDs(*req.CyberFeedbackAccountIDs, "prompt_audit_invalid_cyber_feedback_account", "CYB 反馈账号 ID 无效"); err != nil {
+			return err
+		}
+	}
 	if req.MaxTotalInputChars != nil && (*req.MaxTotalInputChars < MinMaxTotalInputChars || *req.MaxTotalInputChars > MaxMaxTotalInputChars) {
 		return infraerrors.BadRequest("prompt_audit_invalid_max_total_input_chars", "审计总字符上限超出允许范围")
 	}
@@ -493,6 +511,17 @@ func validateUpdateConfigRequest(req UpdateConfigRequest) error {
 		if strings.TrimSpace(endpoint.Adapter) != "" && !validPromptAdapter(strings.TrimSpace(endpoint.Adapter)) {
 			return infraerrors.BadRequest("prompt_audit_invalid_endpoint_adapter", "审计节点适配器无效")
 		}
+		if source := strings.TrimSpace(endpoint.CredentialSource); source != "" {
+			if source != CredentialSourceContentModeration {
+				return infraerrors.BadRequest("prompt_audit_invalid_credential_source", "审计节点凭据来源无效")
+			}
+			if strings.TrimSpace(endpoint.Adapter) != AdapterOpenAIModeration {
+				return infraerrors.BadRequest("prompt_audit_credential_source_adapter_mismatch", "仅 OpenAI Moderation 节点可复用内容审计凭据")
+			}
+			if strings.TrimSpace(endpoint.Token) != "" || endpoint.ClearToken {
+				return infraerrors.BadRequest("prompt_audit_credential_source_conflict", "不能同时提交节点 Token、清除 Token 与凭据复用")
+			}
+		}
 		if endpoint.TimeoutMS < MinTimeoutMS || endpoint.TimeoutMS > MaxTimeoutMS {
 			return infraerrors.BadRequest("prompt_audit_invalid_timeout", "审计节点超时超出允许范围")
 		}
@@ -522,6 +551,19 @@ func (cfg ActiveConfig) IncludesGroup(groupID *int64) bool {
 	}
 	i := sort.Search(len(cfg.GroupIDs), func(i int) bool { return cfg.GroupIDs[i] >= *groupID })
 	return i < len(cfg.GroupIDs) && cfg.GroupIDs[i] == *groupID
+}
+
+// IncludesCyberFeedbackSource is deliberately independent of IncludesGroup
+// and EffectiveMode. It controls only whether a real upstream cyber_policy
+// response is captured for administrator feedback and rule learning; it never
+// causes the request to be sent to a Prompt Audit endpoint.
+func (cfg ActiveConfig) IncludesCyberFeedbackSource(accountID int64, platform, accountType string) bool {
+	platform = strings.ToLower(strings.TrimSpace(platform))
+	accountType = strings.ToLower(strings.TrimSpace(accountType))
+	if platform == service.PlatformOpenAI && accountType == service.AccountTypeOAuth {
+		return true
+	}
+	return accountID > 0 && containsCanonicalInt64(cfg.CyberFeedbackAccountIDs, accountID)
 }
 
 func (cfg ActiveConfig) EnabledEndpoints() []ActiveEndpoint {
@@ -560,6 +602,7 @@ func PublicFromStorage(cfg storageConfig, riskControlEnabled bool, invalidTokenE
 	scanners := append([]string{}, cfg.Scanners...)
 	groupIDs := append([]int64{}, cfg.GroupIDs...)
 	riskRouteAccountIDs := append([]int64{}, cfg.RiskRouteAccountIDs...)
+	cyberFeedbackAccountIDs := append([]int64{}, cfg.CyberFeedbackAccountIDs...)
 	endpoints := make([]PublicEndpoint, 0, len(cfg.Endpoints))
 	for _, ep := range cfg.Endpoints {
 		hasToken := strings.TrimSpace(ep.TokenCiphertext) != ""
@@ -583,7 +626,8 @@ func PublicFromStorage(cfg storageConfig, riskControlEnabled bool, invalidTokenE
 		Enabled: cfg.Enabled, BlockingEnabled: cfg.BlockingEnabled, BlockingLatestTurnOnly: cfg.BlockingLatestTurnOnly, StorePassEvents: cfg.StorePassEvents,
 		EffectiveMode: active.EffectiveMode(), Strategy: cfg.Strategy, WorkerCount: cfg.WorkerCount,
 		QueueCapacity: cfg.QueueCapacity, Scanners: scanners, AllGroups: cfg.AllGroups,
-		GroupIDs: groupIDs, RiskRouteAccountIDs: riskRouteAccountIDs, MaxTotalInputChars: cfg.MaxTotalInputChars,
+		GroupIDs: groupIDs, RiskRouteAccountIDs: riskRouteAccountIDs,
+		CyberFeedbackAccountIDs: cyberFeedbackAccountIDs, MaxTotalInputChars: cfg.MaxTotalInputChars,
 		PromptTemplates:        clonePromptTemplates(cfg.PromptTemplates),
 		CyberSupplementRules:   cloneCyberSupplementRules(cfg.CyberSupplementRules),
 		ActivePromptTemplateID: cfg.ActivePromptTemplateID, FlagThreshold: thresholdValue(cfg.FlagThreshold, DefaultFlagThreshold),
@@ -600,7 +644,8 @@ func ActiveFromStorage(cfg storageConfig, riskControlEnabled bool, encryptor Sec
 		BlockingLatestTurnOnly: cfg.BlockingLatestTurnOnly,
 		StorePassEvents:        cfg.StorePassEvents, Strategy: cfg.Strategy, WorkerCount: cfg.WorkerCount,
 		QueueCapacity: cfg.QueueCapacity, Scanners: append([]string(nil), cfg.Scanners...), AllGroups: cfg.AllGroups,
-		GroupIDs: append([]int64(nil), cfg.GroupIDs...), RiskRouteAccountIDs: append([]int64(nil), cfg.RiskRouteAccountIDs...), MaxTotalInputChars: cfg.MaxTotalInputChars,
+		GroupIDs: append([]int64(nil), cfg.GroupIDs...), RiskRouteAccountIDs: append([]int64(nil), cfg.RiskRouteAccountIDs...),
+		CyberFeedbackAccountIDs: append([]int64(nil), cfg.CyberFeedbackAccountIDs...), MaxTotalInputChars: cfg.MaxTotalInputChars,
 		PromptTemplates:        clonePromptTemplates(cfg.PromptTemplates),
 		CyberSupplementRules:   cloneCyberSupplementRules(cfg.CyberSupplementRules),
 		ActivePromptTemplateID: template.ID, FlagThreshold: thresholdValue(cfg.FlagThreshold, DefaultFlagThreshold),
@@ -619,6 +664,9 @@ func ActiveFromStorage(cfg storageConfig, riskControlEnabled bool, encryptor Sec
 				return ActiveConfig{}, err
 			}
 			supplementApplied = len(cfg.CyberSupplementRules) > 0
+		}
+		if ep.Adapter == AdapterOpenAIModeration {
+			systemPrompt = ""
 		}
 		token := ""
 		tokenInvalid := false
@@ -652,27 +700,42 @@ func ActiveFromStorage(cfg storageConfig, riskControlEnabled bool, encryptor Sec
 
 func changeSummary(cfg storageConfig) string {
 	summary := struct {
-		Enabled                bool    `json:"enabled"`
-		BlockingEnabled        bool    `json:"blocking_enabled"`
-		BlockingLatestTurnOnly bool    `json:"blocking_latest_turn_only"`
-		StorePassEvents        bool    `json:"store_pass_events"`
-		EndpointCount          int     `json:"endpoint_count"`
-		ScannerCount           int     `json:"scanner_count"`
-		AllGroups              bool    `json:"all_groups"`
-		GroupCount             int     `json:"group_count"`
-		GroupHash              string  `json:"group_hash"`
-		RiskRouteAccountCount  int     `json:"risk_route_account_count"`
-		MaxTotalInputChars     int     `json:"max_total_input_chars"`
-		TemplateCount          int     `json:"template_count"`
-		CyberSupplementCount   int     `json:"cyber_supplement_count"`
-		ActiveTemplateID       string  `json:"active_template_id"`
-		FlagThreshold          float64 `json:"flag_threshold"`
-		BlockThreshold         float64 `json:"block_threshold"`
-		BlockHTTPStatus        int     `json:"block_http_status"`
-	}{cfg.Enabled, cfg.BlockingEnabled, cfg.BlockingLatestTurnOnly, cfg.StorePassEvents, len(cfg.Endpoints), len(cfg.Scanners), cfg.AllGroups, len(cfg.GroupIDs), "", len(cfg.RiskRouteAccountIDs), cfg.MaxTotalInputChars, len(cfg.PromptTemplates), len(cfg.CyberSupplementRules), cfg.ActivePromptTemplateID, thresholdValue(cfg.FlagThreshold, DefaultFlagThreshold), thresholdValue(cfg.BlockThreshold, DefaultBlockThreshold), cfg.BlockHTTPStatus}
+		Enabled                   bool    `json:"enabled"`
+		BlockingEnabled           bool    `json:"blocking_enabled"`
+		BlockingLatestTurnOnly    bool    `json:"blocking_latest_turn_only"`
+		StorePassEvents           bool    `json:"store_pass_events"`
+		EndpointCount             int     `json:"endpoint_count"`
+		ScannerCount              int     `json:"scanner_count"`
+		AllGroups                 bool    `json:"all_groups"`
+		GroupCount                int     `json:"group_count"`
+		GroupHash                 string  `json:"group_hash"`
+		RiskRouteAccountCount     int     `json:"risk_route_account_count"`
+		CyberFeedbackAccountCount int     `json:"cyber_feedback_account_count"`
+		CyberFeedbackAccountHash  string  `json:"cyber_feedback_account_hash"`
+		MaxTotalInputChars        int     `json:"max_total_input_chars"`
+		TemplateCount             int     `json:"template_count"`
+		CyberSupplementCount      int     `json:"cyber_supplement_count"`
+		ActiveTemplateID          string  `json:"active_template_id"`
+		FlagThreshold             float64 `json:"flag_threshold"`
+		BlockThreshold            float64 `json:"block_threshold"`
+		BlockHTTPStatus           int     `json:"block_http_status"`
+	}{
+		Enabled: cfg.Enabled, BlockingEnabled: cfg.BlockingEnabled,
+		BlockingLatestTurnOnly: cfg.BlockingLatestTurnOnly, StorePassEvents: cfg.StorePassEvents,
+		EndpointCount: len(cfg.Endpoints), ScannerCount: len(cfg.Scanners), AllGroups: cfg.AllGroups,
+		GroupCount: len(cfg.GroupIDs), RiskRouteAccountCount: len(cfg.RiskRouteAccountIDs),
+		CyberFeedbackAccountCount: len(cfg.CyberFeedbackAccountIDs),
+		MaxTotalInputChars:        cfg.MaxTotalInputChars, TemplateCount: len(cfg.PromptTemplates),
+		CyberSupplementCount: len(cfg.CyberSupplementRules), ActiveTemplateID: cfg.ActivePromptTemplateID,
+		FlagThreshold:  thresholdValue(cfg.FlagThreshold, DefaultFlagThreshold),
+		BlockThreshold: thresholdValue(cfg.BlockThreshold, DefaultBlockThreshold), BlockHTTPStatus: cfg.BlockHTTPStatus,
+	}
 	rawGroups, _ := json.Marshal(cfg.GroupIDs)
 	digest := sha256.Sum256(rawGroups)
 	summary.GroupHash = hex.EncodeToString(digest[:])
+	rawCyberAccounts, _ := json.Marshal(cfg.CyberFeedbackAccountIDs)
+	cyberAccountDigest := sha256.Sum256(rawCyberAccounts)
+	summary.CyberFeedbackAccountHash = hex.EncodeToString(cyberAccountDigest[:])
 	raw, _ := json.Marshal(summary)
 	return string(raw)
 }
@@ -692,6 +755,11 @@ func canonicalInt64s(values []int64) []int64 {
 	}
 	sort.Slice(result, func(i, j int) bool { return result[i] < result[j] })
 	return result
+}
+
+func containsCanonicalInt64(values []int64, target int64) bool {
+	i := sort.Search(len(values), func(i int) bool { return values[i] >= target })
+	return i < len(values) && values[i] == target
 }
 
 func validatePositiveIDs(values []int64, code, message string) error {

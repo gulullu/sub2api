@@ -1151,8 +1151,8 @@ var notificationEmailEventDefinitions = map[string]NotificationEmailEventInfo{
 	},
 	NotificationEmailEventOpenAIOAuthCYBAdminAlert: {
 		Event:       NotificationEmailEventOpenAIOAuthCYBAdminAlert,
-		Label:       "OpenAI OAuth CYB administrator alert",
-		Description: "Sent to the fixed administrator recipient after a real OpenAI OAuth cyber_policy response is confirmed.",
+		Label:       "Upstream CYB administrator alert",
+		Description: "Sent to the fixed administrator recipient after an in-scope upstream cyber_policy response is confirmed.",
 		Category:    "security",
 		Optional:    false,
 		Placeholders: append(append([]string{}, notificationEmailCommonPlaceholders...),
@@ -1435,8 +1435,8 @@ var notificationEmailOfficialTemplates = map[string]map[string]notificationEmail
 	},
 	NotificationEmailEventOpenAIOAuthCYBAdminAlert: {
 		notificationEmailDefaultLocale: {
-			Subject: "[{{site_name}}] OpenAI OAuth upstream security rejection alert · #{{event_id}}",
-			HTML: notificationEmailCard("#b91c1c", "OpenAI OAuth upstream security rejection alert", `
+			Subject: "[{{site_name}}] Upstream security rejection alert · #{{event_id}}",
+			HTML: notificationEmailCard("#b91c1c", "Upstream security rejection alert", `
 <p>A real upstream security-policy rejection was confirmed.</p>
 <table style="width:100%;border-collapse:collapse;table-layout:fixed;">
   <tr><td>Event ID</td><td>{{event_id}}</td></tr>
@@ -1451,8 +1451,8 @@ var notificationEmailOfficialTemplates = map[string]map[string]notificationEmail
 <p><a href="{{admin_link}}">Open administrator review</a></p>`),
 		},
 		notificationEmailLocaleChinese: {
-			Subject: "[{{site_name}}] OpenAI OAuth 上游安全拦截告警 · #{{event_id}}",
-			HTML: notificationEmailCard("#b91c1c", "OpenAI OAuth 上游安全拦截告警", `
+			Subject: "[{{site_name}}] 上游安全拦截告警 · #{{event_id}}",
+			HTML: notificationEmailCard("#b91c1c", "上游安全拦截告警", `
 <p>已确认一次真实的上游安全策略拒绝。</p>
 <table style="width:100%;border-collapse:collapse;table-layout:fixed;">
   <tr><td>事件 ID</td><td>{{event_id}}</td></tr>

@@ -91,8 +91,8 @@ func TestPromptAuditAdminOperationsUseOmittedBodiesAndAllowlistedDetails(t *test
 	})
 
 	for _, request := range []*http.Request{
-		httptest.NewRequest(http.MethodPut, "/api/v1/admin/prompt-audit/config", bytes.NewBufferString(`{"expected_config_version":8,"token":"audit-canary-secret"}`)),
-		httptest.NewRequest(http.MethodPost, "/api/v1/admin/prompt-audit/endpoints/probe", bytes.NewBufferString(`{"endpoint":{"token":"audit-canary-secret"}}`)),
+		httptest.NewRequest(http.MethodPut, "/api/v1/admin/prompt-audit/config", bytes.NewBufferString(`{"expected_config_version":8,"endpoints":[{"credential_source":"content_moderation","token":"audit-canary-secret"}]}`)),
+		httptest.NewRequest(http.MethodPost, "/api/v1/admin/prompt-audit/endpoints/probe", bytes.NewBufferString(`{"endpoint":{"credential_source":"content_moderation","token":"audit-canary-secret"}}`)),
 	} {
 		request.Header.Set("Content-Type", "application/json")
 		recorder := httptest.NewRecorder()

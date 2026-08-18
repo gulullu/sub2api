@@ -15,7 +15,7 @@ func (s *OpenAIGatewayService) getModelAvailabilityPreflightCache() *modelAvaila
 }
 
 func (s *OpenAIGatewayService) modelAvailabilityQueryScope(groupID *int64, platform string) (*int64, bool, string) {
-	platform = normalizeOpenAICompatiblePlatform(platform)
+	platform = NormalizeOpenAICompatiblePlatform(platform)
 	queryGroupID := groupID
 	includeGrouped := false
 	if s.cfg != nil && s.cfg.RunMode == config.RunModeSimple {

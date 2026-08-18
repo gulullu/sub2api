@@ -47,6 +47,14 @@ func ChatCompletionsURL(base string) (string, error) {
 	return normalized + "/v1/chat/completions", nil
 }
 
+func ModerationsURL(base string) (string, error) {
+	normalized, err := NormalizeBaseURL(base)
+	if err != nil {
+		return "", err
+	}
+	return normalized + "/v1/moderations", nil
+}
+
 func ModelsURL(base string) (string, error) {
 	normalized, err := NormalizeBaseURL(base)
 	if err != nil {

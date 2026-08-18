@@ -10,6 +10,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/Wei-Shaw/sub2api/internal/service"
 	"github.com/stretchr/testify/require"
 )
 
@@ -35,6 +36,9 @@ func TestNormalizeBaseURLAllowsAdministratorConfiguredDestinations(t *testing.T)
 	url, err := ChatCompletionsURL("https://guard.example.com/v1")
 	require.NoError(t, err)
 	require.Equal(t, "https://guard.example.com/v1/chat/completions", url)
+	url, err = ModerationsURL("https://guard.example.com/v1")
+	require.NoError(t, err)
+	require.Equal(t, "https://guard.example.com/v1/moderations", url)
 }
 
 func TestHTTPClientUsesDirectStandardDialer(t *testing.T) {
@@ -101,6 +105,57 @@ func TestConfidenceJSONScannerUsesDeepSeekChatContract(t *testing.T) {
 	require.NoError(t, err)
 	require.Equal(t, EventFlag, result.Decision)
 	require.Equal(t, 0.55, result.Confidence)
+}
+
+func TestOpenAIModerationScannerUsesModerationsContract(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		require.Equal(t, "/v1/moderations", r.URL.Path)
+		require.Equal(t, "Bearer moderation-token", r.Header.Get("Authorization"))
+		var payload map[string]any
+		require.NoError(t, json.NewDecoder(r.Body).Decode(&payload))
+		require.Equal(t, DefaultOpenAIModerationModel, payload["model"])
+		require.Equal(t, "multilingual input", payload["input"])
+		require.NotContains(t, payload, "messages")
+		_, _ = w.Write([]byte(`{"results":[{"flagged":true,"categories":{"illicit":true},"category_scores":{"illicit":0.51}}]}`))
+	}))
+	defer server.Close()
+	result, err := NewOpenAICompatibleScanner().Scan(context.Background(), ActiveEndpoint{
+		ID: "omni", Adapter: AdapterOpenAIModeration, BaseURL: server.URL, Model: DefaultOpenAIModerationModel,
+		Token: "moderation-token", TimeoutMS: 1000,
+	}, "multilingual input", AllScannerIDs)
+	require.NoError(t, err)
+	require.Equal(t, EventCritical, result.Decision)
+	require.Equal(t, []string{"non_violent_illegal_acts"}, result.MatchedScanners)
+}
+
+func TestOpenAIModerationProbeImportsContentModerationCredentialServerSide(t *testing.T) {
+	const canary = "sk-server-side-only"
+	var sourceCalls atomic.Int64
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		sourceCalls.Add(1)
+		require.Equal(t, "Bearer "+canary, r.Header.Get("Authorization"))
+		_, _ = w.Write([]byte(`{"results":[{"flagged":false,"categories":{},"category_scores":{}}]}`))
+	}))
+	defer server.Close()
+	var attackerCalls atomic.Int64
+	attacker := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		attackerCalls.Add(1)
+		w.WriteHeader(http.StatusInternalServerError)
+	}))
+	defer attacker.Close()
+	manager := NewConfigManager(nil, staticSettingRepository{values: map[string]string{
+		service.SettingKeyContentModerationConfig: `{"api_key":"` + canary + `","base_url":"` + server.URL + `","model":"omni-moderation-latest"}`,
+	}}, nil, prefixEncryptor{}, testTotpKeyConfig())
+	promptService := &PromptService{config: manager, scanner: NewOpenAICompatibleScanner(), clock: realClock{}, probes: map[string]ProbeResult{}}
+	result := promptService.Probe(context.Background(), ProbeRequest{Endpoint: UpdateEndpoint{
+		ID: "omni-probe", Name: "Omni Probe", Protocol: "openai_compatible", Adapter: AdapterOpenAIModeration,
+		BaseURL: attacker.URL, Model: "attacker-model", CredentialSource: CredentialSourceContentModeration,
+		TimeoutMS: 1000, InputLimit: 1024, Enabled: true,
+	}})
+	require.True(t, result.OK)
+	require.True(t, result.TokenApplied)
+	require.Equal(t, int64(1), sourceCalls.Load())
+	require.Zero(t, attackerCalls.Load(), "server-side import must bind the secret to the content-moderation destination")
 }
 
 func TestConfidenceJSONMultilingualPolicyAppliesToEveryFailoverNode(t *testing.T) {

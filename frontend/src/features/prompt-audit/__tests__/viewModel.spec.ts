@@ -54,7 +54,7 @@ describe('Prompt Audit view model', () => {
   it('normalizes legacy null collections from the public config', () => {
     const legacy = { ...config(), group_ids: null, scanners: null, endpoints: null } as unknown as PromptAuditConfig
     expect(configToDraft(legacy)).toMatchObject({
-      group_ids: [], scanners: [], endpoints: [], risk_route_account_ids: [], active_prompt_template_id: DEFAULT_PROMPT_TEMPLATE_ID,
+      group_ids: [], scanners: [], endpoints: [], risk_route_account_ids: [], cyber_feedback_account_ids: [], active_prompt_template_id: DEFAULT_PROMPT_TEMPLATE_ID,
       flag_threshold: 0.4, block_threshold: 0.7, block_http_status: 403, block_message: DEFAULT_BLOCK_MESSAGE,
       max_total_input_chars: 40000,
     })
@@ -90,6 +90,17 @@ describe('Prompt Audit view model', () => {
     expect(createDefaultEndpoint(3, 'confidence_json', 9).priority).toBe(9)
   })
 
+  it('creates OpenAI Moderation as a disabled priority-3 experimental node', () => {
+    expect(createDefaultEndpoint(4, 'openai_moderation', 99)).toMatchObject({
+      adapter: 'openai_moderation',
+      base_url: 'https://api.openai.com',
+      model: 'omni-moderation-latest',
+      priority: 3,
+      enabled: false,
+      credential_source: 'content_moderation',
+    })
+  })
+
   it('sums only enabled node timeouts for the worst-case failover wait', () => {
     expect(enabledFailoverTimeoutMS([
       { enabled: true, timeout_ms: 10000 },
@@ -116,6 +127,12 @@ describe('Prompt Audit view model', () => {
     const draft = configToDraft({ ...config(), risk_route_account_ids: [9, 2, 9] })
     expect(draft.risk_route_account_ids).toEqual([2, 9])
     expect(buildUpdateRequest(draft).risk_route_account_ids).toEqual([2, 9])
+  })
+
+  it('preserves and canonicalizes the independent CYB feedback account allowlist', () => {
+    const draft = configToDraft({ ...config(), cyber_feedback_account_ids: [91, 17, 91] })
+    expect(draft.cyber_feedback_account_ids).toEqual([17, 91])
+    expect(buildUpdateRequest(draft).cyber_feedback_account_ids).toEqual([17, 91])
   })
 
   it('clamps and fingerprints the per-request total audit cap', () => {

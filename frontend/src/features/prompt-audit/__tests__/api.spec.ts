@@ -30,6 +30,17 @@ describe('Prompt Audit API', () => {
     expect(JSON.stringify(result)).not.toContain('api-canary-secret')
   })
 
+  it('sends only the one-shot credential-source instruction for a moderation probe', async () => {
+    client.post.mockResolvedValue({ data: { ok: true, token_applied: true } })
+    await promptAuditAPI.probeEndpoint({
+      id: 'omni-1', name: 'Omni', protocol: 'openai_compatible', adapter: 'openai_moderation', base_url: 'https://attacker.invalid', model: 'attacker-model',
+      priority: 3, token: '', credential_source: 'content_moderation', clear_token: false, timeout_ms: 4000, input_limit: 40000, enabled: false, has_token: false, token_status: 'missing',
+    })
+    expect(client.post).toHaveBeenCalledWith('/admin/prompt-audit/endpoints/probe', expect.objectContaining({
+      endpoint: expect.objectContaining({ credential_source: 'content_moderation', token: undefined, adapter: 'openai_moderation' }),
+    }))
+  })
+
   it('loads every account page before resolving stale risk-route IDs', async () => {
     client.get.mockImplementation(async (url: string, options?: { params?: { page?: number } }) => {
       expect(url).toBe('/admin/accounts')

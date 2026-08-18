@@ -8,6 +8,9 @@ import (
 	"strings"
 	"sync"
 	"time"
+
+	infraerrors "github.com/Wei-Shaw/sub2api/internal/pkg/errors"
+	"github.com/Wei-Shaw/sub2api/internal/service"
 )
 
 type PromptService struct {
@@ -36,6 +39,10 @@ type PromptService struct {
 	enqueueSlots chan struct{}
 	probeMu      sync.RWMutex
 	probes       map[string]ProbeResult
+}
+
+type EndpointCredentialSourceResolver interface {
+	ResolveEndpointCredentialSource(context.Context, UpdateEndpoint) (UpdateEndpoint, error)
 }
 
 func NewPromptService(
@@ -116,6 +123,22 @@ func (s *PromptService) EffectiveMode() Mode {
 		return ModeOff
 	}
 	return s.config.EffectiveMode()
+}
+
+// IncludesCyberFeedbackSource intentionally does not consult EffectiveMode or
+// the Prompt Audit group scope. It is a post-upstream capture policy, not an
+// instruction to audit the request before routing it.
+func (s *PromptService) IncludesCyberFeedbackSource(accountID int64, platform, accountType string) bool {
+	if s == nil || s.config == nil {
+		return strings.EqualFold(strings.TrimSpace(platform), service.PlatformOpenAI) &&
+			strings.EqualFold(strings.TrimSpace(accountType), service.AccountTypeOAuth)
+	}
+	cfg, ok := s.config.Active()
+	if !ok {
+		return strings.EqualFold(strings.TrimSpace(platform), service.PlatformOpenAI) &&
+			strings.EqualFold(strings.TrimSpace(accountType), service.AccountTypeOAuth)
+	}
+	return cfg.IncludesCyberFeedbackSource(accountID, platform, accountType)
 }
 
 func (s *PromptService) Enqueue(_ context.Context, req Request) error {
@@ -303,6 +326,17 @@ type ProbeRequest struct {
 
 func (s *PromptService) Probe(ctx context.Context, request ProbeRequest) ProbeResult {
 	started := s.clock.Now()
+	if strings.TrimSpace(request.Endpoint.CredentialSource) != "" {
+		resolver, ok := s.config.(EndpointCredentialSourceResolver)
+		if !ok || resolver == nil {
+			return s.finishProbe(request.Endpoint.ID, started, ProbeResult{Status: "failed", ErrorCode: "endpoint_credential_source_unavailable", Message: "审计节点凭据来源不可用"})
+		}
+		resolved, resolveErr := resolver.ResolveEndpointCredentialSource(ctx, request.Endpoint)
+		if resolveErr != nil {
+			return s.finishProbe(request.Endpoint.ID, started, ProbeResult{Status: "failed", ErrorCode: infraerrors.Reason(resolveErr), Message: "审计节点凭据来源不可用"})
+		}
+		request.Endpoint = resolved
+	}
 	endpoint, tokenApplied, err := s.resolveProbeEndpoint(request.Endpoint)
 	if err != nil {
 		return s.finishProbe(request.Endpoint.ID, started, ProbeResult{Status: "failed", ErrorCode: "endpoint_invalid", Message: "审计节点配置无效"})
@@ -428,9 +462,12 @@ func (s *PromptService) resolveProbeEndpoint(input UpdateEndpoint) (ActiveEndpoi
 		}
 		supplementApplied = len(cyberRules) > 0
 	}
+	if adapter == AdapterOpenAIModeration {
+		systemPrompt = ""
+	}
 	model := strings.TrimSpace(input.Model)
 	if model == "" {
-		model = DefaultGuardModel
+		model = defaultModelForPromptAdapter(adapter)
 	}
 	timeout := input.TimeoutMS
 	if timeout == 0 {

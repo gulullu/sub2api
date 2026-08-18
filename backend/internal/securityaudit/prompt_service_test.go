@@ -18,8 +18,12 @@ type staticSettingRepository struct {
 func (r staticSettingRepository) Get(context.Context, string) (*service.Setting, error) {
 	return nil, service.ErrSettingNotFound
 }
-func (r staticSettingRepository) GetValue(context.Context, string) (string, error) {
-	return "", service.ErrSettingNotFound
+func (r staticSettingRepository) GetValue(_ context.Context, key string) (string, error) {
+	value, ok := r.values[key]
+	if !ok {
+		return "", service.ErrSettingNotFound
+	}
+	return value, nil
 }
 func (r staticSettingRepository) Set(context.Context, string, string) error { return nil }
 func (r staticSettingRepository) GetMultiple(_ context.Context, keys []string) (map[string]string, error) {

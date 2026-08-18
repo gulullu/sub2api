@@ -19,6 +19,7 @@ var ProviderSet = wire.NewSet(
 	wire.Bind(new(PromptEngine), new(*PromptService)),
 	wire.Bind(new(PromptAdminService), new(*PromptService)),
 	wire.Bind(new(CyberRuleDraftGenerator), new(*PromptService)),
+	wire.Bind(new(CyberFeedbackScopeProvider), new(*PromptService)),
 	NewCyberFeedbackService,
 	NewLegacyModerationAdapter,
 	NewCoordinator,

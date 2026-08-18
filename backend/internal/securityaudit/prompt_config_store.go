@@ -273,6 +273,10 @@ func (m *ConfigManager) Save(ctx context.Context, req UpdateConfigRequest, actor
 	if current.ConfigVersion != req.ExpectedConfigVersion {
 		return PublicConfig{}, infraerrors.Conflict(ErrorCodeConfigConflict, "提示词审计配置已被其他管理员更新")
 	}
+	req, err = m.resolveEndpointCredentialSourcesTx(ctx, tx, current, req)
+	if err != nil {
+		return PublicConfig{}, err
+	}
 	next, err := m.buildNextStorage(current, req, actorID)
 	if err != nil {
 		return PublicConfig{}, err
@@ -326,6 +330,121 @@ func (m *ConfigManager) Save(ctx context.Context, req UpdateConfigRequest, actor
 	return PublicFromStorage(next, active.RiskControlEnabled, active.InvalidTokenEndpointIDs()), nil
 }
 
+func (m *ConfigManager) resolveEndpointCredentialSourcesTx(ctx context.Context, tx *sql.Tx, current storageConfig, req UpdateConfigRequest) (UpdateConfigRequest, error) {
+	if !hasEndpointCredentialSource(req.Endpoints) {
+		return req, nil
+	}
+	var raw string
+	if err := tx.QueryRowContext(ctx, `SELECT value FROM settings WHERE key=$1`, service.SettingKeyContentModerationConfig).Scan(&raw); err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return UpdateConfigRequest{}, contentModerationCredentialError("prompt_audit_content_moderation_credential_missing", "内容审计未配置可复用的 API Key")
+		}
+		return UpdateConfigRequest{}, err
+	}
+	source, err := parseContentModerationCredentialSource(raw)
+	if err != nil {
+		return UpdateConfigRequest{}, err
+	}
+	return applyEndpointCredentialSource(req, current, source)
+}
+
+// ResolveEndpointCredentialSource implements the optional probe-time resolver.
+// The returned UpdateEndpoint contains the credential only in process memory.
+func (m *ConfigManager) ResolveEndpointCredentialSource(ctx context.Context, endpoint UpdateEndpoint) (UpdateEndpoint, error) {
+	if strings.TrimSpace(endpoint.CredentialSource) == "" {
+		return endpoint, nil
+	}
+	if m == nil || m.settings == nil {
+		return UpdateEndpoint{}, contentModerationCredentialError("prompt_audit_content_moderation_credential_missing", "内容审计凭据暂不可用")
+	}
+	raw, err := m.settings.GetValue(ctx, service.SettingKeyContentModerationConfig)
+	if err != nil {
+		return UpdateEndpoint{}, contentModerationCredentialError("prompt_audit_content_moderation_credential_missing", "内容审计未配置可复用的 API Key")
+	}
+	source, err := parseContentModerationCredentialSource(raw)
+	if err != nil {
+		return UpdateEndpoint{}, err
+	}
+	req, err := applyEndpointCredentialSource(UpdateConfigRequest{Endpoints: []UpdateEndpoint{endpoint}}, storageConfig{}, source)
+	if err != nil {
+		return UpdateEndpoint{}, err
+	}
+	return req.Endpoints[0], nil
+}
+
+func hasEndpointCredentialSource(endpoints []UpdateEndpoint) bool {
+	for _, endpoint := range endpoints {
+		if strings.TrimSpace(endpoint.CredentialSource) != "" {
+			return true
+		}
+	}
+	return false
+}
+
+type endpointCredentialSource struct {
+	credential string
+	baseURL    string
+	model      string
+}
+
+func applyEndpointCredentialSource(req UpdateConfigRequest, current storageConfig, material endpointCredentialSource) (UpdateConfigRequest, error) {
+	currentByID := make(map[string]StorageEndpoint, len(current.Endpoints))
+	for _, endpoint := range current.Endpoints {
+		currentByID[endpoint.ID] = endpoint
+	}
+	for index := range req.Endpoints {
+		endpoint := &req.Endpoints[index]
+		credentialSource := strings.TrimSpace(endpoint.CredentialSource)
+		if credentialSource == "" {
+			continue
+		}
+		if credentialSource != CredentialSourceContentModeration {
+			return UpdateConfigRequest{}, contentModerationCredentialError("prompt_audit_invalid_credential_source", "审计节点凭据来源无效")
+		}
+		adapter := strings.TrimSpace(endpoint.Adapter)
+		if adapter == "" {
+			adapter = currentByID[strings.TrimSpace(endpoint.ID)].Adapter
+		}
+		if adapter != AdapterOpenAIModeration {
+			return UpdateConfigRequest{}, contentModerationCredentialError("prompt_audit_credential_source_adapter_mismatch", "仅 OpenAI Moderation 节点可复用内容审计凭据")
+		}
+		if strings.TrimSpace(endpoint.Token) != "" || endpoint.ClearToken {
+			return UpdateConfigRequest{}, contentModerationCredentialError("prompt_audit_credential_source_conflict", "不能同时提交节点 Token、清除 Token 与凭据复用")
+		}
+		endpoint.Token = material.credential
+		endpoint.BaseURL = material.baseURL
+		endpoint.Model = material.model
+		endpoint.CredentialSource = ""
+	}
+	return req, nil
+}
+
+func parseContentModerationCredentialSource(raw string) (endpointCredentialSource, error) {
+	stored, err := service.ParseContentModerationCredentialMaterial(raw)
+	if err != nil {
+		return endpointCredentialSource{}, contentModerationCredentialError("prompt_audit_content_moderation_credential_invalid", "内容审计凭据配置无效")
+	}
+	if len(stored.APIKeys) == 0 {
+		return endpointCredentialSource{}, contentModerationCredentialError("prompt_audit_content_moderation_credential_missing", "内容审计未配置可复用的 API Key")
+	}
+	if len(stored.APIKeys) != 1 {
+		return endpointCredentialSource{}, contentModerationCredentialError("prompt_audit_content_moderation_credential_ambiguous", "内容审计配置了多个 API Key，无法确定要复用哪一个")
+	}
+	baseURL, err := NormalizeBaseURL(stored.BaseURL)
+	if err != nil {
+		return endpointCredentialSource{}, contentModerationCredentialError("prompt_audit_content_moderation_source_invalid", "内容审计 Base URL 无效，无法安全复用凭据")
+	}
+	model := strings.TrimSpace(stored.Model)
+	if model == "" {
+		return endpointCredentialSource{}, contentModerationCredentialError("prompt_audit_content_moderation_source_invalid", "内容审计模型为空，无法安全复用凭据")
+	}
+	return endpointCredentialSource{credential: stored.APIKeys[0], baseURL: baseURL, model: model}, nil
+}
+
+func contentModerationCredentialError(code, message string) error {
+	return infraerrors.BadRequest(code, message)
+}
+
 func (m *ConfigManager) buildNextStorage(current storageConfig, req UpdateConfigRequest, actorID int64) (storageConfig, error) {
 	if err := validateUpdateConfigRequest(req); err != nil {
 		return storageConfig{}, err
@@ -339,9 +458,10 @@ func (m *ConfigManager) buildNextStorage(current storageConfig, req UpdateConfig
 		Strategy: strings.TrimSpace(req.Strategy), WorkerCount: req.WorkerCount,
 		QueueCapacity: req.QueueCapacity, Scanners: append([]string(nil), req.Scanners...),
 		AllGroups: req.AllGroups, GroupIDs: append([]int64(nil), req.GroupIDs...),
-		RiskRouteAccountIDs: append([]int64(nil), current.RiskRouteAccountIDs...),
-		MaxTotalInputChars:  current.MaxTotalInputChars,
-		PromptTemplates:     clonePromptTemplates(current.PromptTemplates), ActivePromptTemplateID: current.ActivePromptTemplateID,
+		RiskRouteAccountIDs:     append([]int64(nil), current.RiskRouteAccountIDs...),
+		CyberFeedbackAccountIDs: append([]int64(nil), current.CyberFeedbackAccountIDs...),
+		MaxTotalInputChars:      current.MaxTotalInputChars,
+		PromptTemplates:         clonePromptTemplates(current.PromptTemplates), ActivePromptTemplateID: current.ActivePromptTemplateID,
 		CyberSupplementRules: cloneCyberSupplementRules(current.CyberSupplementRules),
 		FlagThreshold:        float64Pointer(thresholdValue(current.FlagThreshold, DefaultFlagThreshold)),
 		BlockThreshold:       float64Pointer(thresholdValue(current.BlockThreshold, DefaultBlockThreshold)),
@@ -351,6 +471,9 @@ func (m *ConfigManager) buildNextStorage(current storageConfig, req UpdateConfig
 	}
 	if req.RiskRouteAccountIDs != nil {
 		next.RiskRouteAccountIDs = append([]int64(nil), (*req.RiskRouteAccountIDs)...)
+	}
+	if req.CyberFeedbackAccountIDs != nil {
+		next.CyberFeedbackAccountIDs = append([]int64(nil), (*req.CyberFeedbackAccountIDs)...)
 	}
 	if req.MaxTotalInputChars != nil {
 		next.MaxTotalInputChars = *req.MaxTotalInputChars
@@ -504,6 +627,7 @@ func (m *ConfigManager) WithCyberSupplementMutationLock(ctx context.Context, ope
 
 func updateRequestFromStorage(storage storageConfig) UpdateConfigRequest {
 	riskIDs := append([]int64(nil), storage.RiskRouteAccountIDs...)
+	cyberAccountIDs := append([]int64(nil), storage.CyberFeedbackAccountIDs...)
 	maxChars := storage.MaxTotalInputChars
 	templates := clonePromptTemplates(storage.PromptTemplates)
 	activeTemplateID := storage.ActivePromptTemplateID
@@ -518,7 +642,8 @@ func updateRequestFromStorage(storage storageConfig) UpdateConfigRequest {
 		Strategy: storage.Strategy, WorkerCount: storage.WorkerCount, QueueCapacity: storage.QueueCapacity,
 		Scanners: append([]string(nil), storage.Scanners...), AllGroups: storage.AllGroups,
 		GroupIDs: append([]int64(nil), storage.GroupIDs...), RiskRouteAccountIDs: &riskIDs,
-		MaxTotalInputChars: &maxChars, PromptTemplates: &templates, ActivePromptTemplateID: &activeTemplateID,
+		CyberFeedbackAccountIDs: &cyberAccountIDs,
+		MaxTotalInputChars:      &maxChars, PromptTemplates: &templates, ActivePromptTemplateID: &activeTemplateID,
 		FlagThreshold: &flagThreshold, BlockThreshold: &blockThreshold,
 		BlockHTTPStatus: &blockStatus, BlockMessage: &blockMessage,
 		Endpoints: make([]UpdateEndpoint, 0, len(storage.Endpoints)),
@@ -638,6 +763,7 @@ func cloneStorageConfig(cfg storageConfig) storageConfig {
 	cfg.Scanners = append([]string(nil), cfg.Scanners...)
 	cfg.GroupIDs = append([]int64(nil), cfg.GroupIDs...)
 	cfg.RiskRouteAccountIDs = append([]int64(nil), cfg.RiskRouteAccountIDs...)
+	cfg.CyberFeedbackAccountIDs = append([]int64(nil), cfg.CyberFeedbackAccountIDs...)
 	cfg.PromptTemplates = clonePromptTemplates(cfg.PromptTemplates)
 	cfg.CyberSupplementRules = cloneCyberSupplementRules(cfg.CyberSupplementRules)
 	cfg.FlagThreshold = float64Pointer(thresholdValue(cfg.FlagThreshold, DefaultFlagThreshold))
@@ -650,6 +776,7 @@ func cloneActiveConfig(cfg ActiveConfig) ActiveConfig {
 	cfg.Scanners = append([]string(nil), cfg.Scanners...)
 	cfg.GroupIDs = append([]int64(nil), cfg.GroupIDs...)
 	cfg.RiskRouteAccountIDs = append([]int64(nil), cfg.RiskRouteAccountIDs...)
+	cfg.CyberFeedbackAccountIDs = append([]int64(nil), cfg.CyberFeedbackAccountIDs...)
 	cfg.PromptTemplates = clonePromptTemplates(cfg.PromptTemplates)
 	cfg.CyberSupplementRules = cloneCyberSupplementRules(cfg.CyberSupplementRules)
 	cfg.Endpoints = append([]ActiveEndpoint(nil), cfg.Endpoints...)

@@ -1,7 +1,8 @@
 export type PromptAuditMode = 'off' | 'async_audit' | 'blocking'
 export type PromptDecision = 'pass' | 'flag' | 'critical'
 export type PromptRiskLevel = 'low' | 'medium' | 'high' | 'critical'
-export type PromptAuditAdapter = 'qwen3guard' | 'confidence_json'
+export type PromptAuditAdapter = 'qwen3guard' | 'confidence_json' | 'openai_moderation'
+export type PromptAuditCredentialSource = '' | 'content_moderation'
 
 export interface PromptAuditTemplate {
   id: string
@@ -45,6 +46,7 @@ export interface PromptAuditEndpointDraft extends Omit<PromptAuditEndpoint, 'ada
   adapter: PromptAuditAdapter
   priority: number
   token: string
+  credential_source?: PromptAuditCredentialSource
   clear_token: boolean
 }
 
@@ -61,6 +63,7 @@ export interface PromptAuditConfig {
   all_groups: boolean
   group_ids: number[]
   risk_route_account_ids?: number[]
+  cyber_feedback_account_ids?: number[]
   prompt_templates?: PromptAuditTemplate[]
   active_prompt_template_id?: string
   flag_threshold?: number
@@ -86,6 +89,7 @@ export interface PromptAuditDraft extends Omit<
   | 'block_message'
   | 'max_total_input_chars'
   | 'risk_route_account_ids'
+  | 'cyber_feedback_account_ids'
 > {
   endpoints: PromptAuditEndpointDraft[]
   prompt_templates: PromptAuditTemplate[]
@@ -96,6 +100,7 @@ export interface PromptAuditDraft extends Omit<
   block_message: string
   max_total_input_chars: number
   risk_route_account_ids: number[]
+  cyber_feedback_account_ids: number[]
 }
 
 export interface PromptAuditUpdateRequest {
@@ -111,6 +116,7 @@ export interface PromptAuditUpdateRequest {
   all_groups: boolean
   group_ids: number[]
   risk_route_account_ids: number[]
+  cyber_feedback_account_ids: number[]
   prompt_templates: PromptAuditTemplate[]
   active_prompt_template_id: string
   flag_threshold: number
@@ -127,6 +133,7 @@ export interface PromptAuditUpdateRequest {
     model: string
     priority: number
     token?: string
+    credential_source?: Exclude<PromptAuditCredentialSource, ''>
     clear_token: boolean
     timeout_ms: number
     input_limit: number

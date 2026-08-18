@@ -174,6 +174,30 @@ type ContentModerationConfig struct {
 	CyberPolicyExcludeFromBanCount bool `json:"cyber_policy_exclude_from_ban_count"`
 }
 
+// ContentModerationCredentialMaterial is the server-only subset of the stored
+// content-moderation configuration that another internal service may import.
+// It must never be exposed by an HTTP DTO or written to logs.
+type ContentModerationCredentialMaterial struct {
+	APIKeys []string
+	BaseURL string
+	Model   string
+}
+
+// ParseContentModerationCredentialMaterial applies the same defaults and
+// normalization as the live content-moderation service. The caller is
+// responsible for requiring exactly one API key before using the material.
+func ParseContentModerationCredentialMaterial(raw string) (ContentModerationCredentialMaterial, error) {
+	cfg, err := parseContentModerationConfig(raw)
+	if err != nil {
+		return ContentModerationCredentialMaterial{}, err
+	}
+	return ContentModerationCredentialMaterial{
+		APIKeys: append([]string(nil), cfg.APIKeys...),
+		BaseURL: cfg.BaseURL,
+		Model:   cfg.Model,
+	}, nil
+}
+
 type ContentModerationConfigView struct {
 	Enabled                        bool                            `json:"enabled"`
 	Mode                           string                          `json:"mode"`

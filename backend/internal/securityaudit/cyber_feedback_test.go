@@ -29,7 +29,7 @@ func TestCyberPrepareTurnFailOpenStillKeepsSafeMetadata(t *testing.T) {
 		Body: []byte(`{"input":"confirmed test prompt"}`), Stage: "http",
 	}
 
-	withoutKey := NewCyberFeedbackService(nil, nil, &config.Config{}, nil, nil, nil)
+	withoutKey := NewCyberFeedbackService(nil, nil, &config.Config{}, nil, nil, nil, nil)
 	evidence, ok := withoutKey.PrepareTurn(req, 0)
 	require.True(t, ok)
 	require.Empty(t, evidence.Scope.PromptSignature)
@@ -177,7 +177,7 @@ func (*cyberFeedbackRepositoryStub) CompleteCyberRuleGeneration(context.Context,
 
 func TestConfirmRecordsMetadataWithoutFingerprint(t *testing.T) {
 	repo := &cyberFeedbackRepositoryStub{}
-	serviceUnderTest := NewCyberFeedbackService(repo, nil, &config.Config{}, nil, nil, nil)
+	serviceUnderTest := NewCyberFeedbackService(repo, nil, &config.Config{}, nil, nil, nil, nil)
 	groupID := int64(12)
 	evidence, ok := serviceUnderTest.PrepareTurn(Request{
 		RequestID: "same-client-visible-id", APIKeyID: 7, GroupID: &groupID,
@@ -197,7 +197,7 @@ func TestConfirmRecordsMetadataWithoutFingerprint(t *testing.T) {
 
 func TestConfirmSnapshotsAdminEvidenceAndUpstreamIdentity(t *testing.T) {
 	repo := &cyberFeedbackRepositoryStub{}
-	svc := NewCyberFeedbackService(repo, nil, &config.Config{}, nil, nil, nil)
+	svc := NewCyberFeedbackService(repo, nil, &config.Config{}, nil, nil, nil, nil)
 	groupID := int64(12)
 	evidence, ok := svc.PrepareTurn(Request{
 		RequestID: "req-evidence", UserID: 3, Username: "tester", UserEmail: "tester@example.test",
@@ -252,8 +252,8 @@ func TestCyberSignatureScopesByGroupAndKeyVersionOnly(t *testing.T) {
 		GroupID: &groupID, Provider: service.PlatformOpenAI, Protocol: "openai_responses",
 		Body: []byte(`{"input":"same normalized prompt"}`), Stage: "http",
 	}
-	first := NewCyberFeedbackService(nil, nil, &config.Config{JWT: config.JWTConfig{Secret: "stable-key-one"}}, nil, nil, nil)
-	second := NewCyberFeedbackService(nil, nil, &config.Config{JWT: config.JWTConfig{Secret: "stable-key-two"}}, nil, nil, nil)
+	first := NewCyberFeedbackService(nil, nil, &config.Config{JWT: config.JWTConfig{Secret: "stable-key-one"}}, nil, nil, nil, nil)
+	second := NewCyberFeedbackService(nil, nil, &config.Config{JWT: config.JWTConfig{Secret: "stable-key-two"}}, nil, nil, nil, nil)
 
 	httpEvidence, ok := first.PrepareTurn(req, 0)
 	require.True(t, ok)
@@ -279,7 +279,7 @@ func TestCyberSignatureScopesByGroupAndKeyVersionOnly(t *testing.T) {
 	require.True(t, ok)
 	require.NotEqual(t, cyberEventKey(httpEvidence, 99), cyberEventKey(secondEvidence, 99))
 
-	noKey := NewCyberFeedbackService(nil, nil, &config.Config{}, nil, nil, nil)
+	noKey := NewCyberFeedbackService(nil, nil, &config.Config{}, nil, nil, nil, nil)
 	withoutFingerprintA, ok := noKey.PrepareTurn(req, 0)
 	require.True(t, ok)
 	withoutFingerprintB, ok := noKey.PrepareTurn(req, 0)
@@ -301,7 +301,7 @@ func TestBoundedCyberRuleSource(t *testing.T) {
 	require.Equal(t, input[len(input)-1024:], bounded[len(bounded)-1024:])
 
 	groupID := int64(12)
-	svc := NewCyberFeedbackService(nil, nil, &config.Config{JWT: config.JWTConfig{Secret: "stable-key"}}, nil, nil, nil)
+	svc := NewCyberFeedbackService(nil, nil, &config.Config{JWT: config.JWTConfig{Secret: "stable-key"}}, nil, nil, nil, nil)
 	evidence, ok := svc.PrepareTurn(Request{
 		GroupID: &groupID, Provider: service.PlatformOpenAI, Protocol: "openai_responses",
 		Body: []byte(fmt.Sprintf(`{"input":%q}`, strings.Repeat("large-sensitive-source", 5000))),
@@ -421,7 +421,7 @@ func TestCyberReplayWarmUsesReadyZSetAndIsGroupIsolated(t *testing.T) {
 	repo := &cyberReplayRepositoryStub{items: []CyberActiveSignature{{
 		ID: 1, GroupID: 1, SignatureVersion: version, PromptSignature: groupOne.PromptSignature, ExpiresAt: now.Add(24 * time.Hour),
 	}}}
-	svc := NewCyberFeedbackService(repo, client, &config.Config{}, nil, nil, nil)
+	svc := NewCyberFeedbackService(repo, client, &config.Config{}, nil, nil, nil, nil)
 	svc.clock = fixedClock{now: now}
 
 	require.True(t, svc.IsReplay(context.Background(), CyberTurnEvidence{Scope: groupOne}))
@@ -447,7 +447,7 @@ func TestCyberReplayWarmCompletesMultiplePages(t *testing.T) {
 		}
 	}
 	repo := &cyberReplayRepositoryStub{items: items}
-	svc := NewCyberFeedbackService(repo, client, &config.Config{}, nil, nil, nil)
+	svc := NewCyberFeedbackService(repo, client, &config.Config{}, nil, nil, nil, nil)
 	svc.clock = fixedClock{now: now}
 	scope := cyberTestScope(7, version, items[len(items)-1].PromptSignature)
 	require.True(t, svc.IsReplay(context.Background(), CyberTurnEvidence{Scope: scope}))
@@ -458,7 +458,7 @@ func TestCyberReplayWarmTimeoutDoesNotPublishReadyMarker(t *testing.T) {
 	_, client := newCyberReplayRedis(t)
 	version := "hmac-sha256-v1:timeout"
 	repo := &cyberReplayRepositoryStub{wait: true}
-	svc := NewCyberFeedbackService(repo, client, &config.Config{}, nil, nil, nil)
+	svc := NewCyberFeedbackService(repo, client, &config.Config{}, nil, nil, nil, nil)
 	scope := cyberTestScope(8, version, []byte("signature"))
 	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Millisecond)
 	defer cancel()
@@ -478,7 +478,7 @@ func TestCyberReplayWarmSurvivesFirstCallerCancellation(t *testing.T) {
 			PromptSignature: scope.PromptSignature, ExpiresAt: time.Now().Add(time.Hour),
 		}},
 	}
-	svc := NewCyberFeedbackService(repo, client, &config.Config{}, nil, nil, nil)
+	svc := NewCyberFeedbackService(repo, client, &config.Config{}, nil, nil, nil, nil)
 	ctx, cancel := context.WithCancel(context.Background())
 	returned := make(chan bool, 1)
 	go func() { returned <- svc.IsReplay(ctx, CyberTurnEvidence{Scope: scope}) }()
@@ -502,7 +502,7 @@ func TestCyberReplayWarmCannotShortenConcurrentConfirmation(t *testing.T) {
 	repo := &cyberReplayRepositoryStub{items: []CyberActiveSignature{{
 		ID: 1, GroupID: 9, SignatureVersion: version, PromptSignature: scope.PromptSignature, ExpiresAt: oldExpiry,
 	}}}
-	svc := NewCyberFeedbackService(repo, client, &config.Config{}, nil, nil, nil)
+	svc := NewCyberFeedbackService(repo, client, &config.Config{}, nil, nil, nil, nil)
 	svc.clock = fixedClock{now: now}
 	zsetKey := cyberSignatureZSetKey(9, version)
 	require.NoError(t, client.ZAdd(context.Background(), zsetKey, redis.Z{
@@ -519,7 +519,7 @@ func TestCyberReplayNeverExtendsPersistedExpiryOnRead(t *testing.T) {
 	now := time.Date(2026, 8, 17, 2, 0, 0, 0, time.UTC)
 	version := "hmac-sha256-v1:ttl"
 	scope := cyberTestScope(10, version, []byte("signature"))
-	svc := NewCyberFeedbackService(&cyberReplayRepositoryStub{}, client, &config.Config{}, nil, nil, nil)
+	svc := NewCyberFeedbackService(&cyberReplayRepositoryStub{}, client, &config.Config{}, nil, nil, nil, nil)
 	clock := &advancingClock{now: now}
 	svc.clock = clock
 	zsetKey := cyberSignatureZSetKey(10, version)
@@ -546,7 +546,7 @@ func TestCyberReplayRedisFailureKeepsBoundedLocalPositive(t *testing.T) {
 	})
 	t.Cleanup(func() { _ = dead.Close() })
 	now := time.Date(2026, 8, 17, 2, 0, 0, 0, time.UTC)
-	svc := NewCyberFeedbackService(&cyberReplayRepositoryStub{}, dead, &config.Config{}, nil, nil, nil)
+	svc := NewCyberFeedbackService(&cyberReplayRepositoryStub{}, dead, &config.Config{}, nil, nil, nil, nil)
 	svc.clock = fixedClock{now: now}
 	scope := cyberTestScope(11, "hmac-sha256-v1:dead", []byte("signature"))
 	svc.cacheConfirmedSignature(context.Background(), scope, now.Add(6*24*time.Hour))
@@ -558,7 +558,7 @@ func TestCyberReplayRedisFailureKeepsBoundedLocalPositive(t *testing.T) {
 
 func TestCyberCanonicalFingerprintPreservesRolesAndSegmentBoundaries(t *testing.T) {
 	groupID := int64(12)
-	svc := NewCyberFeedbackService(nil, nil, &config.Config{JWT: config.JWTConfig{Secret: "stable-key"}}, nil, nil, nil)
+	svc := NewCyberFeedbackService(nil, nil, &config.Config{JWT: config.JWTConfig{Secret: "stable-key"}}, nil, nil, nil, nil)
 	prepare := func(protocol, stage, body string) CyberTurnEvidence {
 		evidence, ok := svc.PrepareTurn(Request{
 			GroupID: &groupID, Provider: service.PlatformOpenAI, Protocol: protocol, Stage: stage, Body: []byte(body),
@@ -642,7 +642,7 @@ func TestCyberEventNonceFallbackAndFeedbackJSONStaySafe(t *testing.T) {
 func TestCyberFeedbackPreviewWithholdsAllPromptText(t *testing.T) {
 	groupID := int64(12)
 	repo := &cyberFeedbackRepositoryStub{}
-	svc := NewCyberFeedbackService(repo, nil, &config.Config{JWT: config.JWTConfig{Secret: "stable-key"}}, nil, nil, nil)
+	svc := NewCyberFeedbackService(repo, nil, &config.Config{JWT: config.JWTConfig{Secret: "stable-key"}}, nil, nil, nil, nil)
 	evidence, ok := svc.PrepareTurn(Request{
 		RequestID: "request-safe-preview", GroupID: &groupID, Provider: service.PlatformOpenAI,
 		Protocol: "openai_responses", Body: []byte(`{"input":"Alice_INTERNAL asked about abcd1234"}`),

@@ -10,6 +10,7 @@ import type {
 
 export const DEFAULT_GUARD_MODEL = 'sileader/qwen3guard:0.6b'
 export const DEFAULT_CONFIDENCE_MODEL = 'deepseek-chat'
+export const DEFAULT_OPENAI_MODERATION_MODEL = 'omni-moderation-latest'
 export const DEFAULT_PROMPT_TEMPLATE_ID = 'relaybases-cyber-safety-v1'
 export const DEFAULT_FLAG_THRESHOLD = 0.4
 export const DEFAULT_BLOCK_THRESHOLD = 0.7
@@ -136,6 +137,7 @@ export function configToDraft(config: PromptAuditConfig): PromptAuditDraft {
     ...cloneData(config),
     group_ids: [...(config.group_ids ?? [])],
     risk_route_account_ids: normalizedPositiveIDs(config.risk_route_account_ids),
+    cyber_feedback_account_ids: normalizedPositiveIDs(config.cyber_feedback_account_ids),
     scanners: [...(config.scanners ?? [])],
     prompt_templates: promptTemplates,
     active_prompt_template_id: activeTemplateID,
@@ -148,9 +150,10 @@ export function configToDraft(config: PromptAuditConfig): PromptAuditDraft {
       : DEFAULT_MAX_TOTAL_INPUT_CHARS,
     endpoints: (config.endpoints ?? []).map((endpoint, index) => ({
       ...endpoint,
-      adapter: endpoint.adapter === 'confidence_json' ? 'confidence_json' : 'qwen3guard',
+      adapter: endpoint.adapter === 'confidence_json' || endpoint.adapter === 'openai_moderation' ? endpoint.adapter : 'qwen3guard',
       priority: normalizedEndpointPriority(endpoint.priority, index + 1),
       token: '',
+      credential_source: '',
       clear_token: false,
     })),
   }
@@ -162,20 +165,22 @@ export function createDefaultEndpoint(
   priority = index,
 ): PromptAuditEndpointDraft {
   const confidenceJSON = adapter === 'confidence_json'
+  const openAIModeration = adapter === 'openai_moderation'
   return {
     id: `guard-${Date.now()}-${index}`,
-    name: confidenceJSON ? `Confidence Audit ${index}` : `Qwen3Guard ${index}`,
+    name: openAIModeration ? `OpenAI Moderation ${index}` : confidenceJSON ? `Confidence Audit ${index}` : `Qwen3Guard ${index}`,
     protocol: 'openai_compatible',
     adapter,
-    base_url: confidenceJSON ? 'https://api.deepseek.com' : 'http://127.0.0.1:8000',
-    model: confidenceJSON ? DEFAULT_CONFIDENCE_MODEL : DEFAULT_GUARD_MODEL,
-    priority: normalizedEndpointPriority(priority, index),
-    timeout_ms: confidenceJSON ? 4000 : 3000,
-    input_limit: confidenceJSON ? 40000 : 4000,
-    enabled: true,
+    base_url: openAIModeration ? 'https://api.openai.com' : confidenceJSON ? 'https://api.deepseek.com' : 'http://127.0.0.1:8000',
+    model: openAIModeration ? DEFAULT_OPENAI_MODERATION_MODEL : confidenceJSON ? DEFAULT_CONFIDENCE_MODEL : DEFAULT_GUARD_MODEL,
+    priority: openAIModeration ? 3 : normalizedEndpointPriority(priority, index),
+    timeout_ms: confidenceJSON || openAIModeration ? 4000 : 3000,
+    input_limit: confidenceJSON || openAIModeration ? 40000 : 4000,
+    enabled: !openAIModeration,
     has_token: false,
     token_status: 'missing',
     token: '',
+    credential_source: openAIModeration ? 'content_moderation' : '',
     clear_token: false,
   }
 }
@@ -194,6 +199,7 @@ export function buildUpdateRequest(draft: PromptAuditDraft): PromptAuditUpdateRe
     all_groups: draft.all_groups,
     group_ids: draft.all_groups ? [] : [...draft.group_ids].sort((a, b) => a - b),
     risk_route_account_ids: normalizedPositiveIDs(draft.risk_route_account_ids),
+    cyber_feedback_account_ids: normalizedPositiveIDs(draft.cyber_feedback_account_ids),
     prompt_templates: draft.prompt_templates.map((template) => ({
       id: template.id.trim(),
       name: template.name.trim(),
@@ -212,9 +218,10 @@ export function buildUpdateRequest(draft: PromptAuditDraft): PromptAuditUpdateRe
       protocol: 'openai_compatible',
       adapter: endpoint.adapter,
       base_url: endpoint.base_url.trim(),
-      model: endpoint.model.trim() || (endpoint.adapter === 'confidence_json' ? DEFAULT_CONFIDENCE_MODEL : DEFAULT_GUARD_MODEL),
+      model: endpoint.model.trim() || (endpoint.adapter === 'openai_moderation' ? DEFAULT_OPENAI_MODERATION_MODEL : endpoint.adapter === 'confidence_json' ? DEFAULT_CONFIDENCE_MODEL : DEFAULT_GUARD_MODEL),
       priority: normalizedEndpointPriority(endpoint.priority, index + 1),
       token: endpoint.token.trim() || undefined,
+      credential_source: endpoint.credential_source || undefined,
       clear_token: endpoint.clear_token,
       timeout_ms: Number(endpoint.timeout_ms),
       input_limit: Number(endpoint.input_limit),

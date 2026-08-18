@@ -199,13 +199,18 @@ func (s *OpenAICompatibleScanner) Scan(ctx context.Context, endpoint ActiveEndpo
 	if err != nil {
 		return nil, &GuardError{Code: ErrorCodeUnavailable, Cause: err}
 	}
-	requestURL, err := ChatCompletionsURL(endpoint.BaseURL)
-	if err != nil {
-		return nil, &GuardError{Code: ErrorCodeUnavailable, Cause: err}
-	}
 	adapter := strings.TrimSpace(endpoint.Adapter)
 	if adapter == "" {
 		adapter = AdapterQwen3Guard
+	}
+	requestURL := ""
+	if adapter == AdapterOpenAIModeration {
+		requestURL, err = ModerationsURL(endpoint.BaseURL)
+	} else {
+		requestURL, err = ChatCompletionsURL(endpoint.BaseURL)
+	}
+	if err != nil {
+		return nil, &GuardError{Code: ErrorCodeUnavailable, Cause: err}
 	}
 	var payload map[string]any
 	switch adapter {
@@ -227,6 +232,8 @@ func (s *OpenAICompatibleScanner) Scan(ctx context.Context, endpoint ActiveEndpo
 			},
 			"temperature": 0,
 		}
+	case AdapterOpenAIModeration:
+		payload = map[string]any{"model": endpoint.Model, "input": chunk}
 	default:
 		return nil, &GuardError{Code: ErrorCodeInvalidResponse}
 	}
@@ -264,16 +271,22 @@ func (s *OpenAICompatibleScanner) Scan(ctx context.Context, endpoint ActiveEndpo
 	if int64(len(responseBody)) > maxGuardResponseBytes {
 		return nil, &GuardError{Code: ErrorCodeInvalidResponse}
 	}
-	content, err := extractOpenAIContent(responseBody)
-	if err != nil {
-		return nil, &GuardError{Code: ErrorCodeInvalidResponse, Cause: err}
-	}
 	var result *NormalizedResult
 	switch adapter {
 	case AdapterQwen3Guard:
+		content, extractErr := extractOpenAIContent(responseBody)
+		if extractErr != nil {
+			return nil, &GuardError{Code: ErrorCodeInvalidResponse, Cause: extractErr}
+		}
 		result, err = ParseQwen3Guard(content, enabledScanners)
 	case AdapterConfidenceJSON:
+		content, extractErr := extractOpenAIContent(responseBody)
+		if extractErr != nil {
+			return nil, &GuardError{Code: ErrorCodeInvalidResponse, Cause: extractErr}
+		}
 		result, err = ParseConfidenceJSON(content, endpoint)
+	case AdapterOpenAIModeration:
+		result, err = ParseOpenAIModeration(responseBody, endpoint, enabledScanners)
 	}
 	if err != nil {
 		return nil, err
@@ -281,6 +294,118 @@ func (s *OpenAICompatibleScanner) Scan(ctx context.Context, endpoint ActiveEndpo
 	result.GuardEndpointID = endpoint.ID
 	result.ScannerVersion = endpoint.Model
 	return result, nil
+}
+
+var openAIModerationCategoryOrder = []string{
+	"violence", "violence/graphic", "illicit/violent", "illicit",
+	"sexual", "sexual/minors",
+	"self-harm", "self-harm/intent", "self-harm/instructions",
+	"harassment", "harassment/threatening", "hate", "hate/threatening",
+}
+
+var openAIModerationReasonLabels = map[string]string{
+	"violent":                       "暴力或暴力型违法风险",
+	"non_violent_illegal_acts":      "非暴力违法风险",
+	"sexual_content_or_sexual_acts": "性内容风险",
+	"suicide_and_self_harm":         "自杀与自残风险",
+	"unethical_acts":                "骚扰或仇恨风险",
+}
+
+// ParseOpenAIModeration normalizes the official /v1/moderations response. The
+// provider's flagged boolean is authoritative for Safe vs Unsafe; category
+// scores are evidence only and never compared with Prompt Audit confidence
+// thresholds. As with Qwen3Guard, disabled known scanners downgrade an Unsafe
+// result to a warning instead of silently overriding the administrator policy.
+func ParseOpenAIModeration(body []byte, endpoint ActiveEndpoint, enabledScanners []string) (*NormalizedResult, error) {
+	var response struct {
+		Results []struct {
+			Flagged        *bool              `json:"flagged"`
+			Categories     map[string]bool    `json:"categories"`
+			CategoryScores map[string]float64 `json:"category_scores"`
+		} `json:"results"`
+	}
+	if err := json.Unmarshal(body, &response); err != nil || len(response.Results) == 0 || response.Results[0].Flagged == nil {
+		return nil, &GuardError{Code: ErrorCodeInvalidResponse, Cause: errors.New("OpenAI moderation response invalid")}
+	}
+	moderation := response.Results[0]
+	flaggedCategories := make(map[string]struct{})
+	scores := make(map[string]float64)
+	confidence := 0.0
+	for _, rawCategory := range openAIModerationCategoryOrder {
+		category := mapOpenAIModerationCategory(rawCategory)
+		if category == "" {
+			continue
+		}
+		if score, ok := moderation.CategoryScores[rawCategory]; ok {
+			if math.IsNaN(score) || math.IsInf(score, 0) || score < 0 || score > 1 {
+				return nil, &GuardError{Code: ErrorCodeInvalidResponse, Cause: errors.New("OpenAI moderation category score invalid")}
+			}
+			if score > scores[category] {
+				scores[category] = score
+			}
+			if score > confidence {
+				confidence = score
+			}
+		}
+		if moderation.Categories[rawCategory] {
+			flaggedCategories[category] = struct{}{}
+		}
+	}
+	categories := orderedScannerKeys(flaggedCategories)
+	enabled := make(map[string]struct{}, len(enabledScanners))
+	for _, scanner := range enabledScanners {
+		enabled[NormalizeCategory(scanner)] = struct{}{}
+	}
+	matched := make([]string, 0, len(categories))
+	for _, category := range categories {
+		if _, ok := enabled[category]; ok {
+			matched = append(matched, category)
+		}
+	}
+	evidence := make(map[string]string, len(categories))
+	labels := make([]string, 0, len(categories))
+	for _, category := range categories {
+		label := openAIModerationReasonLabels[category]
+		evidence[category] = "OpenAI 审核模型标记存在" + label + "。"
+		labels = append(labels, label)
+	}
+	result := &NormalizedResult{
+		Decision: EventPass, RiskLevel: RiskLow, Action: ActionAllow, Safety: "Safe",
+		Categories: categories, MatchedScanners: matched, ScannerScores: scores, ScannerEvidence: evidence,
+		ScannerBackend: "openai-moderation", ScannerVersion: endpoint.Model,
+		PolicyID: "openai-moderation", PolicyVersion: 1, Confidence: confidence,
+	}
+	if *moderation.Flagged {
+		if len(labels) == 0 {
+			return nil, &GuardError{Code: ErrorCodeInvalidResponse, Cause: errors.New("OpenAI moderation flagged result has no mapped category")}
+		}
+		result.Safety = "Unsafe"
+		result.Reason = "OpenAI 审核模型判定命中：" + strings.Join(labels, "、") + "。"
+		if len(matched) > 0 {
+			result.Decision, result.RiskLevel, result.Action = EventCritical, RiskCritical, ActionBlock
+		} else {
+			result.Decision, result.RiskLevel, result.Action = EventFlag, RiskHigh, ActionWarn
+		}
+	}
+	return result, nil
+}
+
+func mapOpenAIModerationCategory(value string) string {
+	value = strings.ToLower(strings.TrimSpace(value))
+	switch {
+	case value == "illicit/violent", strings.HasPrefix(value, "violence"):
+		return "violent"
+	case value == "illicit":
+		return "non_violent_illegal_acts"
+	case strings.HasPrefix(value, "sexual"):
+		return "sexual_content_or_sexual_acts"
+	case strings.HasPrefix(value, "self-harm"):
+		return "suicide_and_self_harm"
+	case strings.HasPrefix(value, "harassment"), strings.HasPrefix(value, "hate"):
+		return "unethical_acts"
+	default:
+		return ""
+	}
 }
 
 const confidenceScoreKey = "confidence_json"

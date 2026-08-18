@@ -2,6 +2,7 @@ package securityaudit
 
 import (
 	"context"
+	"encoding/base64"
 	"encoding/json"
 	"errors"
 	"strings"
@@ -9,6 +10,7 @@ import (
 
 	"github.com/Wei-Shaw/sub2api/internal/config"
 	infraerrors "github.com/Wei-Shaw/sub2api/internal/pkg/errors"
+	"github.com/Wei-Shaw/sub2api/internal/service"
 	"github.com/stretchr/testify/require"
 )
 
@@ -20,6 +22,27 @@ func (prefixEncryptor) Decrypt(value string) (string, error) {
 		return "", errors.New("cipher: message authentication failed")
 	}
 	return value[4:], nil
+}
+
+type opaqueTestEncryptor struct{}
+
+func (opaqueTestEncryptor) Encrypt(value string) (string, error) {
+	encoded := []byte(value)
+	for index := range encoded {
+		encoded[index] ^= 0x5a
+	}
+	return base64.RawStdEncoding.EncodeToString(encoded), nil
+}
+
+func (opaqueTestEncryptor) Decrypt(value string) (string, error) {
+	decoded, err := base64.RawStdEncoding.DecodeString(value)
+	if err != nil {
+		return "", err
+	}
+	for index := range decoded {
+		decoded[index] ^= 0x5a
+	}
+	return string(decoded), nil
 }
 
 // testTotpKeyConfig mirrors a deployment with a fixed TOTP_ENCRYPTION_KEY so
@@ -43,11 +66,13 @@ func TestDefaultConfigIsOff(t *testing.T) {
 	require.Equal(t, DefaultBlockHTTPStatus, storage.BlockHTTPStatus)
 	require.Equal(t, DefaultBlockMessage, storage.BlockMessage)
 	require.Equal(t, DefaultMaxTotalInputChars, storage.MaxTotalInputChars)
+	require.Empty(t, storage.CyberFeedbackAccountIDs)
 	require.Equal(t, []PromptTemplate{DefaultPromptTemplate()}, storage.PromptTemplates)
 	publicJSON, err := json.Marshal(PublicFromStorage(storage, true, nil))
 	require.NoError(t, err)
 	require.Contains(t, string(publicJSON), `"group_ids":[]`)
 	require.Contains(t, string(publicJSON), `"risk_route_account_ids":[]`)
+	require.Contains(t, string(publicJSON), `"cyber_feedback_account_ids":[]`)
 	require.Contains(t, string(publicJSON), `"endpoints":[]`)
 }
 
@@ -118,6 +143,7 @@ func TestOldUpdatePreservesNewPromptPolicyFields(t *testing.T) {
 	current.BlockHTTPStatus = 422
 	current.BlockMessage = "custom block"
 	current.RiskRouteAccountIDs = []int64{9}
+	current.CyberFeedbackAccountIDs = []int64{77}
 	current.Endpoints = []StorageEndpoint{{ID: "one", Name: "One", Protocol: "openai_compatible", Adapter: AdapterConfidenceJSON, BaseURL: "http://127.0.0.1:8080", Model: "deepseek-chat", TimeoutMS: 1000, InputLimit: 1000}}
 	req := UpdateConfigRequest{ExpectedConfigVersion: 1, Strategy: "priority", WorkerCount: 1, QueueCapacity: 10, Scanners: []string{"pii"}, AllGroups: true,
 		Endpoints: []UpdateEndpoint{{ID: "one", Name: "One", Protocol: "openai_compatible", BaseURL: "http://127.0.0.1:8080", Model: "deepseek-chat", TimeoutMS: 1000, InputLimit: 1000}}}
@@ -132,6 +158,7 @@ func TestOldUpdatePreservesNewPromptPolicyFields(t *testing.T) {
 	require.Equal(t, 422, next.BlockHTTPStatus)
 	require.Equal(t, "custom block", next.BlockMessage)
 	require.Equal(t, []int64{9}, next.RiskRouteAccountIDs)
+	require.Equal(t, []int64{77}, next.CyberFeedbackAccountIDs)
 	require.Equal(t, DefaultMaxTotalInputChars, next.MaxTotalInputChars)
 }
 
@@ -165,6 +192,114 @@ func TestPromptAuditRiskRouteConfigRoundTrip(t *testing.T) {
 	require.Equal(t, next.RiskRouteAccountIDs, active.RiskRouteAccountIDs)
 	public := PublicFromStorage(next, true, nil)
 	require.Equal(t, next.RiskRouteAccountIDs, public.RiskRouteAccountIDs)
+}
+
+func TestContentModerationCredentialSourceIsOneShotEncryptedAndNeverPublic(t *testing.T) {
+	const canary = "sk-content-moderation-canary"
+	source, err := parseContentModerationCredentialSource(`{"api_key":"` + canary + `","base_url":"https://api.openai.com/v1","model":"omni-moderation-latest"}`)
+	require.NoError(t, err)
+	require.Equal(t, canary, source.credential)
+	require.Equal(t, "https://api.openai.com", source.baseURL)
+	require.Equal(t, DefaultOpenAIModerationModel, source.model)
+
+	req := promptAuditUpdateRequest(1, 1, "")
+	req.Endpoints[0].Adapter = AdapterOpenAIModeration
+	req.Endpoints[0].BaseURL = "https://attacker.invalid"
+	req.Endpoints[0].Model = "attacker-model"
+	req.Endpoints[0].CredentialSource = CredentialSourceContentModeration
+	resolved, err := applyEndpointCredentialSource(req, DefaultStorageConfig(), source)
+	require.NoError(t, err)
+	require.Equal(t, canary, resolved.Endpoints[0].Token)
+	require.Equal(t, "https://api.openai.com", resolved.Endpoints[0].BaseURL)
+	require.Equal(t, DefaultOpenAIModerationModel, resolved.Endpoints[0].Model)
+	require.Empty(t, resolved.Endpoints[0].CredentialSource)
+
+	manager := &ConfigManager{encryptor: opaqueTestEncryptor{}, encryptionKeyConfigured: true}
+	next, err := manager.buildNextStorage(DefaultStorageConfig(), resolved, 5)
+	require.NoError(t, err)
+	require.NotEqual(t, canary, next.Endpoints[0].TokenCiphertext)
+	decrypted, err := manager.encryptor.Decrypt(next.Endpoints[0].TokenCiphertext)
+	require.NoError(t, err)
+	require.Equal(t, canary, decrypted)
+	rawStorage, err := json.Marshal(next)
+	require.NoError(t, err)
+	require.NotContains(t, string(rawStorage), canary)
+	require.NotContains(t, string(rawStorage), "credential_source")
+	next.CyberSupplementRules = []CyberSupplementRule{{ID: "reviewed-rule", RuleText: "抽象规则", Status: "active"}}
+	active, err := ActiveFromStorage(next, true, manager.encryptor)
+	require.NoError(t, err)
+	require.Len(t, active.Endpoints, 1)
+	require.False(t, active.Endpoints[0].SupportsSystemPrompt)
+	require.False(t, active.Endpoints[0].CyberSupplementApplied)
+	require.Empty(t, active.Endpoints[0].SystemPrompt)
+	public := PublicFromStorage(next, true, nil)
+	require.False(t, public.Endpoints[0].SupportsSystemPrompt)
+	require.False(t, public.Endpoints[0].CyberSupplementApplied)
+	publicJSON, err := json.Marshal(public)
+	require.NoError(t, err)
+	require.NotContains(t, string(publicJSON), canary)
+	require.NotContains(t, string(publicJSON), "credential_source")
+	require.Contains(t, string(publicJSON), `"has_token":true`)
+}
+
+func TestContentModerationCredentialSourceRejectsMissingAmbiguousAndConflictingValues(t *testing.T) {
+	for _, raw := range []string{`{}`, `{"api_keys":[]}`, `{"api_keys":["key-one","key-two"],"base_url":"https://api.openai.com","model":"omni-moderation-latest"}`, `{invalid`} {
+		_, err := parseContentModerationCredentialSource(raw)
+		require.Error(t, err, raw)
+	}
+	source, err := parseContentModerationCredentialSource(`{"api_key":"same","api_keys":["same"," same "],"base_url":"https://api.openai.com/v1","model":"omni-moderation-latest"}`)
+	require.NoError(t, err)
+	require.Equal(t, "same", source.credential)
+
+	defaulted, err := parseContentModerationCredentialSource(`{"api_key":"same"}`)
+	require.NoError(t, err)
+	require.Equal(t, "https://api.openai.com", defaulted.baseURL)
+	require.Equal(t, DefaultOpenAIModerationModel, defaulted.model)
+
+	base := promptAuditUpdateRequest(1, 1, "")
+	base.Endpoints[0].CredentialSource = CredentialSourceContentModeration
+	_, err = applyEndpointCredentialSource(base, DefaultStorageConfig(), source)
+	require.Error(t, err, "only the moderation adapter may import this credential")
+
+	base.Endpoints[0].Adapter = AdapterOpenAIModeration
+	base.Endpoints[0].Token = "explicit"
+	_, err = applyEndpointCredentialSource(base, DefaultStorageConfig(), source)
+	require.Error(t, err, "explicit token and imported token are ambiguous")
+}
+
+func TestCyberFeedbackScopeIsIndependentFromPromptAuditScope(t *testing.T) {
+	manager := &ConfigManager{encryptor: prefixEncryptor{}, encryptionKeyConfigured: true}
+	accountIDs := []int64{77, 77}
+	req := promptAuditUpdateRequest(1, 1, "")
+	req.Enabled = false
+	req.AllGroups = false
+	req.GroupIDs = []int64{12}
+	req.CyberFeedbackAccountIDs = &accountIDs
+
+	next, err := manager.buildNextStorage(DefaultStorageConfig(), req, 5)
+	require.NoError(t, err)
+	require.Equal(t, []int64{77}, next.CyberFeedbackAccountIDs)
+
+	active, err := ActiveFromStorage(next, false, prefixEncryptor{})
+	require.NoError(t, err)
+	require.Equal(t, ModeOff, active.EffectiveMode())
+	require.True(t, active.IncludesCyberFeedbackSource(70, service.PlatformOpenAI, service.AccountTypeOAuth))
+	require.True(t, active.IncludesCyberFeedbackSource(77, service.PlatformOpenAI, service.AccountTypeUpstream))
+	require.False(t, active.IncludesCyberFeedbackSource(70, service.PlatformOpenAI, service.AccountTypeAPIKey))
+	require.False(t, active.IncludesCyberFeedbackSource(70, service.PlatformOpenAI, service.AccountTypeUpstream))
+
+	public := PublicFromStorage(next, false, nil)
+	require.Equal(t, []int64{77}, public.CyberFeedbackAccountIDs)
+}
+
+func TestLegacyCyberFeedbackScopePreservesOpenAIOAuthBehavior(t *testing.T) {
+	storage, err := ParseStorageConfig(`{"enabled":false,"strategy":"priority","worker_count":1,"queue_capacity":10,"scanners":["pii"],"all_groups":true,"endpoints":[]}`)
+	require.NoError(t, err)
+	active, err := ActiveFromStorage(storage, false, prefixEncryptor{})
+	require.NoError(t, err)
+	require.True(t, active.IncludesCyberFeedbackSource(91, service.PlatformOpenAI, service.AccountTypeOAuth))
+	require.False(t, active.IncludesCyberFeedbackSource(92, service.PlatformOpenAI, service.AccountTypeAPIKey))
+	require.False(t, active.IncludesCyberFeedbackSource(93, service.PlatformGrok, service.AccountTypeOAuth))
 }
 
 func TestBlockingLatestTurnOnlyConfigRoundTrip(t *testing.T) {

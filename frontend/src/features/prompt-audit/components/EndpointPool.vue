@@ -163,25 +163,39 @@
           <select :value="editing.adapter" class="input w-full" :aria-label="t('admin.promptAudit.pool.adapter')" @change="changeAdapter(($event.target as HTMLSelectElement).value as PromptAuditAdapter)">
             <option value="confidence_json">{{ t('admin.promptAudit.pool.adapters.confidence_json') }}</option>
             <option value="qwen3guard">{{ t('admin.promptAudit.pool.adapters.qwen3guard') }}</option>
+            <option value="openai_moderation">{{ t('admin.promptAudit.pool.adapters.openai_moderation') }}</option>
           </select>
           <span class="block text-xs text-gray-500 dark:text-dark-400">{{ t(`admin.promptAudit.pool.adapterHints.${editing.adapter}`) }}</span>
         </label>
         <label class="space-y-1 text-sm text-gray-700 dark:text-dark-200 sm:col-span-2">
           <span>{{ t('admin.promptAudit.pool.baseUrl') }}</span>
-          <input v-model="editing.base_url" class="input w-full" required inputmode="url" :aria-label="t('admin.promptAudit.pool.baseUrl')" />
+          <input v-model="editing.base_url" class="input w-full" required inputmode="url" :disabled="editing.credential_source === 'content_moderation'" :aria-label="t('admin.promptAudit.pool.baseUrl')" />
         </label>
         <label class="space-y-1 text-sm text-gray-700 dark:text-dark-200 sm:col-span-2">
           <span>{{ t('admin.promptAudit.pool.apiKey') }}</span>
-          <input v-model="editing.token" class="input w-full" type="password" autocomplete="new-password" :placeholder="editing.has_token ? (editing.token_status === 'invalid' ? t('admin.promptAudit.pool.reenterSecret') : t('admin.promptAudit.pool.keepSecret')) : ''" :aria-label="t('admin.promptAudit.pool.apiKey')" />
+          <input v-model="editing.token" class="input w-full" type="password" autocomplete="new-password" :disabled="editing.credential_source === 'content_moderation'" :placeholder="editing.has_token ? (editing.token_status === 'invalid' ? t('admin.promptAudit.pool.reenterSecret') : t('admin.promptAudit.pool.keepSecret')) : ''" :aria-label="t('admin.promptAudit.pool.apiKey')" />
           <span class="block text-xs text-gray-500 dark:text-dark-400">{{ t('admin.promptAudit.pool.secretHint') }}</span>
         </label>
-        <label v-if="editing.has_token" class="flex items-center gap-2 text-sm text-red-600 dark:text-red-300 sm:col-span-2">
+        <label v-if="editing.adapter === 'openai_moderation'" class="flex items-start gap-2 rounded-lg bg-gray-50 px-3 py-3 text-sm text-gray-700 dark:bg-dark-900/60 dark:text-dark-200 sm:col-span-2">
+          <input
+            type="checkbox"
+            class="mt-0.5"
+            :checked="editing.credential_source === 'content_moderation'"
+            data-test="reuse-content-moderation-credential"
+            @change="toggleContentModerationCredential"
+          />
+          <span>
+            <span class="block font-medium">{{ t('admin.promptAudit.pool.reuseContentModerationCredential') }}</span>
+            <span class="mt-0.5 block text-xs leading-5 text-gray-500 dark:text-dark-400">{{ t('admin.promptAudit.pool.reuseContentModerationCredentialHint') }}</span>
+          </span>
+        </label>
+        <label v-if="editing.has_token && editing.credential_source !== 'content_moderation'" class="flex items-center gap-2 text-sm text-red-600 dark:text-red-300 sm:col-span-2">
           <input v-model="editing.clear_token" type="checkbox" :aria-label="t('admin.promptAudit.pool.clearSecret')" />
           {{ t('admin.promptAudit.pool.clearSecret') }}
         </label>
         <label class="space-y-1 text-sm text-gray-700 dark:text-dark-200 sm:col-span-2">
           <span>{{ t('admin.promptAudit.pool.model') }}</span>
-          <input v-model="editing.model" class="input w-full" :aria-label="t('admin.promptAudit.pool.model')" />
+          <input v-model="editing.model" class="input w-full" :disabled="editing.credential_source === 'content_moderation'" :aria-label="t('admin.promptAudit.pool.model')" />
         </label>
         <label class="space-y-1 text-sm text-gray-700 dark:text-dark-200">
           <span>{{ t('admin.promptAudit.pool.timeout') }}</span>
@@ -276,17 +290,23 @@ function changeAdapter(adapter: PromptAuditAdapter) {
   editing.value = {
     ...editing.value,
     adapter,
+    priority: editingIndex.value < 0 && adapter === 'openai_moderation' ? 3 : editing.value.priority,
+    enabled: adapter === 'openai_moderation' ? false : editing.value.enabled,
     base_url: editing.value.base_url === previousDefaults.base_url ? nextDefaults.base_url : editing.value.base_url,
     model: editing.value.model === previousDefaults.model ? nextDefaults.model : editing.value.model,
     timeout_ms: editing.value.timeout_ms === previousDefaults.timeout_ms ? nextDefaults.timeout_ms : editing.value.timeout_ms,
     input_limit: editing.value.input_limit === previousDefaults.input_limit ? nextDefaults.input_limit : editing.value.input_limit,
+    credential_source: nextDefaults.credential_source,
   }
 }
 function saveEditor() {
   if (!editing.value || !editorValid.value) return
   const next = props.endpoints.map((item) => cloneData(item))
   const value = cloneData(editing.value)
-  if (value.token.trim()) value.clear_token = false
+  if (value.token.trim()) {
+    value.clear_token = false
+    value.credential_source = ''
+  }
   if (editingIndex.value < 0) next.push(value)
   else next.splice(editingIndex.value, 1, value)
   emit('update:endpoints', next)
@@ -300,13 +320,24 @@ function removeEndpoint(endpoint: PromptAuditEndpointDraft) {
   emit('update:endpoints', props.endpoints.filter((item) => item.id !== endpoint.id).map((item) => cloneData(item)))
 }
 function hasCredential(endpoint: PromptAuditEndpointDraft): boolean {
-  return Boolean(endpoint.token.trim() || (endpoint.has_token && !endpoint.clear_token))
+  return Boolean(endpoint.credential_source || endpoint.token.trim() || (endpoint.has_token && !endpoint.clear_token))
 }
 function credentialInvalid(endpoint: PromptAuditEndpointDraft): boolean {
-  return endpoint.token_status === 'invalid' && !endpoint.token.trim() && !endpoint.clear_token
+  return !endpoint.credential_source && endpoint.token_status === 'invalid' && !endpoint.token.trim() && !endpoint.clear_token
 }
 function adapterLabel(adapter: PromptAuditAdapter): string {
-  return adapter === 'confidence_json' ? 'JSON confidence' : 'Qwen3Guard'
+  if (adapter === 'confidence_json') return 'JSON confidence'
+  if (adapter === 'openai_moderation') return 'OpenAI Moderation'
+  return 'Qwen3Guard'
+}
+function toggleContentModerationCredential() {
+  if (!editing.value) return
+  const enabled = editing.value.credential_source !== 'content_moderation'
+  editing.value.credential_source = enabled ? 'content_moderation' : ''
+  if (enabled) {
+    editing.value.token = ''
+    editing.value.clear_token = false
+  }
 }
 function failoverPosition(id: string): number {
   return failoverPositions.value.get(id) ?? 0

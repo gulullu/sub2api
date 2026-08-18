@@ -41,7 +41,8 @@ const (
 	CyberRuleTextSourceRecoveredCandidate = "recovered_candidate"
 	CyberRuleTextSourceUnavailable        = "unavailable"
 
-	OpenAIOAuthCYBAdminRecipient = "gulullu@gmail.com"
+	UpstreamCYBAdminRecipient    = "gulullu@gmail.com"
+	OpenAIOAuthCYBAdminRecipient = UpstreamCYBAdminRecipient // legacy source compatibility
 	cyberReplayLocalPositiveTTL  = time.Minute
 	cyberReplayLocalCacheCap     = 4096
 	cyberReplayWarmTTL           = 10 * time.Minute
@@ -269,12 +270,17 @@ type CyberRuleDraftGenerator interface {
 	GenerateCyberRuleDraft(ctx context.Context, snapshot PromptSnapshot) (string, error)
 }
 
+type CyberFeedbackScopeProvider interface {
+	IncludesCyberFeedbackSource(accountID int64, platform, accountType string) bool
+}
+
 type CyberFeedbackService struct {
 	repo             CyberFeedbackRepository
 	redis            *redis.Client
 	notification     *service.NotificationEmailService
 	settings         service.SettingRepository
 	generator        CyberRuleDraftGenerator
+	scope            CyberFeedbackScopeProvider
 	hmacKey          []byte
 	signatureVersion string
 	clock            Clock
@@ -299,6 +305,7 @@ func NewCyberFeedbackService(
 	notification *service.NotificationEmailService,
 	settings service.SettingRepository,
 	generator CyberRuleDraftGenerator,
+	scope CyberFeedbackScopeProvider,
 ) *CyberFeedbackService {
 	var key []byte
 	if cfg != nil && strings.TrimSpace(cfg.JWT.Secret) != "" {
@@ -311,13 +318,13 @@ func NewCyberFeedbackService(
 	}
 	return &CyberFeedbackService{
 		repo: repo, redis: redisClient, notification: notification, settings: settings,
-		generator: generator, hmacKey: key, signatureVersion: signatureVersion,
+		generator: generator, scope: scope, hmacKey: key, signatureVersion: signatureVersion,
 		clock: realClock{}, generationSlots: make(chan struct{}, 4), warmSlots: make(chan struct{}, 2),
 		positiveReplay: make(map[string]time.Time), warmFailures: make(map[string]time.Time),
 	}
 }
 
-// PrepareTurn always retains safe event metadata for OpenAI turns. When the
+// PrepareTurn always retains safe event metadata for OpenAI-compatible turns. When the
 // stable HMAC key or prompt text is unavailable, replay blocking fails open but
 // a real upstream confirmation can still create an event and administrator alert.
 func (s *CyberFeedbackService) PrepareTurn(req Request, turnNumber int) (CyberTurnEvidence, bool) {
@@ -396,7 +403,21 @@ func (s *CyberFeedbackService) IsReplay(ctx context.Context, evidence CyberTurnE
 	return s.replayMemberActive(ctx, zsetKey, member)
 }
 
-func (s *CyberFeedbackService) ConfirmOpenAIOAuthCYB(
+// IncludesConfirmationSource applies the administrator's CYB feedback scope.
+// When no active scope provider is available, it preserves the historical
+// behavior exactly: only a real OpenAI OAuth account is captured.
+func (s *CyberFeedbackService) IncludesConfirmationSource(accountID int64, platform, accountType string) bool {
+	if s == nil || accountID <= 0 {
+		return false
+	}
+	if s.scope != nil {
+		return s.scope.IncludesCyberFeedbackSource(accountID, platform, accountType)
+	}
+	return strings.EqualFold(strings.TrimSpace(platform), service.PlatformOpenAI) &&
+		strings.EqualFold(strings.TrimSpace(accountType), service.AccountTypeOAuth)
+}
+
+func (s *CyberFeedbackService) ConfirmUpstreamCYB(
 	ctx context.Context,
 	evidence CyberTurnEvidence,
 	confirmation CyberUpstreamConfirmation,
@@ -461,6 +482,17 @@ func (s *CyberFeedbackService) ConfirmOpenAIOAuthCYB(
 	return feedback, true, nil
 }
 
+// ConfirmOpenAIOAuthCYB is retained for source compatibility with existing
+// integrations. New call sites should use ConfirmUpstreamCYB because selected
+// non-OAuth sources can now be explicitly included by administrators.
+func (s *CyberFeedbackService) ConfirmOpenAIOAuthCYB(
+	ctx context.Context,
+	evidence CyberTurnEvidence,
+	confirmation CyberUpstreamConfirmation,
+) (CyberFeedback, bool, error) {
+	return s.ConfirmUpstreamCYB(ctx, evidence, confirmation)
+}
+
 func (s *CyberFeedbackService) generateRuleDraft(feedbackID int64, snapshot PromptSnapshot) {
 	generationCtx, cancelGeneration := context.WithTimeout(context.Background(), 90*time.Second)
 	rule, err := s.generator.GenerateCyberRuleDraft(generationCtx, snapshot)
@@ -490,7 +522,7 @@ func (s *CyberFeedbackService) sendAdminAlert(ctx context.Context, feedback Cybe
 	}
 	if err := s.notification.Send(ctx, service.NotificationEmailSendInput{
 		Event: service.NotificationEmailEventOpenAIOAuthCYBAdminAlert, Locale: "zh",
-		RecipientEmail: OpenAIOAuthCYBAdminRecipient, RecipientName: "Administrator",
+		RecipientEmail: UpstreamCYBAdminRecipient, RecipientName: "Administrator",
 		SourceType: "prompt_audit_cyber_feedback", SourceID: strconv.FormatInt(feedback.ID, 10), Variables: variables,
 	}); err != nil {
 		slog.Warn("cyber feedback admin email failed", "feedback_id", feedback.ID, "error", err)

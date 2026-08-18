@@ -69,6 +69,15 @@
                 @update:draft="replaceDraft"
                 @retry="loadRiskRouteAccounts"
               />
+              <CyberFeedbackScopePanel
+                :draft="draft"
+                :accounts="riskRouteAccounts"
+                :accounts-loaded="riskRouteAccountsLoaded"
+                :loading="loading.accounts"
+                :error="loadErrors.accounts"
+                @update:draft="replaceDraft"
+                @retry="loadRiskRouteAccounts"
+              />
               <div v-if="loadErrors.groups" role="alert" class="mt-5 rounded-lg bg-amber-50 px-4 py-3 text-sm text-amber-800 dark:bg-amber-950/30 dark:text-amber-200">{{ loadErrors.groups }}</div>
               <PolicyPanel :draft="draft" :groups="groups" @update:draft="replaceDraft" />
             </template>
@@ -180,6 +189,7 @@ import EndpointPool from './components/EndpointPool.vue'
 import PromptTemplatePanel from './components/PromptTemplatePanel.vue'
 import DecisionPolicyPanel from './components/DecisionPolicyPanel.vue'
 import RiskRouteAccountSelector from './components/RiskRouteAccountSelector.vue'
+import CyberFeedbackScopePanel from './components/CyberFeedbackScopePanel.vue'
 import PolicyPanel from './components/PolicyPanel.vue'
 import EventWorkspace from './components/EventWorkspace.vue'
 import EventDetailDialog from './components/EventDetailDialog.vue'
