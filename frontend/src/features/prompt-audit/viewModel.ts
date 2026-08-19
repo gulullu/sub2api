@@ -138,6 +138,7 @@ export function configToDraft(config: PromptAuditConfig): PromptAuditDraft {
     group_ids: [...(config.group_ids ?? [])],
     risk_route_account_ids: normalizedPositiveIDs(config.risk_route_account_ids),
     cyber_feedback_account_ids: normalizedPositiveIDs(config.cyber_feedback_account_ids),
+    excluded_user_ids: normalizedPositiveIDs(config.excluded_user_ids),
     scanners: [...(config.scanners ?? [])],
     prompt_templates: promptTemplates,
     active_prompt_template_id: activeTemplateID,
@@ -200,6 +201,7 @@ export function buildUpdateRequest(draft: PromptAuditDraft): PromptAuditUpdateRe
     group_ids: draft.all_groups ? [] : [...draft.group_ids].sort((a, b) => a - b),
     risk_route_account_ids: normalizedPositiveIDs(draft.risk_route_account_ids),
     cyber_feedback_account_ids: normalizedPositiveIDs(draft.cyber_feedback_account_ids),
+    excluded_user_ids: normalizedPositiveIDs(draft.excluded_user_ids),
     prompt_templates: draft.prompt_templates.map((template) => ({
       id: template.id.trim(),
       name: template.name.trim(),

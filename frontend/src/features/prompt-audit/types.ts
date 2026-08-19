@@ -64,6 +64,7 @@ export interface PromptAuditConfig {
   group_ids: number[]
   risk_route_account_ids?: number[]
   cyber_feedback_account_ids?: number[]
+  excluded_user_ids?: number[]
   prompt_templates?: PromptAuditTemplate[]
   active_prompt_template_id?: string
   flag_threshold?: number
@@ -90,6 +91,7 @@ export interface PromptAuditDraft extends Omit<
   | 'max_total_input_chars'
   | 'risk_route_account_ids'
   | 'cyber_feedback_account_ids'
+  | 'excluded_user_ids'
 > {
   endpoints: PromptAuditEndpointDraft[]
   prompt_templates: PromptAuditTemplate[]
@@ -101,6 +103,7 @@ export interface PromptAuditDraft extends Omit<
   max_total_input_chars: number
   risk_route_account_ids: number[]
   cyber_feedback_account_ids: number[]
+  excluded_user_ids: number[]
 }
 
 export interface PromptAuditUpdateRequest {
@@ -117,6 +120,7 @@ export interface PromptAuditUpdateRequest {
   group_ids: number[]
   risk_route_account_ids: number[]
   cyber_feedback_account_ids: number[]
+  excluded_user_ids: number[]
   prompt_templates: PromptAuditTemplate[]
   active_prompt_template_id: string
   flag_threshold: number
@@ -139,6 +143,45 @@ export interface PromptAuditUpdateRequest {
     input_limit: number
     enabled: boolean
   }>
+}
+
+export interface PromptAuditUserProfileFilter {
+  days: number
+  search: string
+  group_id?: number
+  min_samples?: number
+}
+
+export interface PromptAuditUserProfile {
+  user_id: number
+  username: string
+  email: string
+  status: string
+  deleted: boolean
+  excluded: boolean
+  audit_jobs: number
+  high_risk_jobs: number
+  critical_risk_jobs: number
+  usage_total: number
+  cyber_blocked_total: number
+  cyber_recorded_total: number
+  sample_total: number
+  audit_coverage: number
+  cyber_ratio: number
+  high_risk_ratio: number
+  critical_risk_ratio: number
+  score: number
+  last_audit_at?: string
+  last_usage_at?: string
+  last_recorded_at?: string
+}
+
+export interface PromptAuditUserProfilePage {
+  items: PromptAuditUserProfile[]
+  total: number
+  page: number
+  page_size: number
+  pages: number
 }
 
 export interface PromptProbeResult {

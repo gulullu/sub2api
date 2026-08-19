@@ -3,16 +3,18 @@ import { accountsAPI } from '@/api/admin/accounts'
 import type {
   PromptAuditAccount,
   PromptAuditConfig,
+  PromptAuditEndpointDraft,
   PromptAuditEvent,
   PromptAuditGroup,
   PromptAuditRuntime,
   PromptAuditUpdateRequest,
+  PromptAuditUserProfileFilter,
+  PromptAuditUserProfilePage,
   PromptDeletePreview,
   PromptDeleteResult,
   PromptEventFilters,
   PromptEventPage,
   PromptProbeResult,
-  PromptAuditEndpointDraft,
   CyberFeedbackActionResult,
   CyberFeedbackDetail,
   CyberFeedbackEvidence,
@@ -89,6 +91,24 @@ export async function probeEndpoint(endpoint: PromptAuditEndpointDraft): Promise
 
 export async function getRuntime(): Promise<PromptAuditRuntime> {
   const { data } = await apiClient.get<PromptAuditRuntime>(`${basePath}/runtime`)
+  return data
+}
+
+export async function listUserProfiles(
+  filter: PromptAuditUserProfileFilter,
+  page: number,
+  pageSize: number,
+): Promise<PromptAuditUserProfilePage> {
+  const { data } = await apiClient.get<PromptAuditUserProfilePage>(`${basePath}/user-profiles`, {
+    params: {
+      page,
+      page_size: pageSize,
+      days: filter.days,
+      search: filter.search,
+      min_samples: filter.min_samples ?? 0,
+      ...(typeof filter.group_id === 'number' && filter.group_id > 0 ? { group_id: filter.group_id } : {}),
+    },
+  })
   return data
 }
 
@@ -286,6 +306,7 @@ export const promptAuditAPI = {
   updateConfig,
   probeEndpoint,
   getRuntime,
+  listUserProfiles,
   listEvents,
   getEvent,
   listCyberEvents,
