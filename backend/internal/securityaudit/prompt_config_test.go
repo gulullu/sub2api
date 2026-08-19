@@ -73,6 +73,7 @@ func TestDefaultConfigIsOff(t *testing.T) {
 	require.Contains(t, string(publicJSON), `"group_ids":[]`)
 	require.Contains(t, string(publicJSON), `"risk_route_account_ids":[]`)
 	require.Contains(t, string(publicJSON), `"cyber_feedback_account_ids":[]`)
+	require.Contains(t, string(publicJSON), `"excluded_user_ids":[]`)
 	require.Contains(t, string(publicJSON), `"endpoints":[]`)
 }
 
@@ -144,6 +145,7 @@ func TestOldUpdatePreservesNewPromptPolicyFields(t *testing.T) {
 	current.BlockMessage = "custom block"
 	current.RiskRouteAccountIDs = []int64{9}
 	current.CyberFeedbackAccountIDs = []int64{77}
+	current.ExcludedUserIDs = []int64{88}
 	current.Endpoints = []StorageEndpoint{{ID: "one", Name: "One", Protocol: "openai_compatible", Adapter: AdapterConfidenceJSON, BaseURL: "http://127.0.0.1:8080", Model: "deepseek-chat", TimeoutMS: 1000, InputLimit: 1000}}
 	req := UpdateConfigRequest{ExpectedConfigVersion: 1, Strategy: "priority", WorkerCount: 1, QueueCapacity: 10, Scanners: []string{"pii"}, AllGroups: true,
 		Endpoints: []UpdateEndpoint{{ID: "one", Name: "One", Protocol: "openai_compatible", BaseURL: "http://127.0.0.1:8080", Model: "deepseek-chat", TimeoutMS: 1000, InputLimit: 1000}}}
@@ -159,6 +161,7 @@ func TestOldUpdatePreservesNewPromptPolicyFields(t *testing.T) {
 	require.Equal(t, "custom block", next.BlockMessage)
 	require.Equal(t, []int64{9}, next.RiskRouteAccountIDs)
 	require.Equal(t, []int64{77}, next.CyberFeedbackAccountIDs)
+	require.Equal(t, []int64{88}, next.ExcludedUserIDs)
 	require.Equal(t, DefaultMaxTotalInputChars, next.MaxTotalInputChars)
 }
 
@@ -192,6 +195,36 @@ func TestPromptAuditRiskRouteConfigRoundTrip(t *testing.T) {
 	require.Equal(t, next.RiskRouteAccountIDs, active.RiskRouteAccountIDs)
 	public := PublicFromStorage(next, true, nil)
 	require.Equal(t, next.RiskRouteAccountIDs, public.RiskRouteAccountIDs)
+}
+
+func TestPromptAuditExcludedUserIDsRoundTripAndAdmissionGate(t *testing.T) {
+	manager := &ConfigManager{encryptor: prefixEncryptor{}, encryptionKeyConfigured: true}
+	req := promptAuditUpdateRequest(1, 1, "")
+	excluded := []int64{19, 19, 7, 42}
+	req.ExcludedUserIDs = &excluded
+
+	next, err := manager.buildNextStorage(DefaultStorageConfig(), req, 5)
+	require.NoError(t, err)
+	require.Equal(t, []int64{7, 19, 42}, next.ExcludedUserIDs)
+
+	active, err := ActiveFromStorage(next, true, prefixEncryptor{})
+	require.NoError(t, err)
+	require.True(t, active.IncludesUser(1))
+	require.False(t, active.IncludesUser(19))
+	require.True(t, active.IncludesUser(0))
+
+	public := PublicFromStorage(next, true, nil)
+	require.Equal(t, []int64{7, 19, 42}, public.ExcludedUserIDs)
+}
+
+func TestPromptAuditExcludedUserIDsRejectInvalidInput(t *testing.T) {
+	manager := &ConfigManager{encryptor: prefixEncryptor{}, encryptionKeyConfigured: true}
+	req := promptAuditUpdateRequest(1, 1, "")
+	excluded := []int64{19, 0, 42}
+	req.ExcludedUserIDs = &excluded
+
+	_, err := manager.buildNextStorage(DefaultStorageConfig(), req, 5)
+	require.Error(t, err)
 }
 
 func TestContentModerationCredentialSourceIsOneShotEncryptedAndNeverPublic(t *testing.T) {

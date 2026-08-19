@@ -145,6 +145,14 @@ func (s *PromptService) Enqueue(_ context.Context, req Request) error {
 	if s == nil || s.enqueuer == nil || s.EffectiveMode() != ModeAsync {
 		return nil
 	}
+	if s.config != nil {
+		if cfg, ok := s.config.Active(); ok && !cfg.IncludesUser(req.UserID) {
+			LogInfo(EventEnqueueSkipped, map[string]any{
+				"request_id": req.RequestID, "user_id": req.UserID, "status": "skipped", "error_code": "user_excluded",
+			})
+			return nil
+		}
+	}
 	select {
 	case s.enqueueSlots <- struct{}{}:
 	default:
@@ -187,7 +195,7 @@ func (s *PromptService) Evaluate(ctx context.Context, req Request) (*PromptDecis
 		}
 		return &PromptDecision{Kind: DecisionAllow, AllowNextStage: true}, nil
 	}
-	if cfg.EffectiveMode() != ModeBlocking || !cfg.IncludesGroup(req.GroupID) {
+	if !cfg.IncludesUser(req.UserID) || cfg.EffectiveMode() != ModeBlocking || !cfg.IncludesGroup(req.GroupID) {
 		return &PromptDecision{Kind: DecisionAllow, AllowNextStage: true}, nil
 	}
 	snapshot, err := ExtractBlockingPromptSnapshot(req, cfg.BlockingLatestTurnOnly)
@@ -265,6 +273,34 @@ func (s *PromptService) GetConfig() (PublicConfig, error) { return s.config.Publ
 
 func (s *PromptService) SaveConfig(ctx context.Context, req UpdateConfigRequest, actorID int64) (PublicConfig, error) {
 	return s.config.Save(ctx, req, actorID)
+}
+
+func (s *PromptService) ListUserProfiles(ctx context.Context, filter PromptAuditUserProfileFilter, page, pageSize int) (*PromptAuditUserProfilePage, error) {
+	if s == nil || s.repo == nil {
+		return nil, errors.New("prompt audit profile repository unavailable")
+	}
+	pageResult, err := s.repo.ListUserProfiles(ctx, filter, page, pageSize)
+	if err != nil {
+		return nil, err
+	}
+	if s.config == nil || pageResult == nil {
+		return pageResult, nil
+	}
+	active, ok := s.config.Active()
+	if !ok || len(active.ExcludedUserIDs) == 0 {
+		return pageResult, nil
+	}
+	excluded := make(map[int64]struct{}, len(active.ExcludedUserIDs))
+	for _, id := range active.ExcludedUserIDs {
+		excluded[id] = struct{}{}
+	}
+	for _, item := range pageResult.Items {
+		if item == nil {
+			continue
+		}
+		_, item.Excluded = excluded[item.UserID]
+	}
+	return pageResult, nil
 }
 
 func (s *PromptService) Runtime(ctx context.Context) RuntimeSnapshot {

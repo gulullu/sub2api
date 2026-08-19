@@ -133,6 +133,7 @@ func TestPromptAuditAdminRoutesRejectUnauthenticatedAndNonAdminRequests(t *testi
 	} {
 		for _, path := range []string{
 			"/api/v1/admin/prompt-audit/config",
+			"/api/v1/admin/prompt-audit/user-profiles",
 			"/api/v1/admin/prompt-audit/cyber/events/5/evidence",
 		} {
 			t.Run(tc.name+path, func(t *testing.T) {

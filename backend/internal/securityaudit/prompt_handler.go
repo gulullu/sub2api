@@ -15,6 +15,7 @@ import (
 type PromptAdminService interface {
 	GetConfig() (PublicConfig, error)
 	SaveConfig(context.Context, UpdateConfigRequest, int64) (PublicConfig, error)
+	ListUserProfiles(context.Context, PromptAuditUserProfileFilter, int, int) (*PromptAuditUserProfilePage, error)
 	Probe(context.Context, ProbeRequest) ProbeResult
 	Runtime(context.Context) RuntimeSnapshot
 	ListEvents(context.Context, EventFilter, int, int) (*EventPage, error)
@@ -92,6 +93,30 @@ func (h *PromptAdminHandler) ProbeEndpoint(c *gin.Context) {
 
 func (h *PromptAdminHandler) GetRuntime(c *gin.Context) {
 	response.Success(c, h.service.Runtime(c.Request.Context()))
+}
+
+func (h *PromptAdminHandler) ListUserProfiles(c *gin.Context) {
+	page, err := positiveIntQuery(c, "page", 1, 0)
+	if err != nil {
+		response.ErrorFrom(c, err)
+		return
+	}
+	pageSize, err := positiveIntQuery(c, "page_size", 20, 100)
+	if err != nil {
+		response.ErrorFrom(c, err)
+		return
+	}
+	filter, err := userProfileFilterFromQuery(c)
+	if err != nil {
+		response.ErrorFrom(c, err)
+		return
+	}
+	result, err := h.service.ListUserProfiles(c.Request.Context(), filter, page, pageSize)
+	if err != nil {
+		response.ErrorFrom(c, err)
+		return
+	}
+	response.Success(c, result)
 }
 
 func (h *PromptAdminHandler) ListCyberFeedback(c *gin.Context) {
@@ -489,7 +514,20 @@ func configAuditFields(request UpdateConfigRequest, saved *PublicConfig) map[str
 		"config_version":            version, "endpoint_count": len(request.Endpoints),
 		"scanner_count": len(request.Scanners), "all_groups": request.AllGroups,
 		"group_count": len(request.GroupIDs), "risk_route_account_count": riskRouteAccountCount,
+		"excluded_user_count": func() int {
+			if request.ExcludedUserIDs == nil {
+				return len(savedExcludedUserIDs(saved))
+			}
+			return len(*request.ExcludedUserIDs)
+		}(),
 	}
+}
+
+func savedExcludedUserIDs(saved *PublicConfig) []int64 {
+	if saved == nil {
+		return nil
+	}
+	return saved.ExcludedUserIDs
 }
 
 func deleteAuditFields(result *DeleteResult, base map[string]any) map[string]any {
@@ -596,4 +634,30 @@ func positiveIntQuery(c *gin.Context, key string, defaultValue, maxValue int) (i
 		return 0, infraerrors.BadRequest("prompt_audit_invalid_pagination", "分页参数无效")
 	}
 	return parsed, nil
+}
+
+func userProfileFilterFromQuery(c *gin.Context) (PromptAuditUserProfileFilter, error) {
+	days, err := positiveIntQuery(c, "days", 30, 3650)
+	if err != nil {
+		return PromptAuditUserProfileFilter{}, infraerrors.BadRequest("prompt_audit_invalid_filter_days", "画像时间窗口无效")
+	}
+	minSamplesValue := strings.TrimSpace(c.Query("min_samples"))
+	minSamples := 0
+	if minSamplesValue != "" {
+		parsed, parseErr := strconv.Atoi(minSamplesValue)
+		if parseErr != nil || parsed < 0 {
+			return PromptAuditUserProfileFilter{}, infraerrors.BadRequest("prompt_audit_invalid_filter_min_samples", "画像样本门槛无效")
+		}
+		minSamples = parsed
+	}
+	groupID, err := optionalPositiveInt64Query(c, "group_id")
+	if err != nil {
+		return PromptAuditUserProfileFilter{}, err
+	}
+	return PromptAuditUserProfileFilter{
+		Days:       days,
+		Search:     strings.TrimSpace(c.Query("search")),
+		GroupID:    groupID,
+		MinSamples: minSamples,
+	}, nil
 }

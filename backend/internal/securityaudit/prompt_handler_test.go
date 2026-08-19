@@ -21,6 +21,7 @@ type fakePromptAdminService struct {
 	save         func(context.Context, UpdateConfigRequest, int64) (PublicConfig, error)
 	probe        func(context.Context, ProbeRequest) ProbeResult
 	runtime      RuntimeSnapshot
+	listProfiles func(context.Context, PromptAuditUserProfileFilter, int, int) (*PromptAuditUserProfilePage, error)
 	list         func(context.Context, EventFilter, int, int) (*EventPage, error)
 	get          func(context.Context, int64) (*Event, error)
 	deleteOne    func(context.Context, int64) (*DeleteResult, error)
@@ -45,6 +46,12 @@ func (s *fakePromptAdminService) Probe(ctx context.Context, req ProbeRequest) Pr
 	return s.probe(ctx, req)
 }
 func (s *fakePromptAdminService) Runtime(context.Context) RuntimeSnapshot { return s.runtime }
+func (s *fakePromptAdminService) ListUserProfiles(ctx context.Context, filter PromptAuditUserProfileFilter, page, pageSize int) (*PromptAuditUserProfilePage, error) {
+	if s.listProfiles == nil {
+		return &PromptAuditUserProfilePage{}, nil
+	}
+	return s.listProfiles(ctx, filter, page, pageSize)
+}
 func (s *fakePromptAdminService) ListEvents(ctx context.Context, filter EventFilter, page, pageSize int) (*EventPage, error) {
 	if s.list == nil {
 		return &EventPage{}, nil
@@ -94,6 +101,7 @@ func promptAdminRouter(service PromptAdminService) *gin.Engine {
 	group := router.Group("/admin/prompt-audit")
 	group.GET("/config", handler.GetConfig)
 	group.PUT("/config", handler.UpdateConfig)
+	group.GET("/user-profiles", handler.ListUserProfiles)
 	group.POST("/endpoints/probe", handler.ProbeEndpoint)
 	group.GET("/runtime", handler.GetRuntime)
 	group.GET("/events", handler.ListEvents)
@@ -287,6 +295,23 @@ func TestPromptAdminRejectsInvalidEventIDsTimesAndPagination(t *testing.T) {
 		require.Equalf(t, http.StatusBadRequest, response.Code, "%s %s", tc.method, tc.path)
 		require.Contains(t, response.Body.String(), tc.reason)
 	}
+}
+
+func TestPromptAdminUserProfilesRouteBindsQueryAndReturnsProfiles(t *testing.T) {
+	service := &fakePromptAdminService{
+		listProfiles: func(_ context.Context, filter PromptAuditUserProfileFilter, page, pageSize int) (*PromptAuditUserProfilePage, error) {
+			require.Equal(t, 2, page)
+			require.Equal(t, 10, pageSize)
+			require.Equal(t, 14, filter.Days)
+			require.Equal(t, "alice", filter.Search)
+			require.Equal(t, int64(77), *filter.GroupID)
+			require.Equal(t, 3, filter.MinSamples)
+			return &PromptAuditUserProfilePage{Items: []*PromptAuditUserProfile{{UserID: 1, Username: "alice"}}, Total: 1, Page: page, PageSize: pageSize, Pages: 1}, nil
+		},
+	}
+	response := promptAdminRequest(t, promptAdminRouter(service), http.MethodGet, "/admin/prompt-audit/user-profiles?days=14&page=2&page_size=10&search=alice&group_id=77&min_samples=3", nil)
+	require.Equal(t, http.StatusOK, response.Code)
+	require.Contains(t, response.Body.String(), `"user_id":1`)
 }
 
 func validHandlerUpdateRequest(token string) UpdateConfigRequest {

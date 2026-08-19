@@ -460,6 +460,7 @@ func (m *ConfigManager) buildNextStorage(current storageConfig, req UpdateConfig
 		AllGroups: req.AllGroups, GroupIDs: append([]int64(nil), req.GroupIDs...),
 		RiskRouteAccountIDs:     append([]int64(nil), current.RiskRouteAccountIDs...),
 		CyberFeedbackAccountIDs: append([]int64(nil), current.CyberFeedbackAccountIDs...),
+		ExcludedUserIDs:         append([]int64(nil), current.ExcludedUserIDs...),
 		MaxTotalInputChars:      current.MaxTotalInputChars,
 		PromptTemplates:         clonePromptTemplates(current.PromptTemplates), ActivePromptTemplateID: current.ActivePromptTemplateID,
 		CyberSupplementRules: cloneCyberSupplementRules(current.CyberSupplementRules),
@@ -474,6 +475,9 @@ func (m *ConfigManager) buildNextStorage(current storageConfig, req UpdateConfig
 	}
 	if req.CyberFeedbackAccountIDs != nil {
 		next.CyberFeedbackAccountIDs = append([]int64(nil), (*req.CyberFeedbackAccountIDs)...)
+	}
+	if req.ExcludedUserIDs != nil {
+		next.ExcludedUserIDs = append([]int64(nil), (*req.ExcludedUserIDs)...)
 	}
 	if req.MaxTotalInputChars != nil {
 		next.MaxTotalInputChars = *req.MaxTotalInputChars
@@ -628,6 +632,7 @@ func (m *ConfigManager) WithCyberSupplementMutationLock(ctx context.Context, ope
 func updateRequestFromStorage(storage storageConfig) UpdateConfigRequest {
 	riskIDs := append([]int64(nil), storage.RiskRouteAccountIDs...)
 	cyberAccountIDs := append([]int64(nil), storage.CyberFeedbackAccountIDs...)
+	excludedUserIDs := append([]int64(nil), storage.ExcludedUserIDs...)
 	maxChars := storage.MaxTotalInputChars
 	templates := clonePromptTemplates(storage.PromptTemplates)
 	activeTemplateID := storage.ActivePromptTemplateID
@@ -642,8 +647,8 @@ func updateRequestFromStorage(storage storageConfig) UpdateConfigRequest {
 		Strategy: storage.Strategy, WorkerCount: storage.WorkerCount, QueueCapacity: storage.QueueCapacity,
 		Scanners: append([]string(nil), storage.Scanners...), AllGroups: storage.AllGroups,
 		GroupIDs: append([]int64(nil), storage.GroupIDs...), RiskRouteAccountIDs: &riskIDs,
-		CyberFeedbackAccountIDs: &cyberAccountIDs,
-		MaxTotalInputChars:      &maxChars, PromptTemplates: &templates, ActivePromptTemplateID: &activeTemplateID,
+		CyberFeedbackAccountIDs: &cyberAccountIDs, ExcludedUserIDs: &excludedUserIDs,
+		MaxTotalInputChars: &maxChars, PromptTemplates: &templates, ActivePromptTemplateID: &activeTemplateID,
 		FlagThreshold: &flagThreshold, BlockThreshold: &blockThreshold,
 		BlockHTTPStatus: &blockStatus, BlockMessage: &blockMessage,
 		Endpoints: make([]UpdateEndpoint, 0, len(storage.Endpoints)),
@@ -764,6 +769,7 @@ func cloneStorageConfig(cfg storageConfig) storageConfig {
 	cfg.GroupIDs = append([]int64(nil), cfg.GroupIDs...)
 	cfg.RiskRouteAccountIDs = append([]int64(nil), cfg.RiskRouteAccountIDs...)
 	cfg.CyberFeedbackAccountIDs = append([]int64(nil), cfg.CyberFeedbackAccountIDs...)
+	cfg.ExcludedUserIDs = append([]int64(nil), cfg.ExcludedUserIDs...)
 	cfg.PromptTemplates = clonePromptTemplates(cfg.PromptTemplates)
 	cfg.CyberSupplementRules = cloneCyberSupplementRules(cfg.CyberSupplementRules)
 	cfg.FlagThreshold = float64Pointer(thresholdValue(cfg.FlagThreshold, DefaultFlagThreshold))
@@ -777,6 +783,7 @@ func cloneActiveConfig(cfg ActiveConfig) ActiveConfig {
 	cfg.GroupIDs = append([]int64(nil), cfg.GroupIDs...)
 	cfg.RiskRouteAccountIDs = append([]int64(nil), cfg.RiskRouteAccountIDs...)
 	cfg.CyberFeedbackAccountIDs = append([]int64(nil), cfg.CyberFeedbackAccountIDs...)
+	cfg.ExcludedUserIDs = append([]int64(nil), cfg.ExcludedUserIDs...)
 	cfg.PromptTemplates = clonePromptTemplates(cfg.PromptTemplates)
 	cfg.CyberSupplementRules = cloneCyberSupplementRules(cfg.CyberSupplementRules)
 	cfg.Endpoints = append([]ActiveEndpoint(nil), cfg.Endpoints...)

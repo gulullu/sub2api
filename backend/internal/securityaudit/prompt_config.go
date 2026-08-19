@@ -30,6 +30,7 @@ const (
 	DefaultMaxTotalInputChars = 40000
 	MinMaxTotalInputChars     = 128
 	MaxMaxTotalInputChars     = 400000
+	MaxExcludedUserIDs        = 10000
 	DefaultPayloadTTL         = 30 * time.Minute
 )
 
@@ -84,6 +85,7 @@ type storageConfig struct {
 	GroupIDs                []int64               `json:"group_ids"`
 	RiskRouteAccountIDs     []int64               `json:"risk_route_account_ids"`
 	CyberFeedbackAccountIDs []int64               `json:"cyber_feedback_account_ids"`
+	ExcludedUserIDs         []int64               `json:"excluded_user_ids"`
 	MaxTotalInputChars      int                   `json:"max_total_input_chars"`
 	PromptTemplates         []PromptTemplate      `json:"prompt_templates"`
 	ActivePromptTemplateID  string                `json:"active_prompt_template_id"`
@@ -138,6 +140,7 @@ type ActiveConfig struct {
 	GroupIDs                []int64
 	RiskRouteAccountIDs     []int64
 	CyberFeedbackAccountIDs []int64
+	ExcludedUserIDs         []int64
 	MaxTotalInputChars      int
 	PromptTemplates         []PromptTemplate
 	ActivePromptTemplateID  string
@@ -184,6 +187,7 @@ type PublicConfig struct {
 	GroupIDs                []int64               `json:"group_ids"`
 	RiskRouteAccountIDs     []int64               `json:"risk_route_account_ids"`
 	CyberFeedbackAccountIDs []int64               `json:"cyber_feedback_account_ids"`
+	ExcludedUserIDs         []int64               `json:"excluded_user_ids"`
 	MaxTotalInputChars      int                   `json:"max_total_input_chars"`
 	PromptTemplates         []PromptTemplate      `json:"prompt_templates"`
 	ActivePromptTemplateID  string                `json:"active_prompt_template_id"`
@@ -231,6 +235,7 @@ type UpdateConfigRequest struct {
 	GroupIDs                []int64           `json:"group_ids"`
 	RiskRouteAccountIDs     *[]int64          `json:"risk_route_account_ids,omitempty"`
 	CyberFeedbackAccountIDs *[]int64          `json:"cyber_feedback_account_ids,omitempty"`
+	ExcludedUserIDs         *[]int64          `json:"excluded_user_ids,omitempty"`
 	MaxTotalInputChars      *int              `json:"max_total_input_chars,omitempty"`
 	PromptTemplates         *[]PromptTemplate `json:"prompt_templates,omitempty"`
 	ActivePromptTemplateID  *string           `json:"active_prompt_template_id,omitempty"`
@@ -260,6 +265,7 @@ func DefaultStorageConfig() storageConfig {
 		GroupIDs:                []int64{},
 		RiskRouteAccountIDs:     []int64{},
 		CyberFeedbackAccountIDs: []int64{},
+		ExcludedUserIDs:         []int64{},
 		MaxTotalInputChars:      DefaultMaxTotalInputChars,
 		PromptTemplates:         []PromptTemplate{DefaultPromptTemplate()},
 		ActivePromptTemplateID:  DefaultPromptTemplateID,
@@ -311,6 +317,7 @@ func normalizeStorageConfig(cfg *storageConfig) {
 	cfg.GroupIDs = canonicalInt64s(cfg.GroupIDs)
 	cfg.RiskRouteAccountIDs = canonicalInt64s(cfg.RiskRouteAccountIDs)
 	cfg.CyberFeedbackAccountIDs = canonicalInt64s(cfg.CyberFeedbackAccountIDs)
+	cfg.ExcludedUserIDs = canonicalInt64s(cfg.ExcludedUserIDs)
 	if cfg.MaxTotalInputChars == 0 {
 		cfg.MaxTotalInputChars = DefaultMaxTotalInputChars
 	}
@@ -392,6 +399,9 @@ func validateStorageConfig(cfg storageConfig) error {
 	}
 	if err := validatePositiveIDs(cfg.CyberFeedbackAccountIDs, "prompt_audit_invalid_cyber_feedback_account", "CYB 反馈账号 ID 无效"); err != nil {
 		return err
+	}
+	if len(cfg.ExcludedUserIDs) > MaxExcludedUserIDs {
+		return infraerrors.BadRequest("prompt_audit_too_many_excluded_users", "排除用户数量超出允许范围")
 	}
 	if cfg.MaxTotalInputChars < MinMaxTotalInputChars || cfg.MaxTotalInputChars > MaxMaxTotalInputChars {
 		return infraerrors.BadRequest("prompt_audit_invalid_max_total_input_chars", "审计总字符上限超出允许范围")
@@ -481,6 +491,14 @@ func validateUpdateConfigRequest(req UpdateConfigRequest) error {
 			return err
 		}
 	}
+	if req.ExcludedUserIDs != nil {
+		if err := validatePositiveIDs(*req.ExcludedUserIDs, "prompt_audit_invalid_excluded_user", "排除用户 ID 无效"); err != nil {
+			return err
+		}
+		if len(canonicalInt64s(*req.ExcludedUserIDs)) > MaxExcludedUserIDs {
+			return infraerrors.BadRequest("prompt_audit_too_many_excluded_users", "排除用户数量超出允许范围")
+		}
+	}
 	if req.MaxTotalInputChars != nil && (*req.MaxTotalInputChars < MinMaxTotalInputChars || *req.MaxTotalInputChars > MaxMaxTotalInputChars) {
 		return infraerrors.BadRequest("prompt_audit_invalid_max_total_input_chars", "审计总字符上限超出允许范围")
 	}
@@ -566,6 +584,13 @@ func (cfg ActiveConfig) IncludesCyberFeedbackSource(accountID int64, platform, a
 	return accountID > 0 && containsCanonicalInt64(cfg.CyberFeedbackAccountIDs, accountID)
 }
 
+func (cfg ActiveConfig) IncludesUser(userID int64) bool {
+	if userID <= 0 || len(cfg.ExcludedUserIDs) == 0 {
+		return true
+	}
+	return !containsCanonicalInt64(cfg.ExcludedUserIDs, userID)
+}
+
 func (cfg ActiveConfig) EnabledEndpoints() []ActiveEndpoint {
 	result := make([]ActiveEndpoint, 0, len(cfg.Endpoints))
 	for index, ep := range cfg.Endpoints {
@@ -603,6 +628,7 @@ func PublicFromStorage(cfg storageConfig, riskControlEnabled bool, invalidTokenE
 	groupIDs := append([]int64{}, cfg.GroupIDs...)
 	riskRouteAccountIDs := append([]int64{}, cfg.RiskRouteAccountIDs...)
 	cyberFeedbackAccountIDs := append([]int64{}, cfg.CyberFeedbackAccountIDs...)
+	excludedUserIDs := append([]int64{}, cfg.ExcludedUserIDs...)
 	endpoints := make([]PublicEndpoint, 0, len(cfg.Endpoints))
 	for _, ep := range cfg.Endpoints {
 		hasToken := strings.TrimSpace(ep.TokenCiphertext) != ""
@@ -627,7 +653,7 @@ func PublicFromStorage(cfg storageConfig, riskControlEnabled bool, invalidTokenE
 		EffectiveMode: active.EffectiveMode(), Strategy: cfg.Strategy, WorkerCount: cfg.WorkerCount,
 		QueueCapacity: cfg.QueueCapacity, Scanners: scanners, AllGroups: cfg.AllGroups,
 		GroupIDs: groupIDs, RiskRouteAccountIDs: riskRouteAccountIDs,
-		CyberFeedbackAccountIDs: cyberFeedbackAccountIDs, MaxTotalInputChars: cfg.MaxTotalInputChars,
+		CyberFeedbackAccountIDs: cyberFeedbackAccountIDs, ExcludedUserIDs: excludedUserIDs, MaxTotalInputChars: cfg.MaxTotalInputChars,
 		PromptTemplates:        clonePromptTemplates(cfg.PromptTemplates),
 		CyberSupplementRules:   cloneCyberSupplementRules(cfg.CyberSupplementRules),
 		ActivePromptTemplateID: cfg.ActivePromptTemplateID, FlagThreshold: thresholdValue(cfg.FlagThreshold, DefaultFlagThreshold),
@@ -645,7 +671,7 @@ func ActiveFromStorage(cfg storageConfig, riskControlEnabled bool, encryptor Sec
 		StorePassEvents:        cfg.StorePassEvents, Strategy: cfg.Strategy, WorkerCount: cfg.WorkerCount,
 		QueueCapacity: cfg.QueueCapacity, Scanners: append([]string(nil), cfg.Scanners...), AllGroups: cfg.AllGroups,
 		GroupIDs: append([]int64(nil), cfg.GroupIDs...), RiskRouteAccountIDs: append([]int64(nil), cfg.RiskRouteAccountIDs...),
-		CyberFeedbackAccountIDs: append([]int64(nil), cfg.CyberFeedbackAccountIDs...), MaxTotalInputChars: cfg.MaxTotalInputChars,
+		CyberFeedbackAccountIDs: append([]int64(nil), cfg.CyberFeedbackAccountIDs...), ExcludedUserIDs: append([]int64(nil), cfg.ExcludedUserIDs...), MaxTotalInputChars: cfg.MaxTotalInputChars,
 		PromptTemplates:        clonePromptTemplates(cfg.PromptTemplates),
 		CyberSupplementRules:   cloneCyberSupplementRules(cfg.CyberSupplementRules),
 		ActivePromptTemplateID: template.ID, FlagThreshold: thresholdValue(cfg.FlagThreshold, DefaultFlagThreshold),
@@ -712,6 +738,8 @@ func changeSummary(cfg storageConfig) string {
 		RiskRouteAccountCount     int     `json:"risk_route_account_count"`
 		CyberFeedbackAccountCount int     `json:"cyber_feedback_account_count"`
 		CyberFeedbackAccountHash  string  `json:"cyber_feedback_account_hash"`
+		ExcludedUserCount         int     `json:"excluded_user_count"`
+		ExcludedUserHash          string  `json:"excluded_user_hash"`
 		MaxTotalInputChars        int     `json:"max_total_input_chars"`
 		TemplateCount             int     `json:"template_count"`
 		CyberSupplementCount      int     `json:"cyber_supplement_count"`
@@ -725,6 +753,7 @@ func changeSummary(cfg storageConfig) string {
 		EndpointCount: len(cfg.Endpoints), ScannerCount: len(cfg.Scanners), AllGroups: cfg.AllGroups,
 		GroupCount: len(cfg.GroupIDs), RiskRouteAccountCount: len(cfg.RiskRouteAccountIDs),
 		CyberFeedbackAccountCount: len(cfg.CyberFeedbackAccountIDs),
+		ExcludedUserCount:         len(cfg.ExcludedUserIDs),
 		MaxTotalInputChars:        cfg.MaxTotalInputChars, TemplateCount: len(cfg.PromptTemplates),
 		CyberSupplementCount: len(cfg.CyberSupplementRules), ActiveTemplateID: cfg.ActivePromptTemplateID,
 		FlagThreshold:  thresholdValue(cfg.FlagThreshold, DefaultFlagThreshold),
@@ -736,6 +765,9 @@ func changeSummary(cfg storageConfig) string {
 	rawCyberAccounts, _ := json.Marshal(cfg.CyberFeedbackAccountIDs)
 	cyberAccountDigest := sha256.Sum256(rawCyberAccounts)
 	summary.CyberFeedbackAccountHash = hex.EncodeToString(cyberAccountDigest[:])
+	rawExcludedUsers, _ := json.Marshal(cfg.ExcludedUserIDs)
+	excludedUserDigest := sha256.Sum256(rawExcludedUsers)
+	summary.ExcludedUserHash = hex.EncodeToString(excludedUserDigest[:])
 	raw, _ := json.Marshal(summary)
 	return string(raw)
 }

@@ -91,6 +91,39 @@ func TestPromptServiceBlockingLatestTurnOnlyUsesNarrowSnapshot(t *testing.T) {
 	require.Equal(t, []string{"latest user input", "previous output"}, seen)
 }
 
+func TestPromptServiceExcludedUserSkipsBlockingAudit(t *testing.T) {
+	service := &PromptService{
+		config: &fakeConfigStore{active: true, cfg: ActiveConfig{
+			RiskControlEnabled: true, Enabled: true, BlockingEnabled: true, AllGroups: true, ExcludedUserIDs: []int64{77},
+			Scanners: AllScannerIDs, Endpoints: []ActiveEndpoint{{ID: "guard-1", Enabled: true, TimeoutMS: 1000, InputLimit: 4096}},
+		}},
+		evaluator: newGuardEvaluator(PromptScannerFunc(func(context.Context, ActiveEndpoint, string, []string) (*NormalizedResult, error) {
+			t.Fatal("excluded users must not reach the prompt audit scanner")
+			return nil, nil
+		}), nil, NewAtomicMetrics(), 2, 2),
+	}
+	decision, err := service.Evaluate(context.Background(), Request{UserID: 77, Protocol: "openai_chat_completions", Body: []byte(`{"messages":[{"role":"user","content":"hi"}]}`)})
+	require.NoError(t, err)
+	require.Equal(t, DecisionAllow, decision.Kind)
+}
+
+func TestPromptServiceExcludedUserSkipsAsyncEnqueue(t *testing.T) {
+	repo := &fakeJobRepository{}
+	payload := &fakePayloadStore{}
+	config := &fakeConfigStore{active: true, cfg: ActiveConfig{
+		RiskControlEnabled: true, Enabled: true, BlockingEnabled: false, AllGroups: true, ExcludedUserIDs: []int64{77},
+		Scanners: AllScannerIDs, Endpoints: []ActiveEndpoint{{ID: "guard-1", Enabled: true, TimeoutMS: 1000, InputLimit: 4096}},
+	}}
+	service := &PromptService{
+		config:     config,
+		enqueuer:   NewEnqueuer(config, repo, payload, NewAtomicMetrics()),
+		background: context.Background(),
+	}
+	require.NoError(t, service.Enqueue(context.Background(), Request{RequestID: "req-1", UserID: 77, Protocol: "openai_chat_completions", Body: []byte(`{"messages":[{"role":"user","content":"hi"}]}`)}))
+	require.Zero(t, repo.recordBlockingCalls)
+	require.Empty(t, payload.values)
+}
+
 func TestPromptServiceUnavailableAuditFallsBackToHardRiskRoute(t *testing.T) {
 	now := time.Unix(2_000, 0).UTC()
 	cfg := ActiveConfig{
