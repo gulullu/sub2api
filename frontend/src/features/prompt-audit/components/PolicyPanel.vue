@@ -96,7 +96,7 @@
       </div>
 
       <div class="mt-4 grid gap-3 2xl:grid-cols-[minmax(0,1fr)_320px]">
-        <div class="rounded-xl border border-gray-200 p-4 dark:border-dark-700/60 dark:bg-dark-900/20 sm:p-5">
+        <div class="min-w-0 rounded-xl border border-gray-200 p-4 dark:border-dark-700/60 dark:bg-dark-900/20 sm:p-5">
           <div class="grid gap-3 sm:grid-cols-2 xl:grid-cols-6">
             <label class="block text-sm text-gray-700 dark:text-dark-200 sm:col-span-2 xl:col-span-2">
               <span>{{ t('admin.promptAudit.policy.profiles.searchUser') }}</span>
@@ -145,8 +145,8 @@
             {{ bulkSelecting ? t('admin.promptAudit.policy.profiles.loadingBulk') : t('common.loading') }}
           </div>
 
-          <div v-else class="mt-4 overflow-hidden rounded-lg border border-gray-200 dark:border-dark-700">
-            <div class="max-h-[34rem] overflow-auto">
+          <div v-else class="mt-4 min-w-0 overflow-hidden rounded-lg border border-gray-200 dark:border-dark-700">
+            <div class="min-w-0 max-h-[34rem] overflow-auto">
               <table class="min-w-[900px] divide-y divide-gray-200 text-sm dark:divide-dark-700">
                 <thead class="sticky top-0 bg-gray-50 text-left text-xs font-semibold uppercase tracking-wide text-gray-500 dark:bg-dark-900 dark:text-dark-400">
                   <tr>
