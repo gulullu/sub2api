@@ -45,6 +45,8 @@ describe('Prompt Audit view model', () => {
   it('uses the complete-reason contract in the default template', () => {
     expect(DEFAULT_AUDIT_SYSTEM_PROMPT).not.toContain('reason ≤ 20 字')
     expect(DEFAULT_AUDIT_SYSTEM_PROMPT).toContain('reason 按网关追加的固定原因协议填写')
+    expect(DEFAULT_AUDIT_SYSTEM_PROMPT).toContain('反党、反华')
+    expect(DEFAULT_AUDIT_SYSTEM_PROMPT).toContain('颠覆国家政权')
   })
 
   it('localizes the operational audit-unavailable fallback marker', () => {

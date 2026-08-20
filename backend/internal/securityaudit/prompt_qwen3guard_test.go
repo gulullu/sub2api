@@ -222,16 +222,20 @@ func TestPromptAuditWrapperEscapesClosingTagInjection(t *testing.T) {
 func TestConfidenceJSONSystemPromptOverridesPersistedShortReasonLimitOnce(t *testing.T) {
 	require.NotContains(t, DefaultPromptAuditSystemPrompt, "reason ≤ 20 字")
 	require.Contains(t, DefaultPromptAuditSystemPrompt, "reason 按网关追加的固定原因协议填写")
+	require.Contains(t, DefaultPromptAuditSystemPrompt, "反党、反华")
+	require.Contains(t, DefaultPromptAuditSystemPrompt, "颠覆国家政权")
 	legacy := "旧审核模板。只输出 JSON（reason ≤ 20 字）。\n\n" + fixedMultilingualSemanticPolicy
 	effective := confidenceJSONSystemPrompt(legacy)
 	require.Contains(t, effective, legacy)
 	require.Equal(t, 1, strings.Count(effective, fixedMultilingualSemanticPolicy))
+	require.Equal(t, 1, strings.Count(effective, fixedChinesePoliticalSafetyPolicy))
 	require.Equal(t, 1, strings.Count(effective, fixedConfidenceReasonPolicy))
 	require.Greater(t, strings.LastIndex(effective, fixedConfidenceReasonPolicy), strings.Index(effective, "reason ≤ 20 字"))
 
 	repeated := confidenceJSONSystemPrompt(effective)
 	require.Equal(t, effective, repeated)
 	require.Equal(t, 1, strings.Count(repeated, fixedConfidenceReasonPolicy))
+	require.Equal(t, 1, strings.Count(repeated, fixedChinesePoliticalSafetyPolicy))
 }
 
 func TestAggregateRequiresEveryResult(t *testing.T) {
