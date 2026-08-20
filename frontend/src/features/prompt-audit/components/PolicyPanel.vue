@@ -5,7 +5,7 @@
       <p class="mt-1 text-sm text-gray-500 dark:text-dark-300">{{ t('admin.promptAudit.policy.description') }}</p>
     </div>
 
-    <div class="mt-5 grid gap-4 lg:grid-cols-[minmax(0,1fr)_minmax(260px,0.45fr)]">
+    <div class="mt-5 grid gap-4 2xl:grid-cols-[minmax(0,1fr)_minmax(260px,0.45fr)]">
       <div class="rounded-xl border border-gray-200 p-4 dark:border-dark-700/60 dark:bg-dark-900/20 sm:p-5">
         <fieldset>
           <legend class="text-sm font-medium text-gray-900 dark:text-white">{{ t('admin.promptAudit.policy.scope') }}</legend>
@@ -95,10 +95,10 @@
         {{ profileError }}
       </div>
 
-      <div class="mt-4 grid gap-3 lg:grid-cols-[minmax(0,1fr)_320px]">
+      <div class="mt-4 grid gap-3 2xl:grid-cols-[minmax(0,1fr)_320px]">
         <div class="rounded-xl border border-gray-200 p-4 dark:border-dark-700/60 dark:bg-dark-900/20 sm:p-5">
-          <div class="grid gap-3 md:grid-cols-6">
-            <label class="block text-sm text-gray-700 dark:text-dark-200 md:col-span-2">
+          <div class="grid gap-3 sm:grid-cols-2 xl:grid-cols-6">
+            <label class="block text-sm text-gray-700 dark:text-dark-200 sm:col-span-2 xl:col-span-2">
               <span>{{ t('admin.promptAudit.policy.profiles.searchUser') }}</span>
               <div class="mt-1.5 flex gap-2">
                 <input
@@ -147,7 +147,7 @@
 
           <div v-else class="mt-4 overflow-hidden rounded-lg border border-gray-200 dark:border-dark-700">
             <div class="max-h-[34rem] overflow-auto">
-              <table class="min-w-full divide-y divide-gray-200 text-sm dark:divide-dark-700">
+              <table class="min-w-[900px] divide-y divide-gray-200 text-sm dark:divide-dark-700">
                 <thead class="sticky top-0 bg-gray-50 text-left text-xs font-semibold uppercase tracking-wide text-gray-500 dark:bg-dark-900 dark:text-dark-400">
                   <tr>
                     <th class="px-4 py-3 w-10">
