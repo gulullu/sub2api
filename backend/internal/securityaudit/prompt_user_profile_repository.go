@@ -41,7 +41,7 @@ func (r *PostgreSQLRepository) ListUserProfiles(ctx context.Context, filter Prom
 	if r.clock != nil {
 		now = r.clock.Now().UTC()
 	}
-	cacheKey, cacheable := promptAuditUserProfileCacheKey(filter, page, pageSize, now)
+	cacheKey, cacheable := promptAuditUserProfileCacheKey(filter, page, pageSize)
 	if cacheable {
 		if cached := r.getPromptAuditUserProfileCache(cacheKey, now); cached != nil {
 			return cached, nil
@@ -96,7 +96,7 @@ func (r *PostgreSQLRepository) ListUserProfiles(ctx context.Context, filter Prom
 // short process-local cache keeps tab reloads and concurrent admin views from
 // repeating that expensive read while keeping the dashboard's data effectively
 // real-time. Large bulk-selection pages intentionally bypass the cache.
-func promptAuditUserProfileCacheKey(filter PromptAuditUserProfileFilter, page, pageSize int, now time.Time) (string, bool) {
+func promptAuditUserProfileCacheKey(filter PromptAuditUserProfileFilter, page, pageSize int) (string, bool) {
 	if pageSize > 100 {
 		return "", false
 	}
@@ -118,10 +118,11 @@ func promptAuditUserProfileCacheKey(filter PromptAuditUserProfileFilter, page, p
 	if filter.GroupID != nil {
 		groupID = *filter.GroupID
 	}
-	// Bucket the clock so the exact moving end timestamp does not defeat the
-	// cache on every request. The 15-second TTL bounds staleness.
-	bucket := now.Unix() / int64(promptAuditUserProfileCacheTTL/time.Second)
-	return fmt.Sprintf("%d|%d|%d|%d|%q|%d|%d|%d", bucket, days, userID, groupID, strings.ToLower(strings.TrimSpace(filter.Search)), minSamples, page, pageSize), true
+	// The entry expiry, rather than a clock bucket, bounds staleness. Including
+	// a bucket here can make two otherwise identical requests miss when the
+	// first query happens to cross a bucket boundary while the database is
+	// still being read.
+	return fmt.Sprintf("%d|%d|%d|%q|%d|%d|%d", days, userID, groupID, strings.ToLower(strings.TrimSpace(filter.Search)), minSamples, page, pageSize), true
 }
 
 func (r *PostgreSQLRepository) getPromptAuditUserProfileCache(key string, now time.Time) *PromptAuditUserProfilePage {
