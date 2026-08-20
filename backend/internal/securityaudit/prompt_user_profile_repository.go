@@ -10,6 +10,17 @@ import (
 	"time"
 )
 
+const (
+	promptAuditUserProfileCacheTTL        = 15 * time.Second
+	promptAuditUserProfileCacheMaxEntries = 64
+)
+
+type promptAuditUserProfileCacheEntry struct {
+	page      *PromptAuditUserProfilePage
+	expiresAt time.Time
+	usedAt    time.Time
+}
+
 func (r *PostgreSQLRepository) ListUserProfiles(ctx context.Context, filter PromptAuditUserProfileFilter, page, pageSize int) (*PromptAuditUserProfilePage, error) {
 	if r == nil || r.db == nil {
 		return nil, errors.New("prompt audit profile database unavailable")
@@ -23,9 +34,18 @@ func (r *PostgreSQLRepository) ListUserProfiles(ctx context.Context, filter Prom
 	if pageSize > MaxPromptAuditUserProfilePageSize {
 		pageSize = MaxPromptAuditUserProfilePageSize
 	}
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
 	now := time.Now().UTC()
 	if r.clock != nil {
 		now = r.clock.Now().UTC()
+	}
+	cacheKey, cacheable := promptAuditUserProfileCacheKey(filter, page, pageSize, now)
+	if cacheable {
+		if cached := r.getPromptAuditUserProfileCache(cacheKey, now); cached != nil {
+			return cached, nil
+		}
 	}
 	query, args := buildUserProfileQuery(filter, now)
 	queryArgs := append([]any(nil), args...)
@@ -65,7 +85,124 @@ func (r *PostgreSQLRepository) ListUserProfiles(ctx context.Context, filter Prom
 	if total > 0 {
 		pages = int((total + int64(pageSize) - 1) / int64(pageSize))
 	}
-	return &PromptAuditUserProfilePage{Items: items, Total: total, Page: page, PageSize: pageSize, Pages: pages}, nil
+	result := &PromptAuditUserProfilePage{Items: items, Total: total, Page: page, PageSize: pageSize, Pages: pages}
+	if cacheable {
+		r.setPromptAuditUserProfileCache(cacheKey, result, now)
+	}
+	return result, nil
+}
+
+// Profile aggregation reads millions of usage rows on a busy installation. A
+// short process-local cache keeps tab reloads and concurrent admin views from
+// repeating that expensive read while keeping the dashboard's data effectively
+// real-time. Large bulk-selection pages intentionally bypass the cache.
+func promptAuditUserProfileCacheKey(filter PromptAuditUserProfileFilter, page, pageSize int, now time.Time) (string, bool) {
+	if pageSize > 100 {
+		return "", false
+	}
+	days := filter.Days
+	if days <= 0 {
+		days = DefaultPromptAuditUserProfileDays
+	}
+	if days > MaxPromptAuditUserProfileDays {
+		days = MaxPromptAuditUserProfileDays
+	}
+	minSamples := filter.MinSamples
+	if minSamples < 0 {
+		minSamples = 0
+	}
+	var userID, groupID int64
+	if filter.UserID != nil {
+		userID = *filter.UserID
+	}
+	if filter.GroupID != nil {
+		groupID = *filter.GroupID
+	}
+	// Bucket the clock so the exact moving end timestamp does not defeat the
+	// cache on every request. The 15-second TTL bounds staleness.
+	bucket := now.Unix() / int64(promptAuditUserProfileCacheTTL/time.Second)
+	return fmt.Sprintf("%d|%d|%d|%d|%q|%d|%d|%d", bucket, days, userID, groupID, strings.ToLower(strings.TrimSpace(filter.Search)), minSamples, page, pageSize), true
+}
+
+func (r *PostgreSQLRepository) getPromptAuditUserProfileCache(key string, now time.Time) *PromptAuditUserProfilePage {
+	r.profileCacheMu.Lock()
+	defer r.profileCacheMu.Unlock()
+	entry, ok := r.profileCache[key]
+	if !ok {
+		return nil
+	}
+	if !now.Before(entry.expiresAt) {
+		delete(r.profileCache, key)
+		return nil
+	}
+	entry.usedAt = now
+	r.profileCache[key] = entry
+	return clonePromptAuditUserProfilePage(entry.page)
+}
+
+func (r *PostgreSQLRepository) setPromptAuditUserProfileCache(key string, page *PromptAuditUserProfilePage, now time.Time) {
+	if page == nil {
+		return
+	}
+	r.profileCacheMu.Lock()
+	defer r.profileCacheMu.Unlock()
+	if r.profileCache == nil {
+		r.profileCache = make(map[string]promptAuditUserProfileCacheEntry)
+	}
+	for existingKey, entry := range r.profileCache {
+		if !now.Before(entry.expiresAt) {
+			delete(r.profileCache, existingKey)
+		}
+	}
+	if len(r.profileCache) >= promptAuditUserProfileCacheMaxEntries {
+		oldestKey := ""
+		var oldest time.Time
+		for existingKey, entry := range r.profileCache {
+			if oldestKey == "" || entry.usedAt.Before(oldest) {
+				oldestKey, oldest = existingKey, entry.usedAt
+			}
+		}
+		if oldestKey != "" {
+			delete(r.profileCache, oldestKey)
+		}
+	}
+	r.profileCache[key] = promptAuditUserProfileCacheEntry{
+		page:      clonePromptAuditUserProfilePage(page),
+		expiresAt: now.Add(promptAuditUserProfileCacheTTL),
+		usedAt:    now,
+	}
+}
+
+func clonePromptAuditUserProfilePage(page *PromptAuditUserProfilePage) *PromptAuditUserProfilePage {
+	if page == nil {
+		return nil
+	}
+	clone := *page
+	clone.Items = make([]*PromptAuditUserProfile, len(page.Items))
+	for index, item := range page.Items {
+		if item == nil {
+			continue
+		}
+		itemClone := *item
+		if item.LastAuditAt != nil {
+			value := *item.LastAuditAt
+			itemClone.LastAuditAt = &value
+		}
+		if item.LastUsageAt != nil {
+			value := *item.LastUsageAt
+			itemClone.LastUsageAt = &value
+		}
+		if item.LastCyberAt != nil {
+			value := *item.LastCyberAt
+			itemClone.LastCyberAt = &value
+		}
+		if item.LastRecordedAt != nil {
+			value := *item.LastRecordedAt
+			itemClone.LastRecordedAt = &value
+		}
+		clone.Items[index] = &itemClone
+	}
+	return &clone
 }
 
 type userProfileQuery struct {

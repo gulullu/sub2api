@@ -7,6 +7,7 @@ import (
 	"errors"
 	"fmt"
 	"strings"
+	"sync"
 	"time"
 )
 
@@ -81,6 +82,9 @@ type JobRepository interface {
 type PostgreSQLRepository struct {
 	db    *sql.DB
 	clock Clock
+
+	profileCacheMu sync.Mutex
+	profileCache   map[string]promptAuditUserProfileCacheEntry
 }
 
 func NewPostgreSQLRepository(db *sql.DB) *PostgreSQLRepository {

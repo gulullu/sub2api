@@ -102,7 +102,7 @@ export default {
       scanners: 'Qwen3Guard input-risk categories', workerCount: 'Worker count', queueCapacity: 'Persistent queue capacity', strategy: 'Node strategy', strategyHint: 'Try enabled nodes from the lowest priority number to the highest; equal priorities retain their list order.',
       profiles: {
         title: 'User profiles / do-not-audit list',
-        description: 'Sort by content high/critical risk and raw CYB ratio, then bulk-exclude users while retaining the smaller set that still needs audit.',
+        description: 'By default, sort the last 7 days by content high/critical risk and raw CYB ratio; adjust the window and bulk-exclude users while retaining the smaller set that still needs audit.',
         refresh: 'Refresh profiles',
         selectPage: 'Select this page',
         clearPage: 'Clear this page',

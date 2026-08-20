@@ -102,7 +102,7 @@ export default {
       scanners: 'Qwen3Guard 输入风险分类', workerCount: 'Worker 数量', queueCapacity: '持久队列容量', strategy: '节点策略', strategyHint: '按优先级数字从小到大尝试启用节点；相同优先级保持列表顺序。',
       profiles: {
         title: '用户画像 / 不审核名单',
-        description: '按内容高风险、严重风险和原始 CYB 比例排序；可跨页批量加入不审核名单，再保留少量需要继续审核的用户。',
+        description: '默认按最近 7 天的内容高风险、严重风险和原始 CYB 比例排序；可调整时间窗口并跨页批量加入不审核名单，再保留少量需要继续审核的用户。',
         refresh: '刷新画像',
         selectPage: '本页全选',
         clearPage: '本页清空',

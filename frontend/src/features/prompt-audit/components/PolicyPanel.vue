@@ -283,6 +283,9 @@ const PROFILE_BULK_SELECT_LIMIT = 1000
 // The full ID list remains in the draft; only its removable preview is bounded.
 const PROFILE_SELECTED_PREVIEW_LIMIT = 200
 const PROFILE_MAX_DAYS = 180
+// Keep the first profile load responsive on busy installations; administrators
+// can extend the window when they need a longer history.
+const PROFILE_DEFAULT_DAYS = 7
 const PROFILE_DEFAULT_MIN_SAMPLES = 20
 const groupSearch = ref('')
 const profileLoading = ref(false)
@@ -291,7 +294,7 @@ const profileError = ref('')
 const profileNotice = ref('')
 const profilePage = reactive<PromptAuditUserProfilePage>({ items: [], total: 0, page: 1, page_size: 20, pages: 0 })
 const profileFilters = reactive<PromptAuditUserProfileFilter & { page_size: number }>({
-  days: 30,
+  days: PROFILE_DEFAULT_DAYS,
   search: '',
   user_id: undefined,
   group_id: undefined,
@@ -357,7 +360,7 @@ function setProfileUserId(value: string) {
 
 function setProfileDays(value: string) {
 	const parsed = Number(value)
-	profileFilters.days = Number.isInteger(parsed) && parsed > 0 ? Math.min(PROFILE_MAX_DAYS, parsed) : 30
+	profileFilters.days = Number.isInteger(parsed) && parsed > 0 ? Math.min(PROFILE_MAX_DAYS, parsed) : PROFILE_DEFAULT_DAYS
 }
 
 function setProfileGroupId(value: string) {
@@ -398,7 +401,7 @@ function selectVisible(selected: boolean) {
 
 function buildFilter(): PromptAuditUserProfileFilter {
   return {
-    days: Math.max(1, Math.min(PROFILE_MAX_DAYS, Number(profileFilters.days) || 30)),
+    days: Math.max(1, Math.min(PROFILE_MAX_DAYS, Number(profileFilters.days) || PROFILE_DEFAULT_DAYS)),
     search: profileFilters.search.trim(),
     user_id: typeof profileFilters.user_id === 'number' && profileFilters.user_id > 0 ? profileFilters.user_id : undefined,
     group_id: typeof profileFilters.group_id === 'number' && profileFilters.group_id > 0 ? profileFilters.group_id : undefined,
