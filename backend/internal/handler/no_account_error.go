@@ -12,7 +12,9 @@ import (
 	"github.com/Wei-Shaw/sub2api/internal/service"
 )
 
-const opsClientBusinessLimitedReasonLocalModelUnsupported = "local_model_unsupported"
+// Keep the historical handler-local name as a source-compatibility alias while
+// using the shared reason value consumed by Ops attribution/suppression.
+const opsClientBusinessLimitedReasonLocalModelUnsupported = service.OpsClientBusinessLimitedReasonLocalModelConfiguration
 
 const promptRiskRouteSafeMessage = "Service temporarily unavailable"
 
