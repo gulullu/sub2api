@@ -139,6 +139,7 @@ export default {
         unknownStatus: '未知状态',
         excludedTitle: '已排除用户',
         excludedEmpty: '还没有排除任何用户。',
+        excludedPreviewMore: '已选择 {count} 个用户，摘要仅显示前 200 个；可在左侧筛选列表中取消选择。',
         excludedMissing: '有 {count} 个已排除 ID 还没在当前筛选里找到：{ids}',
         saveHint: '勾选结果会保留在配置草稿中，点击页面底部“保存”后对新请求生效。',
         cybPersistence: '排除用户后续触发 CYB 时，原始命中与现有留痕链路不变。',

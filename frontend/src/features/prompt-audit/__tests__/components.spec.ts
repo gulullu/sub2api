@@ -119,6 +119,8 @@ describe('Prompt Audit components', () => {
       props: { draft, groups: [{ id: 1, name: 'Alpha', platform: 'openai', status: 'active' }, { id: 2, name: 'Beta', platform: 'claude', status: 'inactive' }] },
     })
     await flushPromises()
+    const profileSearch = wrapper.findAll('button').find((button) => button.text().includes('admin.promptAudit.policy.profiles.searchAction'))
+    expect(profileSearch?.classes()).toEqual(expect.arrayContaining(['shrink-0', 'whitespace-nowrap']))
     expect(wrapper.text()).toContain('99')
     expect(wrapper.findAll('input[type="checkbox"]').filter((input) => SCANNER_CATALOG.some((scanner) => input.attributes('aria-label') === `admin.promptAudit.scanners.${scanner.id}`))).toHaveLength(9)
     await wrapper.get('[aria-label="admin.promptAudit.policy.searchGroups"]').setValue('Beta')
@@ -130,6 +132,21 @@ describe('Prompt Audit components', () => {
     await wrapper.get('[aria-label="admin.promptAudit.policy.workerCount"]').setValue('6')
     const emitted = wrapper.emitted('update:draft')?.at(-1)?.[0] as PromptAuditDraft
     expect(emitted.worker_count).toBe(6)
+  })
+
+  it('bounds the excluded-user summary DOM for large bulk selections', async () => {
+    const draft: PromptAuditDraft = {
+      enabled: true, blocking_enabled: false, blocking_latest_turn_only: false, store_pass_events: false, effective_mode: 'async_audit', strategy: 'priority',
+      worker_count: 4, queue_capacity: 100, scanners: SCANNER_CATALOG.map((item) => item.id), all_groups: true, group_ids: [],
+      risk_route_account_ids: [], cyber_feedback_account_ids: [], excluded_user_ids: Array.from({ length: 1000 }, (_, index) => index + 1),
+      prompt_templates: [{ id: 'builtin', name: 'Built-in', system_prompt: 'Review input', builtin: true }], active_prompt_template_id: 'builtin',
+      flag_threshold: 0.4, block_threshold: 0.7, block_http_status: 403, block_message: DEFAULT_BLOCK_MESSAGE,
+      max_total_input_chars: 40000, endpoints: [], config_version: 1, updated_at: '', updated_by: 0, change_summary: '',
+    }
+    const wrapper = mount(PolicyPanel, { props: { draft, groups: [] } })
+    await flushPromises()
+    expect(wrapper.findAll('[data-test="prompt-audit-excluded-preview"]')).toHaveLength(200)
+    expect(wrapper.text()).toContain('admin.promptAudit.policy.profiles.excludedPreviewMore')
   })
 
   it('creates confidence JSON nodes with DeepSeek defaults and preserves Qwen defaults when switched', async () => {

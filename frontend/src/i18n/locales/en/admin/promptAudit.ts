@@ -139,6 +139,7 @@ export default {
         unknownStatus: 'Unknown status',
         excludedTitle: 'Excluded users',
         excludedEmpty: 'No users are excluded yet.',
+        excludedPreviewMore: '{count} users selected; only the first 200 are shown here. Use the filtered list on the left to clear selections.',
         excludedMissing: 'There are {count} excluded IDs not found in the current result set: {ids}',
         saveHint: 'Selections stay in the configuration draft and apply to new requests after you click Save at the bottom of the page.',
         cybPersistence: 'If an excluded user later triggers CYB, raw-hit capture and the existing audit trail remain unchanged.',

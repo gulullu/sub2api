@@ -104,13 +104,13 @@
                 <input
                   :value="profileFilters.search"
                   type="search"
-                  class="input w-full"
+                  class="input min-w-0 w-full"
                   :placeholder="t('admin.promptAudit.policy.profiles.searchPlaceholder')"
                   :aria-label="t('admin.promptAudit.policy.profiles.searchUser')"
                   @input="setProfileSearch(($event.target as HTMLInputElement).value)"
                   @keyup.enter="applyProfileFilters"
                 />
-                <button type="button" class="btn btn-primary btn-sm" @click="applyProfileFilters">{{ t('admin.promptAudit.policy.profiles.searchAction') }}</button>
+                <button type="button" class="btn btn-primary btn-sm shrink-0 whitespace-nowrap" @click="applyProfileFilters">{{ t('admin.promptAudit.policy.profiles.searchAction') }}</button>
               </div>
             </label>
             <label class="block text-sm text-gray-700 dark:text-dark-200">
@@ -239,6 +239,7 @@
               <button
                 v-for="item in selectedExcludedUsers"
                 :key="item.id"
+                data-test="prompt-audit-excluded-preview"
                 type="button"
                 class="inline-flex max-w-full items-center gap-2 rounded-full bg-primary-50 px-3 py-1.5 text-left text-xs font-medium text-primary-800 dark:bg-primary-950/40 dark:text-primary-200"
                 @click="toggleExcluded(item.id)"
@@ -247,6 +248,9 @@
                 <span class="shrink-0 opacity-70">×</span>
               </button>
             </div>
+            <p v-if="hiddenExcludedUsersCount" class="mt-2 px-1 text-xs text-gray-500 dark:text-dark-400">
+              {{ t('admin.promptAudit.policy.profiles.excludedPreviewMore', { count: formatCount(hiddenExcludedUsersCount) }) }}
+            </p>
           </div>
 
           <div v-if="missingSelectedIds.length" class="mt-3 rounded-lg bg-amber-50 px-3 py-2 text-xs leading-5 text-amber-800 dark:bg-amber-950/30 dark:text-amber-200">
@@ -275,6 +279,9 @@ const props = defineProps<{ draft: PromptAuditDraft; groups: PromptAuditGroup[] 
 const emit = defineEmits<{ (event: 'update:draft', value: PromptAuditDraft): void }>()
 const { t, locale } = useI18n()
 const PROFILE_BULK_SELECT_LIMIT = 1000
+// Keep the exclusion summary responsive when a large bulk selection is saved.
+// The full ID list remains in the draft; only its removable preview is bounded.
+const PROFILE_SELECTED_PREVIEW_LIMIT = 200
 const PROFILE_MAX_DAYS = 180
 const PROFILE_DEFAULT_MIN_SAMPLES = 20
 const groupSearch = ref('')
@@ -292,6 +299,9 @@ const profileFilters = reactive<PromptAuditUserProfileFilter & { page_size: numb
   page_size: 20,
 })
 const profileCache = reactive(new Map<number, PromptAuditUserProfile>())
+let profileRequestId = 0
+const numberFormatter = computed(() => new Intl.NumberFormat(locale.value))
+const dateFormatter = computed(() => new Intl.DateTimeFormat(locale.value, { dateStyle: 'short', timeStyle: 'medium', hour12: false }))
 
 const filteredGroups = computed(() => {
   const query = groupSearch.value.trim().toLowerCase()
@@ -301,11 +311,13 @@ const filteredGroups = computed(() => {
 const knownGroupIds = computed(() => new Set(props.groups.map((group) => group.id)))
 const missingGroupIds = computed(() => props.draft.group_ids.filter((id) => !knownGroupIds.value.has(id)))
 const selectedExcludedIds = computed(() => [...new Set(props.draft.excluded_user_ids ?? [])].sort((a, b) => a - b))
-const selectedExcludedUsers = computed(() => selectedExcludedIds.value.map((id) => {
+const excludedIdSet = computed(() => new Set(selectedExcludedIds.value))
+const selectedExcludedUsers = computed(() => selectedExcludedIds.value.slice(0, PROFILE_SELECTED_PREVIEW_LIMIT).map((id) => {
   const profile = profileCache.get(id)
   const label = profile ? `${profile.username || profile.email || `#${id}`} · ${profile.email || t('admin.promptAudit.policy.profiles.noEmail')}` : `#${id}`
   return { id, label, profile }
 }))
+const hiddenExcludedUsersCount = computed(() => Math.max(0, selectedExcludedIds.value.length - PROFILE_SELECTED_PREVIEW_LIMIT))
 const missingSelectedIds = computed(() => selectedExcludedIds.value.filter((id) => !profileCache.has(id)))
 const currentPageSelectedIds = computed(() => profilePage.items.filter((profile) => isExcluded(profile.user_id)).map((profile) => profile.user_id))
 const selectedOnPageCount = computed(() => currentPageSelectedIds.value.length)
@@ -365,7 +377,7 @@ function setProfilePageSize(value: string) {
 }
 
 function isExcluded(userID: number): boolean {
-  return selectedExcludedIds.value.includes(userID)
+  return excludedIdSet.value.has(userID)
 }
 
 function toggleExcluded(userID: number) {
@@ -395,11 +407,13 @@ function buildFilter(): PromptAuditUserProfileFilter {
 }
 
 async function loadProfiles(page = profilePage.page) {
+  const requestId = ++profileRequestId
   profileLoading.value = true
   profileError.value = ''
   profileNotice.value = ''
   try {
     const data = await promptAuditAPI.listUserProfiles(buildFilter(), page, profileFilters.page_size)
+    if (requestId !== profileRequestId) return
     profilePage.items = data.items ?? []
     profilePage.total = data.total ?? 0
     profilePage.page = data.page ?? page
@@ -410,9 +424,10 @@ async function loadProfiles(page = profilePage.page) {
       profileCache.set(profile.user_id, profile)
     }
   } catch (error) {
+    if (requestId !== profileRequestId) return
     profileError.value = extractApiErrorMessage(error) || (error instanceof Error ? error.message : String(error))
   } finally {
-    profileLoading.value = false
+    if (requestId === profileRequestId) profileLoading.value = false
   }
 }
 
@@ -475,7 +490,7 @@ function reloadProfiles() {
 }
 
 function formatCount(value: number | null | undefined): string {
-  return new Intl.NumberFormat(locale.value).format(Number(value ?? 0))
+  return numberFormatter.value.format(Number(value ?? 0))
 }
 
 function formatPercent(value: number | null | undefined): string {
@@ -486,7 +501,7 @@ function formatDate(value?: string | null): string {
   if (!value) return '—'
   const date = new Date(value)
   if (Number.isNaN(date.getTime())) return '—'
-  return date.toLocaleString(locale.value, { hour12: false })
+  return dateFormatter.value.format(date)
 }
 
 function riskText(profile: PromptAuditUserProfile): string {
