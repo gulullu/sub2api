@@ -289,12 +289,26 @@ func TestPromptAdminRejectsInvalidEventIDsTimesAndPagination(t *testing.T) {
 		{http.MethodGet, "/admin/prompt-audit/events?group_id=bad", nil, "prompt_audit_invalid_filter_id"},
 		{http.MethodGet, "/admin/prompt-audit/events?start_at=not-time", nil, "prompt_audit_invalid_time"},
 		{http.MethodGet, "/admin/prompt-audit/events?page=0", nil, "prompt_audit_invalid_pagination"},
+		{http.MethodGet, "/admin/prompt-audit/user-profiles?days=181", nil, "prompt_audit_invalid_filter_days"},
+		{http.MethodGet, "/admin/prompt-audit/user-profiles?min_samples=-1", nil, "prompt_audit_invalid_filter_min_samples"},
 		{http.MethodPost, "/admin/prompt-audit/events/batch-delete", map[string]any{"ids": []int64{1, -2}}, "prompt_audit_invalid_event_id"},
 	} {
 		response := promptAdminRequest(t, router, tc.method, tc.path, tc.body)
 		require.Equalf(t, http.StatusBadRequest, response.Code, "%s %s", tc.method, tc.path)
 		require.Contains(t, response.Body.String(), tc.reason)
 	}
+}
+
+func TestPromptAdminUserProfilesUseSafeDefaultWindowAndSampleFloor(t *testing.T) {
+	service := &fakePromptAdminService{
+		listProfiles: func(_ context.Context, filter PromptAuditUserProfileFilter, page, pageSize int) (*PromptAuditUserProfilePage, error) {
+			require.Equal(t, DefaultPromptAuditUserProfileDays, filter.Days)
+			require.Equal(t, DefaultPromptAuditUserProfileMinSamples, filter.MinSamples)
+			return &PromptAuditUserProfilePage{Page: page, PageSize: pageSize}, nil
+		},
+	}
+	response := promptAdminRequest(t, promptAdminRouter(service), http.MethodGet, "/admin/prompt-audit/user-profiles", nil)
+	require.Equal(t, http.StatusOK, response.Code)
 }
 
 func TestPromptAdminUserProfilesRouteBindsQueryAndReturnsProfiles(t *testing.T) {
@@ -304,12 +318,13 @@ func TestPromptAdminUserProfilesRouteBindsQueryAndReturnsProfiles(t *testing.T) 
 			require.Equal(t, 10, pageSize)
 			require.Equal(t, 14, filter.Days)
 			require.Equal(t, "alice", filter.Search)
+			require.Equal(t, int64(88), *filter.UserID)
 			require.Equal(t, int64(77), *filter.GroupID)
 			require.Equal(t, 3, filter.MinSamples)
 			return &PromptAuditUserProfilePage{Items: []*PromptAuditUserProfile{{UserID: 1, Username: "alice"}}, Total: 1, Page: page, PageSize: pageSize, Pages: 1}, nil
 		},
 	}
-	response := promptAdminRequest(t, promptAdminRouter(service), http.MethodGet, "/admin/prompt-audit/user-profiles?days=14&page=2&page_size=10&search=alice&group_id=77&min_samples=3", nil)
+	response := promptAdminRequest(t, promptAdminRouter(service), http.MethodGet, "/admin/prompt-audit/user-profiles?days=14&page=2&page_size=10&search=alice&user_id=88&group_id=77&min_samples=3", nil)
 	require.Equal(t, http.StatusOK, response.Code)
 	require.Contains(t, response.Body.String(), `"user_id":1`)
 }

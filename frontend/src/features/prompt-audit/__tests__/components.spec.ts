@@ -1,6 +1,6 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { defineComponent } from 'vue'
-import { mount } from '@vue/test-utils'
+import { flushPromises, mount } from '@vue/test-utils'
 import DataTable from '@/components/common/DataTable.vue'
 import EndpointPool from '../components/EndpointPool.vue'
 import PromptTemplatePanel from '../components/PromptTemplatePanel.vue'
@@ -13,6 +13,7 @@ import EventDetailDialog from '../components/EventDetailDialog.vue'
 import FilterDeleteDialog from '../components/FilterDeleteDialog.vue'
 import type { PromptAuditDraft, PromptAuditEndpointDraft, PromptAuditEvent, PromptEventFilters } from '../types'
 import { configToDraft, DEFAULT_BLOCK_MESSAGE, emptyEventFilters, resolveDeleteRangeFilters, SCANNER_CATALOG } from '../viewModel'
+import promptAuditAPI from '../api'
 
 vi.mock('vue-i18n', async () => {
   const actual = await vi.importActual<typeof import('vue-i18n')>('vue-i18n')
@@ -29,7 +30,39 @@ const endpoint = (): PromptAuditEndpointDraft => ({
 })
 
 describe('Prompt Audit components', () => {
-  beforeEach(() => vi.restoreAllMocks())
+  beforeEach(() => {
+    vi.restoreAllMocks()
+    vi.spyOn(promptAuditAPI, 'listUserProfiles').mockResolvedValue({
+      items: [{
+        user_id: 10,
+        username: 'safe-user',
+        email: 'safe@example.com',
+        status: 'active',
+        deleted: false,
+        excluded: false,
+        audit_jobs: 100,
+        high_risk_jobs: 1,
+        critical_risk_jobs: 0,
+        high_or_critical_jobs: 1,
+        system_exception_jobs: 2,
+        unclassified_jobs: 90,
+        usage_total: 120,
+        cyber_blocked_total: 3,
+        cyber_recorded_total: 3,
+        sample_total: 120,
+        audit_coverage: 0.8333,
+        cyber_ratio: 0.025,
+        high_risk_ratio: 0.01,
+        critical_risk_ratio: 0,
+        high_or_critical_ratio: 0.01,
+        score: 0.125,
+      }],
+      total: 1,
+      page: 1,
+      page_size: 20,
+      pages: 1,
+    })
+  })
 
   it('edits a saved endpoint with blank-secret keep, explicit clear, replacement, and probe actions', async () => {
     const wrapper = mount(EndpointPool, {
@@ -76,6 +109,7 @@ describe('Prompt Audit components', () => {
       worker_count: 4, queue_capacity: 100, scanners: SCANNER_CATALOG.map((item) => item.id), all_groups: false, group_ids: [1, 99],
       risk_route_account_ids: [],
       cyber_feedback_account_ids: [],
+      excluded_user_ids: [99],
       prompt_templates: [{ id: 'builtin', name: 'Built-in', system_prompt: 'Review input', builtin: true }], active_prompt_template_id: 'builtin',
       flag_threshold: 0.4, block_threshold: 0.7, block_http_status: 403, block_message: DEFAULT_BLOCK_MESSAGE,
       max_total_input_chars: 40000,
@@ -84,11 +118,15 @@ describe('Prompt Audit components', () => {
     const wrapper = mount(PolicyPanel, {
       props: { draft, groups: [{ id: 1, name: 'Alpha', platform: 'openai', status: 'active' }, { id: 2, name: 'Beta', platform: 'claude', status: 'inactive' }] },
     })
+    await flushPromises()
     expect(wrapper.text()).toContain('99')
     expect(wrapper.findAll('input[type="checkbox"]').filter((input) => SCANNER_CATALOG.some((scanner) => input.attributes('aria-label') === `admin.promptAudit.scanners.${scanner.id}`))).toHaveLength(9)
     await wrapper.get('[aria-label="admin.promptAudit.policy.searchGroups"]').setValue('Beta')
-    expect(wrapper.text()).toContain('Beta')
-    expect(wrapper.text()).not.toContain('Alpha')
+    expect(wrapper.get('[data-test="prompt-audit-group-results"]').text()).toContain('Beta')
+    expect(wrapper.get('[data-test="prompt-audit-group-results"]').text()).not.toContain('Alpha')
+    const selectPage = wrapper.findAll('button').find((button) => button.text().includes('admin.promptAudit.policy.profiles.selectPage'))
+    await selectPage!.trigger('click')
+    expect((wrapper.emitted('update:draft')?.at(-1)?.[0] as PromptAuditDraft).excluded_user_ids).toEqual([10, 99])
     await wrapper.get('[aria-label="admin.promptAudit.policy.workerCount"]').setValue('6')
     const emitted = wrapper.emitted('update:draft')?.at(-1)?.[0] as PromptAuditDraft
     expect(emitted.worker_count).toBe(6)

@@ -31,6 +31,10 @@ func (e *Enqueuer) Enqueue(ctx context.Context, req Request) error {
 		return nil
 	}
 	baseFields["config_version"] = cfg.ConfigVersion
+	if !cfg.IncludesUser(req.UserID) {
+		LogInfo(EventEnqueueSkipped, mergeLogFields(baseFields, map[string]any{"status": "skipped", "error_code": "user_excluded"}))
+		return nil
+	}
 	if !cfg.IncludesGroup(req.GroupID) {
 		LogInfo(EventEnqueueSkipped, mergeLogFields(baseFields, map[string]any{"status": "skipped", "error_code": "group_out_of_scope"}))
 		return nil

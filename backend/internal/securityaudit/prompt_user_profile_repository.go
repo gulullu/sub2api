@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"errors"
 	"fmt"
+	"strconv"
 	"strings"
 	"time"
 )
@@ -19,18 +20,14 @@ func (r *PostgreSQLRepository) ListUserProfiles(ctx context.Context, filter Prom
 	if pageSize < 1 {
 		pageSize = 20
 	}
-	if pageSize > 100 {
-		pageSize = 100
+	if pageSize > MaxPromptAuditUserProfilePageSize {
+		pageSize = MaxPromptAuditUserProfilePageSize
 	}
 	now := time.Now().UTC()
 	if r.clock != nil {
 		now = r.clock.Now().UTC()
 	}
 	query, args := buildUserProfileQuery(filter, now)
-	var total int64
-	if err := r.db.QueryRowContext(ctx, query.count, args...).Scan(&total); err != nil {
-		return nil, err
-	}
 	queryArgs := append([]any(nil), args...)
 	limitPos := len(queryArgs) + 1
 	offsetPos := len(queryArgs) + 2
@@ -41,15 +38,28 @@ func (r *PostgreSQLRepository) ListUserProfiles(ctx context.Context, filter Prom
 	}
 	defer func() { _ = rows.Close() }()
 	items := make([]*PromptAuditUserProfile, 0, pageSize)
+	var total int64
 	for rows.Next() {
-		item, err := scanPromptAuditUserProfile(rows)
+		var rowTotal int64
+		item, err := scanPromptAuditUserProfile(rows, &rowTotal)
 		if err != nil {
 			return nil, err
+		}
+		if total == 0 {
+			total = rowTotal
 		}
 		items = append(items, item)
 	}
 	if err := rows.Err(); err != nil {
 		return nil, err
+	}
+	// COUNT(*) OVER() avoids evaluating the large profile CTE twice on the
+	// normal path. An out-of-range page has no row to carry the window count,
+	// so only that edge case falls back to the count query.
+	if total == 0 && page > 1 {
+		if err := r.db.QueryRowContext(ctx, query.count, args...).Scan(&total); err != nil {
+			return nil, err
+		}
 	}
 	pages := 0
 	if total > 0 {
@@ -66,10 +76,10 @@ type userProfileQuery struct {
 func buildUserProfileQuery(filter PromptAuditUserProfileFilter, now time.Time) (userProfileQuery, []any) {
 	days := filter.Days
 	if days <= 0 {
-		days = 30
+		days = DefaultPromptAuditUserProfileDays
 	}
-	if days > 3650 {
-		days = 3650
+	if days > MaxPromptAuditUserProfileDays {
+		days = MaxPromptAuditUserProfileDays
 	}
 	startAt := now.AddDate(0, 0, -days)
 	endAt := now
@@ -84,9 +94,24 @@ func buildUserProfileQuery(filter PromptAuditUserProfileFilter, now time.Time) (
 		usageGroupClause = fmt.Sprintf(" AND ul.group_id = $%d", groupIdx)
 		moderationGroupClause = fmt.Sprintf(" AND l.group_id = $%d", groupIdx)
 	}
+	requestedUserID := int64(0)
+	if filter.UserID != nil && *filter.UserID > 0 {
+		requestedUserID = *filter.UserID
+	}
+	requestedUserIDIdx := len(args) + 1
+	args = append(args, requestedUserID)
+	jobUserClause := fmt.Sprintf(" AND ($%d <= 0 OR j.user_id = $%d)", requestedUserIDIdx, requestedUserIDIdx)
+	usageUserClause := fmt.Sprintf(" AND ($%d <= 0 OR ul.user_id = $%d)", requestedUserIDIdx, requestedUserIDIdx)
+	moderationUserClause := fmt.Sprintf(" AND ($%d <= 0 OR l.user_id = $%d)", requestedUserIDIdx, requestedUserIDIdx)
 	search := strings.ToLower(strings.TrimSpace(filter.Search))
 	searchIdx := len(args) + 1
 	args = append(args, search)
+	searchUserID := int64(0)
+	if parsed, err := strconv.ParseInt(strings.TrimSpace(filter.Search), 10, 64); err == nil && parsed > 0 {
+		searchUserID = parsed
+	}
+	searchUserIDIdx := len(args) + 1
+	args = append(args, searchUserID)
 	minSamples := filter.MinSamples
 	if minSamples < 0 {
 		minSamples = 0
@@ -94,67 +119,118 @@ func buildUserProfileQuery(filter PromptAuditUserProfileFilter, now time.Time) (
 	minSamplesIdx := len(args) + 1
 	args = append(args, minSamples)
 	base := fmt.Sprintf(`
-WITH job_stats AS (
+WITH job_scope AS (
+	SELECT
+		j.id AS job_id,
+		j.user_id,
+		j.created_at,
+		j.username_snapshot,
+		j.user_email_snapshot
+	FROM prompt_audit_jobs j
+	WHERE j.user_id IS NOT NULL
+		AND j.status = 'done'
+		AND j.created_at >= $1
+		AND j.created_at < $2%s%s
+), latest_events AS (
+	SELECT
+		j.job_id,
+		j.user_id,
+		e.risk_level,
+		e.matched_scanners
+	FROM job_scope j
+	JOIN LATERAL (
+		SELECT e.risk_level, e.matched_scanners
+		FROM prompt_audit_events e
+		WHERE e.job_id = j.job_id
+		ORDER BY e.created_at DESC, e.id DESC
+		LIMIT 1
+	) e ON TRUE
+), risk_scope AS (
+	SELECT
+		e.job_id,
+		e.user_id,
+		e.risk_level,
+		(
+			jsonb_array_length(e.matched_scanners) > 0
+			AND e.matched_scanners <@ '["audit_unavailable", "input_too_large"]'::jsonb
+		) AS system_exception
+	FROM latest_events e
+	WHERE e.risk_level IN ('high', 'critical')
+), job_stats AS (
 	SELECT
 		j.user_id,
 		COUNT(*) AS audit_jobs,
-		COUNT(*) FILTER (WHERE e.risk_level = 'high') AS high_risk_jobs,
-		COUNT(*) FILTER (WHERE e.risk_level = 'critical') AS critical_risk_jobs,
-		MAX(j.created_at) AS last_audit_at,
-		MAX(e.created_at) AS last_risk_at
-	FROM prompt_audit_jobs j
-	LEFT JOIN prompt_audit_events e ON e.job_id = j.id
-	WHERE j.user_id IS NOT NULL
-		AND j.created_at >= $1
-		AND j.created_at < $2%s
+		MAX(j.created_at) AS last_audit_at
+	FROM job_scope j
 	GROUP BY j.user_id
+), risk_stats AS (
+	SELECT
+		r.user_id,
+		COUNT(*) FILTER (WHERE r.risk_level = 'high' AND NOT r.system_exception) AS high_risk_jobs,
+		COUNT(*) FILTER (WHERE r.risk_level = 'critical' AND NOT r.system_exception) AS critical_risk_jobs,
+		COUNT(*) FILTER (WHERE NOT r.system_exception) AS high_or_critical_jobs,
+		COUNT(*) FILTER (WHERE r.system_exception) AS system_exception_jobs
+	FROM risk_scope r
+	GROUP BY r.user_id
+), job_snapshots AS (
+	SELECT DISTINCT ON (j.user_id)
+		j.user_id,
+		j.username_snapshot,
+		j.user_email_snapshot
+	FROM job_scope j
+	ORDER BY j.user_id, j.created_at DESC, j.job_id DESC
 ), usage_stats AS (
 	SELECT
 		ul.user_id,
 		COUNT(*) AS usage_total,
 		COUNT(*) FILTER (WHERE ul.request_type = 4) AS cyber_blocked_total,
-		MAX(ul.created_at) AS last_usage_at
+		MAX(ul.created_at) AS last_usage_at,
+		MAX(ul.created_at) FILTER (WHERE ul.request_type = 4) AS last_cyber_at
 	FROM usage_logs ul
 	WHERE ul.user_id IS NOT NULL
 		AND ul.created_at >= $1
-		AND ul.created_at < $2%s
+		AND ul.created_at < $2%s%s
 	GROUP BY ul.user_id
 ), moderation_stats AS (
 	SELECT
 		l.user_id,
-		COUNT(*) AS moderation_total,
 		COUNT(*) FILTER (WHERE l.action = 'cyber_policy') AS cyber_recorded_total,
-		MAX(l.created_at) AS last_recorded_at
+		MAX(l.created_at) FILTER (WHERE l.action = 'cyber_policy') AS last_recorded_at
 	FROM content_moderation_logs l
 	WHERE l.user_id IS NOT NULL
 		AND l.created_at >= $1
-		AND l.created_at < $2%s
+		AND l.created_at < $2%s%s
 	GROUP BY l.user_id
 ), profile_rows AS (
 	SELECT
-		u.id AS user_id,
-		COALESCE(u.username, '') AS username,
-		COALESCE(u.email, '') AS email,
-		COALESCE(u.status, '') AS status,
-		COALESCE(u.deleted_at IS NOT NULL, FALSE) AS deleted,
+		COALESCE(u.id, ids.user_id) AS user_id,
+		COALESCE(NULLIF(u.username, ''), NULLIF(js.username_snapshot, ''), '') AS username,
+		COALESCE(NULLIF(u.email, ''), NULLIF(js.user_email_snapshot, ''), '') AS email,
+		CASE WHEN u.id IS NULL THEN 'deleted' ELSE COALESCE(u.status, '') END AS status,
+		(u.id IS NULL OR u.deleted_at IS NOT NULL) AS deleted,
 		COALESCE(j.audit_jobs, 0) AS audit_jobs,
-		COALESCE(j.high_risk_jobs, 0) AS high_risk_jobs,
-		COALESCE(j.critical_risk_jobs, 0) AS critical_risk_jobs,
+		COALESCE(r.high_risk_jobs, 0) AS high_risk_jobs,
+		COALESCE(r.critical_risk_jobs, 0) AS critical_risk_jobs,
+		COALESCE(r.high_or_critical_jobs, 0) AS high_or_critical_jobs,
+		COALESCE(r.system_exception_jobs, 0) AS system_exception_jobs,
+		GREATEST(COALESCE(j.audit_jobs, 0) - COALESCE(r.high_or_critical_jobs, 0) - COALESCE(r.system_exception_jobs, 0), 0) AS unclassified_jobs,
 		COALESCE(uq.usage_total, 0) AS usage_total,
 		COALESCE(uq.cyber_blocked_total, 0) AS cyber_blocked_total,
 		COALESCE(cm.cyber_recorded_total, 0) AS cyber_recorded_total,
-		(COALESCE(j.audit_jobs, 0) + COALESCE(uq.usage_total, 0) + COALESCE(cm.moderation_total, 0)) AS sample_total,
+		GREATEST(COALESCE(j.audit_jobs, 0), COALESCE(uq.usage_total, 0)) AS sample_total,
 		CASE WHEN COALESCE(uq.usage_total, 0) > 0 THEN COALESCE(j.audit_jobs, 0)::double precision / NULLIF(uq.usage_total, 0) ELSE 0 END AS audit_coverage,
 		CASE WHEN COALESCE(uq.usage_total, 0) > 0 THEN COALESCE(uq.cyber_blocked_total, 0)::double precision / NULLIF(uq.usage_total, 0) ELSE 0 END AS cyber_ratio,
-		CASE WHEN COALESCE(j.audit_jobs, 0) > 0 THEN COALESCE(j.high_risk_jobs, 0)::double precision / NULLIF(j.audit_jobs, 0) ELSE 0 END AS high_risk_ratio,
-		CASE WHEN COALESCE(j.audit_jobs, 0) > 0 THEN COALESCE(j.critical_risk_jobs, 0)::double precision / NULLIF(j.audit_jobs, 0) ELSE 0 END AS critical_risk_ratio,
+		CASE WHEN COALESCE(j.audit_jobs, 0) > 0 THEN COALESCE(r.high_risk_jobs, 0)::double precision / NULLIF(j.audit_jobs, 0) ELSE 0 END AS high_risk_ratio,
+		CASE WHEN COALESCE(j.audit_jobs, 0) > 0 THEN COALESCE(r.critical_risk_jobs, 0)::double precision / NULLIF(j.audit_jobs, 0) ELSE 0 END AS critical_risk_ratio,
+		CASE WHEN COALESCE(j.audit_jobs, 0) > 0 THEN COALESCE(r.high_or_critical_jobs, 0)::double precision / NULLIF(j.audit_jobs, 0) ELSE 0 END AS high_or_critical_ratio,
 		(
-			CASE WHEN COALESCE(j.audit_jobs, 0) > 0 THEN COALESCE(j.critical_risk_jobs, 0)::double precision / NULLIF(j.audit_jobs, 0) ELSE 0 END * 100.0 +
-			CASE WHEN COALESCE(j.audit_jobs, 0) > 0 THEN COALESCE(j.high_risk_jobs, 0)::double precision / NULLIF(j.audit_jobs, 0) ELSE 0 END * 10.0 +
+			CASE WHEN COALESCE(j.audit_jobs, 0) > 0 THEN COALESCE(r.critical_risk_jobs, 0)::double precision / NULLIF(j.audit_jobs, 0) ELSE 0 END * 100.0 +
+			CASE WHEN COALESCE(j.audit_jobs, 0) > 0 THEN COALESCE(r.high_risk_jobs, 0)::double precision / NULLIF(j.audit_jobs, 0) ELSE 0 END * 10.0 +
 			CASE WHEN COALESCE(uq.usage_total, 0) > 0 THEN COALESCE(uq.cyber_blocked_total, 0)::double precision / NULLIF(uq.usage_total, 0) ELSE 0 END
 		) AS score,
 		j.last_audit_at,
 		uq.last_usage_at,
+		uq.last_cyber_at,
 		cm.last_recorded_at
 	FROM (
 		SELECT user_id FROM job_stats
@@ -164,41 +240,49 @@ WITH job_stats AS (
 		SELECT user_id FROM moderation_stats
 	) ids
 	LEFT JOIN users u ON u.id = ids.user_id
+	LEFT JOIN job_snapshots js ON js.user_id = ids.user_id
 	LEFT JOIN job_stats j ON j.user_id = ids.user_id
+	LEFT JOIN risk_stats r ON r.user_id = ids.user_id
 	LEFT JOIN usage_stats uq ON uq.user_id = ids.user_id
 	LEFT JOIN moderation_stats cm ON cm.user_id = ids.user_id
 )
-`, jobGroupClause, usageGroupClause, moderationGroupClause)
+`, jobGroupClause, jobUserClause, usageGroupClause, usageUserClause, moderationGroupClause, moderationUserClause)
 	count := base + fmt.Sprintf(`
 SELECT COUNT(*)
 FROM profile_rows
-WHERE ($%d = '' OR LOWER(username) LIKE '%%' || $%d || '%%' OR LOWER(email) LIKE '%%' || $%d || '%%')
-  AND ($%d <= 0 OR sample_total >= $%d)
-`, searchIdx, searchIdx, searchIdx, minSamplesIdx, minSamplesIdx)
+WHERE ($%d <= 0 OR user_id = $%d)
+  AND ($%d = '' OR LOWER(username) LIKE '%%' || $%d || '%%' OR LOWER(email) LIKE '%%' || $%d || '%%' OR ($%d > 0 AND user_id = $%d))
+  AND ($%d <= 0 OR $%d > 0 OR high_or_critical_jobs > 0 OR cyber_blocked_total > 0 OR cyber_recorded_total > 0 OR audit_jobs >= $%d OR usage_total >= $%d)
+`, requestedUserIDIdx, requestedUserIDIdx, searchIdx, searchIdx, searchIdx, searchUserIDIdx, searchUserIDIdx, minSamplesIdx, requestedUserIDIdx, minSamplesIdx, minSamplesIdx)
 	list := base + fmt.Sprintf(`
 SELECT
+	COUNT(*) OVER() AS profile_total,
 	user_id, username, email, status, deleted,
-	audit_jobs, high_risk_jobs, critical_risk_jobs,
+	audit_jobs, high_risk_jobs, critical_risk_jobs, high_or_critical_jobs,
+	system_exception_jobs, unclassified_jobs,
 	usage_total, cyber_blocked_total, cyber_recorded_total,
-	sample_total, audit_coverage, cyber_ratio, high_risk_ratio, critical_risk_ratio, score,
-	last_audit_at, last_usage_at, last_recorded_at
+	sample_total, audit_coverage, cyber_ratio, high_risk_ratio, critical_risk_ratio, high_or_critical_ratio, score,
+	last_audit_at, last_usage_at, last_cyber_at, last_recorded_at
 FROM profile_rows
-WHERE ($%d = '' OR LOWER(username) LIKE '%%' || $%d || '%%' OR LOWER(email) LIKE '%%' || $%d || '%%')
-  AND ($%d <= 0 OR sample_total >= $%d)
-ORDER BY critical_risk_ratio DESC, high_risk_ratio DESC, cyber_ratio DESC, sample_total DESC, user_id DESC
-`, searchIdx, searchIdx, searchIdx, minSamplesIdx, minSamplesIdx)
+WHERE ($%d <= 0 OR user_id = $%d)
+  AND ($%d = '' OR LOWER(username) LIKE '%%' || $%d || '%%' OR LOWER(email) LIKE '%%' || $%d || '%%' OR ($%d > 0 AND user_id = $%d))
+  AND ($%d <= 0 OR $%d > 0 OR high_or_critical_jobs > 0 OR cyber_blocked_total > 0 OR cyber_recorded_total > 0 OR audit_jobs >= $%d OR usage_total >= $%d)
+ORDER BY high_or_critical_ratio DESC, critical_risk_ratio DESC, high_or_critical_jobs DESC, cyber_ratio DESC, sample_total DESC, user_id DESC
+`, requestedUserIDIdx, requestedUserIDIdx, searchIdx, searchIdx, searchIdx, searchUserIDIdx, searchUserIDIdx, minSamplesIdx, requestedUserIDIdx, minSamplesIdx, minSamplesIdx)
 	return userProfileQuery{count: count, list: list}, args
 }
 
-func scanPromptAuditUserProfile(row rowScanner) (*PromptAuditUserProfile, error) {
+func scanPromptAuditUserProfile(row rowScanner, total *int64) (*PromptAuditUserProfile, error) {
 	item := &PromptAuditUserProfile{}
-	var lastAudit, lastUsage, lastRecorded sql.NullTime
+	var lastAudit, lastUsage, lastCyber, lastRecorded sql.NullTime
 	if err := row.Scan(
+		total,
 		&item.UserID, &item.Username, &item.Email, &item.Status, &item.Deleted,
-		&item.AuditJobs, &item.HighRiskJobs, &item.CriticalRiskJobs,
+		&item.AuditJobs, &item.HighRiskJobs, &item.CriticalRiskJobs, &item.HighOrCriticalJobs,
+		&item.SystemExceptionJobs, &item.UnclassifiedJobs,
 		&item.UsageTotal, &item.CyberBlockedTotal, &item.CyberRecordedTotal,
-		&item.SampleTotal, &item.AuditCoverage, &item.CyberRatio, &item.HighRiskRatio, &item.CriticalRiskRatio, &item.Score,
-		&lastAudit, &lastUsage, &lastRecorded,
+		&item.SampleTotal, &item.AuditCoverage, &item.CyberRatio, &item.HighRiskRatio, &item.CriticalRiskRatio, &item.HighOrCriticalRatio, &item.Score,
+		&lastAudit, &lastUsage, &lastCyber, &lastRecorded,
 	); err != nil {
 		return nil, err
 	}
@@ -209,6 +293,10 @@ func scanPromptAuditUserProfile(row rowScanner) (*PromptAuditUserProfile, error)
 	if lastUsage.Valid {
 		value := lastUsage.Time.UTC()
 		item.LastUsageAt = &value
+	}
+	if lastCyber.Valid {
+		value := lastCyber.Time.UTC()
+		item.LastCyberAt = &value
 	}
 	if lastRecorded.Valid {
 		value := lastRecorded.Time.UTC()

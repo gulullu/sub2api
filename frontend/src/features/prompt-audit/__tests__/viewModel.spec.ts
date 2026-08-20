@@ -135,6 +135,12 @@ describe('Prompt Audit view model', () => {
     expect(buildUpdateRequest(draft).cyber_feedback_account_ids).toEqual([17, 91])
   })
 
+  it('preserves and canonicalizes the global do-not-audit user list', () => {
+    const draft = configToDraft({ ...config(), excluded_user_ids: [77, 12, 77, -1] })
+    expect(draft.excluded_user_ids).toEqual([12, 77])
+    expect(buildUpdateRequest(draft).excluded_user_ids).toEqual([12, 77])
+  })
+
   it('clamps and fingerprints the per-request total audit cap', () => {
     const draft = configToDraft({ ...config(), max_total_input_chars: 500000 })
     expect(draft.max_total_input_chars).toBe(400000)

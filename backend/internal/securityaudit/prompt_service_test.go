@@ -124,6 +124,18 @@ func TestPromptServiceExcludedUserSkipsAsyncEnqueue(t *testing.T) {
 	require.Empty(t, payload.values)
 }
 
+func TestPromptServiceUserExclusionDoesNotChangeCyberFeedbackScope(t *testing.T) {
+	base := ActiveConfig{CyberFeedbackAccountIDs: []int64{88}}
+	withExcluded := cloneActiveConfig(base)
+	withExcluded.ExcludedUserIDs = []int64{77}
+
+	allowed := (&PromptService{config: &fakeConfigStore{active: true, cfg: base}}).IncludesCyberFeedbackSource(88, service.PlatformOpenAI, service.AccountTypeOAuth)
+	excluded := (&PromptService{config: &fakeConfigStore{active: true, cfg: withExcluded}}).IncludesCyberFeedbackSource(88, service.PlatformOpenAI, service.AccountTypeOAuth)
+
+	require.True(t, allowed)
+	require.Equal(t, allowed, excluded)
+}
+
 func TestPromptServiceUnavailableAuditFallsBackToHardRiskRoute(t *testing.T) {
 	now := time.Unix(2_000, 0).UTC()
 	cfg := ActiveConfig{

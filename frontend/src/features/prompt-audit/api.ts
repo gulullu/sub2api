@@ -105,6 +105,7 @@ export async function listUserProfiles(
       page_size: pageSize,
       days: filter.days,
       search: filter.search,
+      ...(typeof filter.user_id === 'number' && filter.user_id > 0 ? { user_id: filter.user_id } : {}),
       min_samples: filter.min_samples ?? 0,
       ...(typeof filter.group_id === 'number' && filter.group_id > 0 ? { group_id: filter.group_id } : {}),
     },

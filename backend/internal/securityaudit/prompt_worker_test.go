@@ -332,6 +332,23 @@ func TestEnqueuerSkipsOffOutOfScopeAndNoText(t *testing.T) {
 	}
 }
 
+func TestEnqueuerSkipsExcludedUserBeforeStaging(t *testing.T) {
+	repo := &fakeJobRepository{}
+	payload := &fakePayloadStore{}
+	cfg := asyncConfig()
+	cfg.ExcludedUserIDs = []int64{77}
+	err := NewEnqueuer(&fakeConfigStore{cfg: cfg, active: true}, repo, payload).Enqueue(context.Background(), Request{
+		RequestID: "excluded-request",
+		UserID:    77,
+		Protocol:  "openai_chat_completions",
+		Body:      []byte(`{"messages":[{"role":"user","content":"payload canary text"}]}`),
+	})
+	require.NoError(t, err)
+	require.Zero(t, repo.completeCount)
+	require.Zero(t, repo.refreshes)
+	require.Empty(t, payload.values)
+}
+
 func TestEnqueuerRecordsAcceptedDroppedAndSkippedMetrics(t *testing.T) {
 	t.Run("accepted increments enqueued", func(t *testing.T) {
 		metrics := NewAtomicMetrics()

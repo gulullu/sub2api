@@ -148,6 +148,7 @@ export interface PromptAuditUpdateRequest {
 export interface PromptAuditUserProfileFilter {
   days: number
   search: string
+  user_id?: number
   group_id?: number
   min_samples?: number
 }
@@ -162,6 +163,9 @@ export interface PromptAuditUserProfile {
   audit_jobs: number
   high_risk_jobs: number
   critical_risk_jobs: number
+  high_or_critical_jobs: number
+  system_exception_jobs: number
+  unclassified_jobs: number
   usage_total: number
   cyber_blocked_total: number
   cyber_recorded_total: number
@@ -170,9 +174,11 @@ export interface PromptAuditUserProfile {
   cyber_ratio: number
   high_risk_ratio: number
   critical_risk_ratio: number
+  high_or_critical_ratio: number
   score: number
   last_audit_at?: string
   last_usage_at?: string
+  last_cyber_at?: string
   last_recorded_at?: string
 }
 

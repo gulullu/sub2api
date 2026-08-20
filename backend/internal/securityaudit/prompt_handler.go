@@ -5,6 +5,7 @@ import (
 	"errors"
 	"strconv"
 	"strings"
+	"time"
 
 	infraerrors "github.com/Wei-Shaw/sub2api/internal/pkg/errors"
 	"github.com/Wei-Shaw/sub2api/internal/pkg/response"
@@ -96,12 +97,12 @@ func (h *PromptAdminHandler) GetRuntime(c *gin.Context) {
 }
 
 func (h *PromptAdminHandler) ListUserProfiles(c *gin.Context) {
-	page, err := positiveIntQuery(c, "page", 1, 0)
+	page, err := positiveIntQuery(c, "page", 1, MaxExcludedUserIDs)
 	if err != nil {
 		response.ErrorFrom(c, err)
 		return
 	}
-	pageSize, err := positiveIntQuery(c, "page_size", 20, 100)
+	pageSize, err := positiveIntQuery(c, "page_size", 20, MaxPromptAuditUserProfilePageSize)
 	if err != nil {
 		response.ErrorFrom(c, err)
 		return
@@ -111,7 +112,9 @@ func (h *PromptAdminHandler) ListUserProfiles(c *gin.Context) {
 		response.ErrorFrom(c, err)
 		return
 	}
-	result, err := h.service.ListUserProfiles(c.Request.Context(), filter, page, pageSize)
+	ctx, cancel := context.WithTimeout(c.Request.Context(), 8*time.Second)
+	defer cancel()
+	result, err := h.service.ListUserProfiles(ctx, filter, page, pageSize)
 	if err != nil {
 		response.ErrorFrom(c, err)
 		return
@@ -637,12 +640,16 @@ func positiveIntQuery(c *gin.Context, key string, defaultValue, maxValue int) (i
 }
 
 func userProfileFilterFromQuery(c *gin.Context) (PromptAuditUserProfileFilter, error) {
-	days, err := positiveIntQuery(c, "days", 30, 3650)
+	days, err := positiveIntQuery(c, "days", DefaultPromptAuditUserProfileDays, MaxPromptAuditUserProfileDays)
 	if err != nil {
 		return PromptAuditUserProfileFilter{}, infraerrors.BadRequest("prompt_audit_invalid_filter_days", "画像时间窗口无效")
 	}
+	userID, err := optionalPositiveInt64Query(c, "user_id")
+	if err != nil {
+		return PromptAuditUserProfileFilter{}, err
+	}
 	minSamplesValue := strings.TrimSpace(c.Query("min_samples"))
-	minSamples := 0
+	minSamples := DefaultPromptAuditUserProfileMinSamples
 	if minSamplesValue != "" {
 		parsed, parseErr := strconv.Atoi(minSamplesValue)
 		if parseErr != nil || parsed < 0 {
@@ -657,6 +664,7 @@ func userProfileFilterFromQuery(c *gin.Context) (PromptAuditUserProfileFilter, e
 	return PromptAuditUserProfileFilter{
 		Days:       days,
 		Search:     strings.TrimSpace(c.Query("search")),
+		UserID:     userID,
 		GroupID:    groupID,
 		MinSamples: minSamples,
 	}, nil
