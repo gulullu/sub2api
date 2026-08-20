@@ -134,6 +134,38 @@ describe('Prompt Audit components', () => {
     expect(emitted.worker_count).toBe(6)
   })
 
+  it('bulk selects only content-risk or CYB candidates without requiring one-by-one clicks', async () => {
+    vi.mocked(promptAuditAPI.listUserProfiles).mockResolvedValue({
+      items: [
+        {
+          user_id: 10, username: 'risk-user', email: 'risk@example.com', status: 'active', deleted: false, excluded: false,
+          audit_jobs: 100, high_risk_jobs: 2, critical_risk_jobs: 1, high_or_critical_jobs: 3, system_exception_jobs: 4, unclassified_jobs: 90,
+          usage_total: 120, cyber_blocked_total: 0, cyber_recorded_total: 0, sample_total: 120, audit_coverage: 0.8, cyber_ratio: 0,
+          high_risk_ratio: 0.02, critical_risk_ratio: 0.01, high_or_critical_ratio: 0.03, score: 3,
+        },
+        {
+          user_id: 11, username: 'quiet-user', email: 'quiet@example.com', status: 'active', deleted: false, excluded: false,
+          audit_jobs: 100, high_risk_jobs: 0, critical_risk_jobs: 0, high_or_critical_jobs: 0, system_exception_jobs: 2, unclassified_jobs: 98,
+          usage_total: 120, cyber_blocked_total: 0, cyber_recorded_total: 0, sample_total: 120, audit_coverage: 0.8, cyber_ratio: 0,
+          high_risk_ratio: 0, critical_risk_ratio: 0, high_or_critical_ratio: 0, score: 0,
+        },
+      ],
+      total: 2, page: 1, page_size: 1000, pages: 1,
+    })
+    const draft: PromptAuditDraft = {
+      enabled: true, blocking_enabled: false, blocking_latest_turn_only: false, store_pass_events: false, effective_mode: 'async_audit', strategy: 'priority',
+      worker_count: 4, queue_capacity: 100, scanners: SCANNER_CATALOG.map((item) => item.id), all_groups: true, group_ids: [],
+      risk_route_account_ids: [], cyber_feedback_account_ids: [], excluded_user_ids: [],
+      prompt_templates: [{ id: 'builtin', name: 'Built-in', system_prompt: 'Review input', builtin: true }], active_prompt_template_id: 'builtin',
+      flag_threshold: 0.4, block_threshold: 0.7, block_http_status: 403, block_message: DEFAULT_BLOCK_MESSAGE,
+      max_total_input_chars: 40000, endpoints: [], config_version: 1, updated_at: '', updated_by: 0, change_summary: '',
+    }
+    const wrapper = mount(PolicyPanel, { props: { draft, groups: [] } })
+    await flushPromises()
+    await wrapper.get('[data-test="prompt-audit-select-risk-candidates"]').trigger('click')
+    expect((wrapper.emitted('update:draft')?.at(-1)?.[0] as PromptAuditDraft).excluded_user_ids).toEqual([10])
+  })
+
   it('bounds the excluded-user summary DOM for large bulk selections', async () => {
     const draft: PromptAuditDraft = {
       enabled: true, blocking_enabled: false, blocking_latest_turn_only: false, store_pass_events: false, effective_mode: 'async_audit', strategy: 'priority',

@@ -81,10 +81,13 @@
           <button type="button" class="btn btn-secondary btn-sm" :disabled="profileLoading || bulkSelecting || !selectedOnPageCount" @click="selectVisible(false)">{{ t('admin.promptAudit.policy.profiles.clearPage') }}</button>
           <button type="button" class="btn btn-primary btn-sm" :disabled="profileLoading || bulkSelecting" @click="selectFiltered(true)">{{ t('admin.promptAudit.policy.profiles.selectFiltered') }}</button>
           <button type="button" class="btn btn-secondary btn-sm" :disabled="profileLoading || bulkSelecting || !selectedExcludedIds.length" @click="selectFiltered(false)">{{ t('admin.promptAudit.policy.profiles.clearFiltered') }}</button>
+          <button data-test="prompt-audit-select-risk-candidates" type="button" class="btn btn-primary btn-sm" :disabled="profileLoading || bulkSelecting" @click="selectRiskCandidates(true)">{{ t('admin.promptAudit.policy.profiles.selectRiskCandidates') }}</button>
+          <button data-test="prompt-audit-clear-risk-candidates" type="button" class="btn btn-secondary btn-sm" :disabled="profileLoading || bulkSelecting || !selectedExcludedIds.length" @click="selectRiskCandidates(false)">{{ t('admin.promptAudit.policy.profiles.clearRiskCandidates') }}</button>
         </div>
       </div>
 
       <p class="mt-2 text-xs text-gray-500 dark:text-dark-400">{{ t('admin.promptAudit.policy.profiles.selectFilteredHint', { limit: formatCount(PROFILE_BULK_SELECT_LIMIT) }) }}</p>
+      <p class="mt-1 text-xs text-gray-500 dark:text-dark-400">{{ t('admin.promptAudit.policy.profiles.riskCandidatesHint') }}</p>
       <div class="mt-4 rounded-lg bg-amber-50 px-3 py-2 text-xs leading-5 text-amber-800 dark:bg-amber-950/30 dark:text-amber-200">
         {{ t('admin.promptAudit.policy.profiles.guardWarning') }}
       </div>
@@ -470,6 +473,35 @@ async function selectFiltered(selected: boolean) {
     patch({ excluded_user_ids: [...next].sort((a, b) => a - b) })
     if (profilePage.total > PROFILE_BULK_SELECT_LIMIT) {
       profileNotice.value = t('admin.promptAudit.policy.profiles.bulkCapped', { total: formatCount(profilePage.total), limit: formatCount(PROFILE_BULK_SELECT_LIMIT) })
+    }
+  } catch (error) {
+    profileError.value = extractApiErrorMessage(error) || (error instanceof Error ? error.message : String(error))
+  } finally {
+    bulkSelecting.value = false
+  }
+}
+
+function isRiskCandidate(profile: PromptAuditUserProfile): boolean {
+  return profile.high_or_critical_jobs > 0 || profile.cyber_blocked_total > 0 || profile.cyber_recorded_total > 0
+}
+
+async function selectRiskCandidates(selected: boolean) {
+  bulkSelecting.value = true
+  profileError.value = ''
+  profileNotice.value = ''
+  try {
+    const profiles = await loadFilteredProfiles()
+    const candidates = profiles.filter(isRiskCandidate)
+    const next = new Set(selectedExcludedIds.value)
+    for (const profile of candidates) {
+      if (selected) next.add(profile.user_id)
+      else next.delete(profile.user_id)
+    }
+    patch({ excluded_user_ids: [...next].sort((a, b) => a - b) })
+    if (profilePage.total > PROFILE_BULK_SELECT_LIMIT) {
+      profileNotice.value = t('admin.promptAudit.policy.profiles.bulkCapped', { total: formatCount(profilePage.total), limit: formatCount(PROFILE_BULK_SELECT_LIMIT) })
+    } else if (candidates.length === 0) {
+      profileNotice.value = t('admin.promptAudit.policy.profiles.noRiskCandidates')
     }
   } catch (error) {
     profileError.value = extractApiErrorMessage(error) || (error instanceof Error ? error.message : String(error))
