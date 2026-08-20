@@ -121,6 +121,12 @@ describe('Prompt Audit components', () => {
     await flushPromises()
     const profileSearch = wrapper.findAll('button').find((button) => button.text().includes('admin.promptAudit.policy.profiles.searchAction'))
     expect(profileSearch?.classes()).toEqual(expect.arrayContaining(['shrink-0', 'whitespace-nowrap']))
+    const profileTable = wrapper.find('table')
+    expect(profileTable.classes()).toEqual(expect.arrayContaining(['w-full', 'table-fixed']))
+    expect(profileTable.findAll('col')).toHaveLength(6)
+    expect(profileTable.findAll('col').map((col) => col.classes())).toEqual([
+      ['w-[5%]'], ['w-[25%]'], ['w-[20%]'], ['w-[20%]'], ['w-[15%]'], ['w-[15%]'],
+    ])
     expect(wrapper.text()).toContain('99')
     expect(wrapper.findAll('input[type="checkbox"]').filter((input) => SCANNER_CATALOG.some((scanner) => input.attributes('aria-label') === `admin.promptAudit.scanners.${scanner.id}`))).toHaveLength(9)
     await wrapper.get('[aria-label="admin.promptAudit.policy.searchGroups"]').setValue('Beta')

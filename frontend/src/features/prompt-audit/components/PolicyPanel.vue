@@ -150,7 +150,15 @@
 
           <div v-else class="mt-4 min-w-0 overflow-hidden rounded-lg border border-gray-200 dark:border-dark-700">
             <div class="min-w-0 max-h-[34rem] overflow-auto">
-              <table class="min-w-[900px] divide-y divide-gray-200 text-sm dark:divide-dark-700">
+              <table class="w-full min-w-[900px] table-fixed divide-y divide-gray-200 text-sm dark:divide-dark-700">
+                <colgroup>
+                  <col class="w-[5%]" />
+                  <col class="w-[25%]" />
+                  <col class="w-[20%]" />
+                  <col class="w-[20%]" />
+                  <col class="w-[15%]" />
+                  <col class="w-[15%]" />
+                </colgroup>
                 <thead class="sticky top-0 bg-gray-50 text-left text-xs font-semibold uppercase tracking-wide text-gray-500 dark:bg-dark-900 dark:text-dark-400">
                   <tr>
                     <th class="px-4 py-3 w-10">
@@ -165,10 +173,10 @@
                 </thead>
                 <tbody class="divide-y divide-gray-100 bg-white dark:divide-dark-800 dark:bg-dark-900/10">
                   <tr v-for="profile in profilePage.items" :key="profile.user_id" :class="profile.deleted ? 'bg-amber-50/50 dark:bg-amber-950/10' : ''">
-                    <td class="px-4 py-3 align-top">
+                    <td class="break-words px-4 py-3 align-top">
                       <input type="checkbox" :checked="isExcluded(profile.user_id)" @change="toggleExcluded(profile.user_id)" />
                     </td>
-                    <td class="px-4 py-3 align-top">
+                    <td class="break-words px-4 py-3 align-top">
                       <div class="flex flex-col gap-1">
                         <div class="flex flex-wrap items-center gap-2">
                           <span class="font-semibold text-gray-900 dark:text-white">{{ profile.username || profile.email || `#${profile.user_id}` }}</span>
@@ -178,13 +186,13 @@
                         <div class="text-xs text-gray-500 dark:text-dark-400">#{{ profile.user_id }} · {{ profile.email || t('admin.promptAudit.policy.profiles.noEmail') }} · {{ profile.status || t('admin.promptAudit.policy.profiles.unknownStatus') }}</div>
                       </div>
                     </td>
-                    <td class="px-4 py-3 align-top">
+                    <td class="break-words px-4 py-3 align-top">
                       <div class="flex flex-col gap-1">
                         <span class="font-medium text-gray-900 dark:text-white">{{ riskText(profile) }}</span>
                         <span v-if="profile.system_exception_jobs" class="text-xs text-amber-600 dark:text-amber-300">{{ t('admin.promptAudit.policy.profiles.systemExceptions', { count: formatCount(profile.system_exception_jobs) }) }}</span>
                       </div>
                     </td>
-                    <td class="px-4 py-3 align-top">
+                    <td class="break-words px-4 py-3 align-top">
                       <div class="flex flex-col gap-1">
                         <span class="font-medium text-gray-900 dark:text-white">{{ guardText(profile) }}</span>
                         <span class="text-xs text-gray-500 dark:text-dark-400">{{ t('admin.promptAudit.policy.profiles.cyberRatio', { ratio: formatPercent(profile.cyber_ratio), usage: formatCount(profile.usage_total) }) }}</span>
@@ -196,7 +204,7 @@
                         <span class="text-xs text-gray-500 dark:text-dark-400">{{ t('admin.promptAudit.policy.profiles.usageSamples', { count: formatCount(profile.usage_total) }) }}</span>
                       </div>
                     </td>
-                    <td class="px-4 py-3 align-top text-xs text-gray-500 dark:text-dark-400">
+                    <td class="break-words px-4 py-3 align-top text-xs text-gray-500 dark:text-dark-400">
                       <div>{{ t('admin.promptAudit.policy.profiles.recentAudit', { time: formatDate(profile.last_audit_at) }) }}</div>
                       <div>{{ t('admin.promptAudit.policy.profiles.recentUsage', { time: formatDate(profile.last_usage_at) }) }}</div>
                       <div>{{ t('admin.promptAudit.policy.profiles.recentCyber', { time: formatDate(profile.last_cyber_at) }) }}</div>
