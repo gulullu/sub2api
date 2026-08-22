@@ -19,6 +19,29 @@ const opsCyberPolicyKey = "ops_cyber_policy"
 // 既不计费、也不 failover、不重复写响应。
 var errOpenAICyberPolicyForwarded = errors.New("openai cyber_policy forwarded to client")
 
+var openAICyberPolicyCodePaths = [...]string{
+	"error.code",
+	"response.error.code",
+	"response.status_details.error.code",
+	"error.codex_error_info",
+	"response.error.codex_error_info",
+	"response.status_details.error.codex_error_info",
+	"error.type",
+	"response.error.type",
+	"response.status_details.error.type",
+	"codex_error_info",
+	"code",
+	"type",
+}
+
+var openAICyberPolicyMessagePaths = [...]string{
+	"error.message",
+	"response.error.message",
+	"response.status_details.error.message",
+	"message",
+	"response.status_details.message",
+}
+
 // CyberPolicyMark 记录一次 cyber_policy 硬阻断的上游证据。
 type CyberPolicyMark struct {
 	Code           string // 固定 "cyber_policy"
@@ -70,19 +93,28 @@ func ClearOpsCyberPolicy(c *gin.Context) {
 	c.Set(opsCyberPolicyKey, (*CyberPolicyMark)(nil))
 }
 
-// detectOpenAICyberPolicy 精确识别 cyber_policy（对齐 codex api_bridge.rs:145 /
-// sse/responses.rs:529）。命中返回 (true, "cyber_policy", message)。
+// detectOpenAICyberPolicy 精确识别 cyber_policy（对齐 codex2api 的
+// response.failed/HTTP 错误兼容形态）。命中返回 (true, "cyber_policy", message)。
+//
+// codex2api 会原样转发部分 Responses 错误，其中官方上游可能把标记放在
+// codex_error_info，而不是 error.code；response.failed 还可能把 error 再包在
+// response 或 response.status_details 下。这里仅接受字段值精确等于
+// cyber_policy（大小写不敏感），不依据 message 猜测，避免把普通安全/上游错误
+// 误记成 CYB。
 func detectOpenAICyberPolicy(payload []byte) (bool, string, string) {
-	code := gjson.GetBytes(payload, "error.code").String()
-	if code == "" {
-		code = gjson.GetBytes(payload, "response.error.code").String()
+	for _, path := range openAICyberPolicyCodePaths {
+		if code := strings.TrimSpace(gjson.GetBytes(payload, path).String()); strings.EqualFold(code, "cyber_policy") {
+			return true, "cyber_policy", openAICyberPolicyMessage(payload)
+		}
 	}
-	if !strings.EqualFold(strings.TrimSpace(code), "cyber_policy") {
-		return false, "", ""
+	return false, "", ""
+}
+
+func openAICyberPolicyMessage(payload []byte) string {
+	for _, path := range openAICyberPolicyMessagePaths {
+		if message := strings.TrimSpace(gjson.GetBytes(payload, path).String()); message != "" {
+			return message
+		}
 	}
-	msg := gjson.GetBytes(payload, "error.message").String()
-	if msg == "" {
-		msg = gjson.GetBytes(payload, "response.error.message").String()
-	}
-	return true, "cyber_policy", strings.TrimSpace(msg)
+	return ""
 }
