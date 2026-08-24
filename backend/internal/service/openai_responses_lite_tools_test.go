@@ -397,8 +397,9 @@ func TestNormalizeOpenAIResponsesLiteTools_RequiredCandidatesArePreserved(t *tes
 			changed, err := normalizeOpenAIResponsesLiteTools(reqBody)
 
 			require.NoError(t, err)
-			require.False(t, changed)
+			require.True(t, changed)
 			require.Equal(t, "required", reqBody["tool_choice"])
+			require.Equal(t, false, reqBody["parallel_tool_calls"])
 		})
 	}
 }

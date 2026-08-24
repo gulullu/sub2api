@@ -86,9 +86,12 @@ func (c *openAIWSPolicyEnforcingFrameConn) Close() error {
 	return c.inner.Close()
 }
 
-// openAIWSPassthroughPolicyModelForFrame returns the model actually forwarded
-// by a passthrough WS frame. Passthrough only replaces authentication, so an
-// account's ordinary model_mapping and Codex aliases must not rewrite it.
+// openAIWSPassthroughPolicyModelForFrame returns the model used by the
+// passthrough WS policy and, for the RelayBases Codex Spark alias, the model
+// that must be forwarded upstream. Ordinary account model mappings remain
+// intentionally ignored: passthrough is otherwise a client-model-preserving
+// protocol. Spark is the narrow exception because its reasoning/tool/image
+// compatibility transforms require the canonical upstream model.
 func openAIWSPassthroughPolicyModelForFrame(account *Account, payload []byte) string {
 	if account == nil || len(payload) == 0 {
 		return ""
@@ -96,6 +99,9 @@ func openAIWSPassthroughPolicyModelForFrame(account *Account, payload []byte) st
 	original := strings.TrimSpace(gjson.GetBytes(payload, "model").String())
 	if original == "" {
 		return ""
+	}
+	if mapped := normalizeOpenAIModelForUpstream(account, account.GetMappedModel(original)); isCodexSparkModel(mapped) {
+		return mapped
 	}
 	return original
 }
@@ -128,6 +134,9 @@ func openAIWSPassthroughPolicyModelFromSessionFrame(account *Account, payload []
 	original := strings.TrimSpace(gjson.GetBytes(payload, "session.model").String())
 	if original == "" {
 		return ""
+	}
+	if mapped := normalizeOpenAIModelForUpstream(account, account.GetMappedModel(original)); isCodexSparkModel(mapped) {
+		return mapped
 	}
 	return original
 }
