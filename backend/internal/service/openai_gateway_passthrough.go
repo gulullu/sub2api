@@ -425,6 +425,30 @@ func (s *OpenAIGatewayService) forwardOpenAIPassthrough(
 				)
 				continue
 			}
+			if isOpenAIResponsesCompactPath(c) && isOpenAILegacyCompactRouteNotFound(resp.StatusCode, probeBody) {
+				upstreamDetail := ""
+				if s.cfg != nil && s.cfg.Gateway.LogUpstreamErrorBody {
+					maxBytes := s.cfg.Gateway.LogUpstreamErrorBodyMaxBytes
+					if maxBytes <= 0 {
+						maxBytes = 2048
+					}
+					upstreamDetail = truncateString(string(probeBody), maxBytes)
+				}
+				appendOpsUpstreamError(c, OpsUpstreamErrorEvent{
+					Platform:           account.Platform,
+					AccountID:          account.ID,
+					AccountName:        account.Name,
+					UpstreamStatusCode: resp.StatusCode,
+					UpstreamRequestID:  resp.Header.Get("x-request-id"),
+					Passthrough:        true,
+					Kind:               "failover",
+					Message:            "Not Found",
+					Detail:             upstreamDetail,
+				})
+				// A route-level miss is local to legacy compact on this account.
+				// Switch accounts without degrading ordinary Responses health.
+				return nil, newOpenAILegacyCompactRouteNotFoundFailoverError(resp, probeBody)
+			}
 
 			// 透传模式默认保持原样代理；容量错误以及 API-key 上游的瞬时
 			// 5xx 应先触发多账号 failover，且此时尚未写入下游响应。
@@ -434,31 +458,6 @@ func (s *OpenAIGatewayService) forwardOpenAIPassthrough(
 			}
 			return nil, s.handleErrorResponsePassthrough(ctx, resp, c, account, body, probeBody)
 		}
-		if isOpenAIResponsesCompactPath(c) && isOpenAILegacyCompactRouteNotFound(resp.StatusCode, probeBody) {
-			upstreamDetail := ""
-			if s.cfg != nil && s.cfg.Gateway.LogUpstreamErrorBody {
-				maxBytes := s.cfg.Gateway.LogUpstreamErrorBodyMaxBytes
-				if maxBytes <= 0 {
-					maxBytes = 2048
-				}
-				upstreamDetail = truncateString(string(probeBody), maxBytes)
-			}
-			appendOpsUpstreamError(c, OpsUpstreamErrorEvent{
-				Platform:           account.Platform,
-				AccountID:          account.ID,
-				AccountName:        account.Name,
-				UpstreamStatusCode: resp.StatusCode,
-				UpstreamRequestID:  resp.Header.Get("x-request-id"),
-				Passthrough:        true,
-				Kind:               "failover",
-				Message:            "Not Found",
-				Detail:             upstreamDetail,
-			})
-			// A route-level miss is local to legacy compact on this account.
-			// Switch accounts without degrading ordinary Responses health.
-			return nil, newOpenAILegacyCompactRouteNotFoundFailoverError(resp, probeBody)
-		}
-
 		if mapping, ok := openAIResponsesClientToolMapping(c); ok && isEventStreamResponse(resp.Header) {
 			maxLineSize := defaultMaxLineSize
 			if s.cfg != nil && s.cfg.Gateway.MaxLineSize > 0 {
