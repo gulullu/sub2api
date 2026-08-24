@@ -735,23 +735,6 @@ func (s *OpenAIGatewayService) proxyResponsesWebSocketV2Passthrough(
 	if capturedSessionModel != "" && capturedSessionModel != strings.TrimSpace(gjson.GetBytes(firstClientMessage, "model").String()) {
 		firstClientMessage = s.ReplaceModelInBody(firstClientMessage, capturedSessionModel)
 	}
-	liteFirstMessage, _, liteErr := normalizeOpenAIResponsesLiteWSPayloadForModel(account, firstClientMessage, capturedSessionModel)
-	if liteErr != nil {
-		return NewOpenAIWSClientCloseError(coderws.StatusPolicyViolation, liteErr.Error(), liteErr)
-	}
-	firstClientMessage = liteFirstMessage
-	normalizedSparkFirstMessage, sparkContextChanged, sparkContextErr := normalizeCodexSparkReasoningContextForUpstream(firstClientMessage, capturedSessionModel)
-	if sparkContextErr != nil {
-		return NewOpenAIWSClientCloseError(coderws.StatusPolicyViolation, "invalid websocket request payload", sparkContextErr)
-	}
-	if sparkContextChanged {
-		firstClientMessage = normalizedSparkFirstMessage
-	}
-	normalizedChoiceFirstMessage, _, choiceErr := normalizeOpenAIRequiredClientToolSearchChoice(account, firstClientMessage)
-	if choiceErr != nil {
-		return NewOpenAIWSClientCloseError(coderws.StatusPolicyViolation, choiceErr.Error(), choiceErr)
-	}
-	firstClientMessage = normalizedChoiceFirstMessage
 	if normalized, compatibilityChanged, normalizeErr := normalizeOpenAIResponsesWebSocketCompatibilityBody(firstClientMessage, account); normalizeErr != nil {
 		return fmt.Errorf("normalize first websocket response.create: %w", normalizeErr)
 	} else if compatibilityChanged {
@@ -774,6 +757,23 @@ func (s *OpenAIGatewayService) proxyResponsesWebSocketV2Passthrough(
 	if accountScoped {
 		firstClientMessage = accountScopedFirst
 	}
+	liteFirstMessage, _, liteErr := normalizeOpenAIResponsesLiteWSPayloadForModel(account, firstClientMessage, capturedSessionModel)
+	if liteErr != nil {
+		return NewOpenAIWSClientCloseError(coderws.StatusPolicyViolation, liteErr.Error(), liteErr)
+	}
+	firstClientMessage = liteFirstMessage
+	normalizedSparkFirstMessage, sparkContextChanged, sparkContextErr := normalizeCodexSparkReasoningContextForUpstream(firstClientMessage, capturedSessionModel)
+	if sparkContextErr != nil {
+		return NewOpenAIWSClientCloseError(coderws.StatusPolicyViolation, "invalid websocket request payload", sparkContextErr)
+	}
+	if sparkContextChanged {
+		firstClientMessage = normalizedSparkFirstMessage
+	}
+	normalizedChoiceFirstMessage, _, choiceErr := normalizeOpenAIRequiredClientToolSearchChoice(account, firstClientMessage)
+	if choiceErr != nil {
+		return NewOpenAIWSClientCloseError(coderws.StatusPolicyViolation, choiceErr.Error(), choiceErr)
+	}
+	firstClientMessage = normalizedChoiceFirstMessage
 	usageMeta := newOpenAIWSPassthroughUsageMeta(initialRequestModel, firstClientMessage)
 	updatedFirst, blocked, policyErr := s.applyOpenAIFastPolicyToWSResponseCreate(ctx, account, capturedSessionModel, firstClientMessage)
 	if policyErr != nil {
