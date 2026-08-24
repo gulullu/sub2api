@@ -218,7 +218,7 @@ func TestRecordCyberPolicyDefaultScopeConfirmsOnlyRealOpenAIOAuthMark(t *testing
 		RequestID: "request-1", Model: "gpt-test", Endpoint: "/v1/responses", Transport: "http", Stage: "http",
 	})
 	service.MarkOpsCyberPolicy(c, service.CyberPolicyMark{Message: "rejected", UpstreamStatus: 400})
-	h.recordCyberPolicyIfMarked(c, apiKey, openAIOAuth, nil, "gpt-test", true, "", service.ChannelUsageFields{}, "")
+	h.recordCyberPolicyIfMarked(c, apiKey, openAIOAuth, nil, "gpt-test", true, nil, service.ChannelUsageFields{}, "")
 	select {
 	case confirmed := <-repo.confirmed:
 		require.Equal(t, openAIOAuth.ID, confirmed.AccountID)
@@ -231,7 +231,7 @@ func TestRecordCyberPolicyDefaultScopeConfirmsOnlyRealOpenAIOAuthMark(t *testing
 	case <-time.After(time.Second):
 		t.Fatal("expected OpenAI OAuth confirmation")
 	}
-	h.recordCyberPolicyIfMarked(c, apiKey, openAIOAuth, nil, "gpt-test", true, "", service.ChannelUsageFields{}, "")
+	h.recordCyberPolicyIfMarked(c, apiKey, openAIOAuth, nil, "gpt-test", true, nil, service.ChannelUsageFields{}, "")
 	select {
 	case <-repo.confirmed:
 		t.Fatal("duplicate recorder call must be idempotent")
@@ -247,7 +247,7 @@ func TestRecordCyberPolicyDefaultScopeConfirmsOnlyRealOpenAIOAuthMark(t *testing
 		caseContext := newHandlerCyberContext("/v1/responses")
 		caseContext.Set(securityAuditCyberTurnEvidenceContextKey, securityaudit.CyberTurnEvidence{Scope: securityaudit.CyberFingerprintScope{GroupID: groupID}})
 		service.MarkOpsCyberPolicy(caseContext, service.CyberPolicyMark{UpstreamStatus: 400})
-		caseHandler.recordCyberPolicyIfMarked(caseContext, apiKey, account, nil, "gpt-test", true, "", service.ChannelUsageFields{}, "")
+		caseHandler.recordCyberPolicyIfMarked(caseContext, apiKey, account, nil, "gpt-test", true, nil, service.ChannelUsageFields{}, "")
 		select {
 		case <-caseRepo.confirmed:
 			t.Fatalf("account %+v must not confirm OpenAI OAuth feedback", account)
@@ -257,7 +257,7 @@ func TestRecordCyberPolicyDefaultScopeConfirmsOnlyRealOpenAIOAuthMark(t *testing
 
 	noMarkRepo := &handlerCyberFeedbackRepo{confirmed: make(chan securityaudit.CyberConfirmInput, 1)}
 	noMarkHandler := &OpenAIGatewayHandler{cyberFeedbackService: newHandlerCyberService(t, noMarkRepo, false)}
-	noMarkHandler.recordCyberPolicyIfMarked(newHandlerCyberContext("/v1/responses"), apiKey, openAIOAuth, nil, "gpt-test", true, "", service.ChannelUsageFields{}, "")
+	noMarkHandler.recordCyberPolicyIfMarked(newHandlerCyberContext("/v1/responses"), apiKey, openAIOAuth, nil, "gpt-test", true, nil, service.ChannelUsageFields{}, "")
 	select {
 	case <-noMarkRepo.confirmed:
 		t.Fatal("missing upstream mark must not confirm feedback")
@@ -285,7 +285,7 @@ func TestRecordCyberPolicyConfiguredScopeCapturesNonOAuthOutsideAuditGroups(t *t
 	require.True(t, ok)
 	c.Set(securityAuditCyberTurnEvidenceContextKey, evidence)
 	service.MarkOpsCyberPolicy(c, service.CyberPolicyMark{Message: "rejected", UpstreamStatus: 400})
-	h.recordCyberPolicyIfMarked(c, apiKey, apiKeyAccount, nil, "gpt-test", true, "", service.ChannelUsageFields{}, "")
+	h.recordCyberPolicyIfMarked(c, apiKey, apiKeyAccount, nil, "gpt-test", true, nil, service.ChannelUsageFields{}, "")
 	select {
 	case confirmed := <-repo.confirmed:
 		require.Equal(t, apiKeyAccount.ID, confirmed.AccountID)
