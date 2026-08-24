@@ -18,7 +18,10 @@ ARG GOSUMDB=sum.golang.google.cn
 FROM ${NODE_IMAGE} AS frontend-builder
 
 WORKDIR /app/frontend
-ENV NODE_OPTIONS=--max-old-space-size=1536
+# The v0.1.180 plugin/model-plaza surface makes vue-tsc exceed the old
+# 1.5 GiB heap cap in production-sized builds. Keep the build bounded, but
+# leave enough headroom for the merged frontend to complete reproducibly.
+ENV NODE_OPTIONS=--max-old-space-size=4096
 
 # Install pnpm. Keep this pinned to the lockfile-compatible major version so
 # Docker builds remain reproducible when pnpm changes config validation rules.
