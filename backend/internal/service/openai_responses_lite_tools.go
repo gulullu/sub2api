@@ -97,11 +97,8 @@ func normalizeOpenAIResponsesLiteTools(reqBody map[string]any) (bool, error) {
 	} else {
 		reqBody["tools"] = topLevelTools
 	}
-	changed := true
-	if normalizeOpenAIResponsesLiteRequiredToolChoice(reqBody) {
-		changed = true
-	}
-	return ensureOpenAIResponsesLiteParallelToolCalls(reqBody, changed)
+	normalizeOpenAIResponsesLiteRequiredToolChoice(reqBody)
+	return ensureOpenAIResponsesLiteParallelToolCalls(reqBody, true)
 }
 
 // finalizeOpenAIResponsesLiteTools applies the Lite invariants that depend on
