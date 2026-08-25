@@ -749,10 +749,11 @@ func TestOpenAIGatewayServiceForward_PinsParallelToolCallsForToollessResponsesLi
 	accountCases := []struct {
 		name        string
 		accountType string
+		model       string
 		credentials map[string]any
 	}{
-		{name: "oauth", accountType: AccountTypeOAuth, credentials: map[string]any{"access_token": "oauth-token", "chatgpt_account_id": "chatgpt-account"}},
-		{name: "apikey", accountType: AccountTypeAPIKey, credentials: map[string]any{"api_key": "sk-test"}},
+		{name: "oauth", accountType: AccountTypeOAuth, model: "gpt-5.6", credentials: map[string]any{"access_token": "oauth-token", "chatgpt_account_id": "chatgpt-account"}},
+		{name: "apikey", accountType: AccountTypeAPIKey, model: "gpt-4.1", credentials: map[string]any{"api_key": "sk-test"}},
 	}
 	parallelCases := []struct {
 		name  string
@@ -793,7 +794,7 @@ func TestOpenAIGatewayServiceForward_PinsParallelToolCallsForToollessResponsesLi
 						Extra:       map[string]any{"openai_passthrough": passthrough},
 					}
 					body := []byte(`{
-						"model":"gpt-5.6","stream":true,"instructions":"test",
+						"model":"` + accountCase.model + `","stream":true,"instructions":"test",
 						"reasoning":{"effort":"high","context":"current_turn"},
 						"input":[{"type":"message","role":"user","content":"hello"}]` + parallelCase.field + `
 					}`)
@@ -840,7 +841,7 @@ func TestOpenAIGatewayServiceForward_DisablesParallelToolCallsForResponsesLiteAP
 				Extra:       map[string]any{"openai_passthrough": passthrough},
 			}
 			body := []byte(`{
-				"model":"gpt-5.6","stream":true,"instructions":"test",
+				"model":"gpt-4.1","stream":true,"instructions":"test",
 				"tools":[{"type":"function","name":"lookup","parameters":{"type":"object"}}],
 				"parallel_tool_calls":true,
 				"input":[{"type":"message","role":"user","content":"hello"}]

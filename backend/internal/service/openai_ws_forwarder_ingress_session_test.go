@@ -1518,7 +1518,7 @@ func TestOpenAIGatewayService_ProxyResponsesWebSocketFromClient_HTTPBridgeModeRe
 
 	writeCtx, cancelWrite := context.WithTimeout(context.Background(), 3*time.Second)
 	err = clientConn.Write(writeCtx, coderws.MessageText, []byte(`{
-		"type":"response.create","model":"gpt-5.6","stream":false,
+		"type":"response.create","model":"gpt-4.1","stream":false,
 		"parallel_tool_calls":true,
 		"client_metadata":{"ws_request_header_x_openai_internal_codex_responses_lite":"true"}
 	}`))
