@@ -200,17 +200,33 @@ func TestNormalizeOpenAIResponsesLiteTools_ForcesParallelToolCallsFalse(t *testi
 		})
 	}
 }
-func TestNormalizeOpenAIResponsesLiteTools_DoesNotAddParallelToolCallsWithoutTools(t *testing.T) {
-	reqBody := map[string]any{
-		"reasoning":           map[string]any{"context": "all_turns"},
-		"parallel_tool_calls": true,
+func TestNormalizeOpenAIResponsesLiteTools_PinsParallelToolCallsWithoutTools(t *testing.T) {
+	tests := []struct {
+		name        string
+		parallel    any
+		include     bool
+		wantChanged bool
+	}{
+		{name: "字段缺失", wantChanged: true},
+		{name: "值为 true", parallel: true, include: true, wantChanged: true},
+		{name: "值为 false", parallel: false, include: true, wantChanged: false},
 	}
 
-	changed, err := normalizeOpenAIResponsesLiteTools(reqBody)
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			reqBody := map[string]any{"reasoning": map[string]any{"context": "all_turns"}}
+			if tt.include {
+				reqBody["parallel_tool_calls"] = tt.parallel
+			}
 
-	require.NoError(t, err)
-	require.False(t, changed)
-	require.Equal(t, true, reqBody["parallel_tool_calls"])
+			changed, err := normalizeOpenAIResponsesLiteTools(reqBody)
+
+			require.NoError(t, err)
+			require.Equal(t, tt.wantChanged, changed)
+			require.Contains(t, reqBody, "parallel_tool_calls")
+			require.Equal(t, false, reqBody["parallel_tool_calls"])
+		})
+	}
 }
 
 func TestNormalizeOpenAIResponsesLiteTools_RejectsNonBooleanParallelToolCalls(t *testing.T) {
@@ -777,7 +793,7 @@ func TestOpenAIGatewayServiceForward_PinsParallelToolCallsForToollessResponsesLi
 						Extra:       map[string]any{"openai_passthrough": passthrough},
 					}
 					body := []byte(`{
-						"model":"gpt-5.6-terra","stream":true,"instructions":"test",
+						"model":"gpt-5.6","stream":true,"instructions":"test",
 						"reasoning":{"effort":"high","context":"current_turn"},
 						"input":[{"type":"message","role":"user","content":"hello"}]` + parallelCase.field + `
 					}`)
@@ -824,7 +840,7 @@ func TestOpenAIGatewayServiceForward_DisablesParallelToolCallsForResponsesLiteAP
 				Extra:       map[string]any{"openai_passthrough": passthrough},
 			}
 			body := []byte(`{
-				"model":"gpt-5.6-terra","stream":true,"instructions":"test",
+				"model":"gpt-5.6","stream":true,"instructions":"test",
 				"tools":[{"type":"function","name":"lookup","parameters":{"type":"object"}}],
 				"parallel_tool_calls":true,
 				"input":[{"type":"message","role":"user","content":"hello"}]
