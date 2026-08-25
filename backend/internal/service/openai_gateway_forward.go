@@ -89,8 +89,13 @@ func (s *OpenAIGatewayService) Forward(ctx context.Context, c *gin.Context, acco
 		compactPath,
 		clientRequestedResponsesLite,
 	)
-	if account.IsOpenAIOAuthLike() && responsesLiteAttemptEnabled {
-		liteBody, changed, liteErr := normalizeOpenAIResponsesLiteToolsPayload(body)
+	// Apply the full namespace/reasoning transformation only for an effective
+	// Responses Lite attempt. The account-aware helper also carries the
+	// official v0.1.182 API-key behavior (pin parallel_tool_calls=false), while
+	// the compatibility gate above keeps known non-Lite models on full Responses.
+	responsesLite := responsesLiteAttemptEnabled
+	if responsesLite {
+		liteBody, changed, liteErr := normalizeOpenAIResponsesLitePayloadForAccount(body, account)
 		if liteErr != nil {
 			param := "tools"
 			var validationErr *openAIResponsesLiteValidationError
@@ -159,7 +164,7 @@ func (s *OpenAIGatewayService) Forward(ctx context.Context, c *gin.Context, acco
 		return s.forwardResponsesViaNativeAnthropic(ctx, c, account, body, reqModel)
 	}
 	if account.IsOpenAIApiKey() {
-		if normalized, changed, normalizeErr := normalizeOpenAIParallelToolCallsWithoutTools(body); normalizeErr != nil {
+		if normalized, changed, normalizeErr := normalizeOpenAIParallelToolCallsWithoutTools(body, responsesLite); normalizeErr != nil {
 			return nil, normalizeErr
 		} else if changed {
 			body = normalized
