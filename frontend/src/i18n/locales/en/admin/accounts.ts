@@ -821,6 +821,11 @@ export default {
 	  autoPause5hDisabled: 'Disable 5h auto-pause',
 	  autoPause7dDisabled: 'Disable 7d auto-pause',
 	  autoPauseDisabledHint: 'When enabled, this account is never auto-paused (even if a global default threshold is configured).',
+	  streamTimeoutTempUnschedulableDisabled: 'Ignore automatic removal after stream timeouts',
+	  streamTimeoutTempUnschedulableDisabledHint:
+	    'High risk: when the system stream-timeout action is set to temporary unscheduling, repeated stream-data timeouts will not automatically remove this account. A failing account may continue receiving requests and amplify 504s. Recommended only for pool accounts; an existing cooldown is not cleared immediately, and manually disabling scheduling still works.',
+	  streamTimeoutTempUnschedulableDisabledWarning:
+	    'High-risk setting enabled: confirm this is a pool account that can tolerate continued failures. To stop traffic immediately, manually turn off “Schedulable”.',
 	  autoResetCredit: {
 	    title: 'Automatically use reset credits',
 	    hint: 'Uses the earliest-expiring available credit only when actual usage reaches a threshold. Off by default; the account remains paused if no credit is available or reset fails.',

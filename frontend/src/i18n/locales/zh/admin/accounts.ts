@@ -893,6 +893,11 @@ export default {
 	  autoPause5hDisabled: '禁用 5h 自动暂停',
 	  autoPause7dDisabled: '禁用 7d 自动暂停',
 	  autoPauseDisabledHint: '开启后该账号永不进入自动暂停（即使全局默认阈值已配置）。',
+	  streamTimeoutTempUnschedulableDisabled: '忽略流超时自动临时摘除',
+	  streamTimeoutTempUnschedulableDisabledHint:
+	    '高风险：在系统流超时动作设为“临时不可调度”时，开启后续流数据超时不会自动摘除该账号，可能让故障账号继续接收请求并放大 504。仅建议号池账号使用；已有冷却不会立即清除，手动关闭调度仍然有效。',
+	  streamTimeoutTempUnschedulableDisabledWarning:
+	    '高风险设置已开启：请确认该账号属于号池且能承受持续失败。若需立即停止流量，请手动关闭“可调度”。',
 	  autoResetCredit: {
 	    title: '自动使用重置卡',
 	    hint: '仅在实际用量达到阈值时使用最早到期的可用卡；默认关闭。无卡或失败时账号保持暂停。',

@@ -2264,6 +2264,47 @@
           />
           <p class="input-hint">{{ t('admin.accounts.autoPauseThresholdHint') }}</p>
         </div>
+        <div
+          v-if="account?.type === 'apikey'"
+          class="space-y-2"
+        >
+          <div class="flex items-center justify-between gap-4">
+            <div class="min-w-0">
+              <label class="input-label mb-0">{{ t('admin.accounts.streamTimeoutTempUnschedulableDisabled') }}</label>
+              <p class="mt-1 text-xs text-gray-500 dark:text-gray-400">
+                {{ t('admin.accounts.streamTimeoutTempUnschedulableDisabledHint') }}
+              </p>
+            </div>
+            <button
+              type="button"
+              @click="streamTimeoutTempUnschedulableDisabled = !streamTimeoutTempUnschedulableDisabled"
+              :class="[
+                'relative inline-flex h-6 w-11 flex-shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 ease-in-out focus:outline-none focus:ring-2 focus:ring-primary-500 focus:ring-offset-2',
+                streamTimeoutTempUnschedulableDisabled ? 'bg-primary-600' : 'bg-gray-200 dark:bg-dark-600'
+              ]"
+              :aria-pressed="streamTimeoutTempUnschedulableDisabled"
+              :aria-label="t('admin.accounts.streamTimeoutTempUnschedulableDisabled')"
+              data-testid="stream-timeout-temp-unschedulable-disabled"
+            >
+              <span
+                :class="[
+                  'pointer-events-none inline-block h-5 w-5 transform rounded-full bg-white shadow ring-0 transition duration-200 ease-in-out',
+                  streamTimeoutTempUnschedulableDisabled ? 'translate-x-5' : 'translate-x-0'
+                ]"
+              />
+            </button>
+          </div>
+          <div
+            v-if="streamTimeoutTempUnschedulableDisabled"
+            class="rounded-lg border border-red-200 bg-red-50 p-3 dark:border-red-800/60 dark:bg-red-900/20"
+            data-testid="stream-timeout-temp-unschedulable-warning"
+          >
+            <p class="text-xs text-red-700 dark:text-red-300">
+              <Icon name="exclamationTriangle" size="sm" class="mr-1 inline" :stroke-width="2" />
+              {{ t('admin.accounts.streamTimeoutTempUnschedulableDisabledWarning') }}
+            </p>
+          </div>
+        </div>
       </div>
 
       <div
@@ -3158,6 +3199,7 @@ const autoPause5hThreshold = ref<number | null>(null)
 const autoPause7dThreshold = ref<number | null>(null)
 const autoPause5hDisabled = ref(false)
 const autoPause7dDisabled = ref(false)
+const streamTimeoutTempUnschedulableDisabled = ref(false)
 const autoResetCreditEnabled = ref(false)
 const autoResetCredit5hThreshold = ref(100)
 const autoResetCredit7dThreshold = ref(100)
@@ -3689,6 +3731,7 @@ const syncFormFromAccount = (newAccount: Account | null) => {
 	autoPause7dThreshold.value = typeof extra?.auto_pause_7d_threshold === 'number' ? extra.auto_pause_7d_threshold * 100 : null
 	autoPause5hDisabled.value = extra?.auto_pause_5h_disabled === true
 	autoPause7dDisabled.value = extra?.auto_pause_7d_disabled === true
+	streamTimeoutTempUnschedulableDisabled.value = extra?.stream_timeout_temp_unschedulable_disabled === true
 	autoResetCreditEnabled.value = extra?.auto_reset_credit_enabled === true
 	autoResetCredit5hThreshold.value =
 		typeof extra?.auto_reset_credit_5h_threshold === 'number' ? extra.auto_reset_credit_5h_threshold * 100 : 100
@@ -5156,6 +5199,11 @@ const handleSubmit = async () => {
 			newExtra.auto_pause_7d_disabled = true
 		} else {
 			delete newExtra.auto_pause_7d_disabled
+		}
+		if (streamTimeoutTempUnschedulableDisabled.value) {
+			newExtra.stream_timeout_temp_unschedulable_disabled = true
+		} else {
+			delete newExtra.stream_timeout_temp_unschedulable_disabled
 		}
 		if (props.account.type === 'oauth' && !isSparkShadow.value) {
 			newExtra.auto_reset_credit_enabled = autoResetCreditEnabled.value

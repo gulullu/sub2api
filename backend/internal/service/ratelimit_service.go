@@ -2614,6 +2614,25 @@ func (s *RateLimitService) HandleStreamTimeout(ctx context.Context, account *Acc
 
 // triggerStreamTimeoutTempUnsched 触发流超时临时不可调度
 func (s *RateLimitService) triggerStreamTimeoutTempUnsched(ctx context.Context, account *Account, settings *StreamTimeoutSettings, model string) bool {
+	// An account may opt out of the system-level stream-timeout quarantine when
+	// it is intentionally used as a pool member. Keep counting/logging the
+	// repeated timeout signal, but do not persist a temporary-unschedulable
+	// state or notify the in-memory runtime blocker. This is deliberately scoped
+	// to the stream-timeout action; explicit account error rules and other
+	// credential/transport protections are unaffected.
+	if account.IsStreamTimeoutTempUnschedulableDisabled() {
+		if s.timeoutCounterCache != nil {
+			if err := s.timeoutCounterCache.ResetTimeoutCount(ctx, account.ID); err != nil {
+				slog.Warn("stream_timeout_reset_count_after_exemption_failed", "account_id", account.ID, "error", err)
+			}
+		}
+		slog.Warn("stream_timeout_temp_unschedulable_skipped",
+			"account_id", account.ID,
+			"model", model,
+			"reason", "account_extra_override")
+		return false
+	}
+
 	now := time.Now()
 	until := now.Add(time.Duration(settings.TempUnschedMinutes) * time.Minute)
 

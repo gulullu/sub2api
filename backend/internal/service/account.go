@@ -113,6 +113,13 @@ const openAIEndpointCapabilitiesCredentialKey = "openai_capabilities"
 // absent/null value uses provider observations.
 const GrokMediaEligibleExtraKey = "grok_media_eligible"
 
+// StreamTimeoutTempUnschedulableDisabledExtraKey is an opt-in per-account
+// safeguard for upstream account pools. When true, repeated stream/first-token
+// timeouts are still returned to the caller and logged, but they do not put the
+// account into the account-wide temporary-unschedulable state. Other health and
+// credential protections remain unchanged.
+const StreamTimeoutTempUnschedulableDisabledExtraKey = "stream_timeout_temp_unschedulable_disabled"
+
 const (
 	OpenAIAuthModePersonalAccessToken = "personalAccessToken"
 	openAIAuthModeCredentialKey       = "auth_mode"
@@ -424,6 +431,17 @@ func (a *Account) IsTempUnschedulableEnabled() bool {
 	}
 	enabled, ok := raw.(bool)
 	return ok && enabled
+}
+
+// IsStreamTimeoutTempUnschedulableDisabled reports whether this account opted
+// out of the system-level stream-timeout quarantine. This is deliberately
+// separate from IsTempUnschedulableEnabled, which controls administrator-
+// configured error-code/keyword rules stored in Credentials.
+func (a *Account) IsStreamTimeoutTempUnschedulableDisabled() bool {
+	if a == nil || a.Platform != PlatformOpenAI || !a.IsPoolMode() {
+		return false
+	}
+	return resolveAccountExtraBool(a.Extra, StreamTimeoutTempUnschedulableDisabledExtraKey)
 }
 
 func (a *Account) GetTempUnschedulableRules() []TempUnschedulableRule {

@@ -3,6 +3,7 @@
 package service
 
 import (
+	"context"
 	"testing"
 	"time"
 
@@ -128,6 +129,122 @@ func TestAccountIsSchedulable_TempUnschedulable(t *testing.T) {
 			require.Equal(t, tt.want, got)
 		})
 	}
+}
+
+func TestAccountIsStreamTimeoutTempUnschedulableDisabled(t *testing.T) {
+	tests := []struct {
+		name        string
+		platform    string
+		typeName    string
+		credentials map[string]any
+		extra       map[string]any
+		want        bool
+	}{
+		{
+			name:     "enabled_pool",
+			typeName: AccountTypeAPIKey,
+			credentials: map[string]any{
+				"pool_mode": true,
+			},
+			extra: map[string]any{
+				StreamTimeoutTempUnschedulableDisabledExtraKey: true,
+			},
+			want: true,
+		},
+		{
+			name:     "non_pool",
+			typeName: AccountTypeAPIKey,
+			credentials: map[string]any{
+				"pool_mode": false,
+			},
+			extra: map[string]any{
+				StreamTimeoutTempUnschedulableDisabledExtraKey: true,
+			},
+			want: false,
+		},
+		{
+			name:     "non_openai",
+			platform: PlatformAnthropic,
+			typeName: AccountTypeAPIKey,
+			credentials: map[string]any{
+				"pool_mode": true,
+			},
+			extra: map[string]any{
+				StreamTimeoutTempUnschedulableDisabledExtraKey: true,
+			},
+			want: false,
+		},
+		{
+			name:     "disabled",
+			typeName: AccountTypeAPIKey,
+			extra: map[string]any{
+				StreamTimeoutTempUnschedulableDisabledExtraKey: false,
+			},
+			want: false,
+		},
+		{
+			name:     "missing",
+			typeName: AccountTypeAPIKey,
+			extra:    map[string]any{},
+			want:     false,
+		},
+		{
+			name:     "nil_extra",
+			typeName: AccountTypeAPIKey,
+			want:     false,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			platform := PlatformOpenAI
+			if tt.platform != "" {
+				platform = tt.platform
+			}
+			account := &Account{Platform: platform, Type: tt.typeName, Credentials: tt.credentials, Extra: tt.extra}
+			require.Equal(t, tt.want, account.IsStreamTimeoutTempUnschedulableDisabled())
+		})
+	}
+}
+
+type streamTimeoutCounterResetStub struct {
+	resetCalls int
+}
+
+func (s *streamTimeoutCounterResetStub) IncrementTimeoutCount(context.Context, int64, int) (int64, error) {
+	return 0, nil
+}
+
+func (s *streamTimeoutCounterResetStub) GetTimeoutCount(context.Context, int64) (int64, error) {
+	return 0, nil
+}
+
+func (s *streamTimeoutCounterResetStub) ResetTimeoutCount(context.Context, int64) error {
+	s.resetCalls++
+	return nil
+}
+
+func (s *streamTimeoutCounterResetStub) GetTimeoutCountTTL(context.Context, int64) (time.Duration, error) {
+	return 0, nil
+}
+
+func TestRateLimitServiceStreamTimeoutExemptionSkipsQuarantine(t *testing.T) {
+	counter := &streamTimeoutCounterResetStub{}
+	svc := &RateLimitService{timeoutCounterCache: counter}
+	account := &Account{
+		ID:          99,
+		Platform:    PlatformOpenAI,
+		Type:        AccountTypeAPIKey,
+		Credentials: map[string]any{"pool_mode": true},
+		Extra: map[string]any{
+			StreamTimeoutTempUnschedulableDisabledExtraKey: true,
+		},
+	}
+	settings := &StreamTimeoutSettings{TempUnschedMinutes: 5}
+
+	require.False(t, svc.triggerStreamTimeoutTempUnsched(context.Background(), account, settings, "gpt-test"))
+	require.Equal(t, 1, counter.resetCalls)
+	require.Nil(t, account.TempUnschedulableUntil)
 }
 
 // TestAccount_IsTempUnschedulableEnabled 测试临时限流开关
