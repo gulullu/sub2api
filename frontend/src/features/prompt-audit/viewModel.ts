@@ -3,6 +3,8 @@ import type {
   PromptAuditDraft,
   PromptAuditAdapter,
   PromptAuditEndpointDraft,
+  PromptAuditGroupPolicy,
+  PromptAuditNoRouteFallbackMode,
   PromptAuditTemplate,
   PromptAuditUpdateRequest,
   PromptEventFilters,
@@ -20,6 +22,7 @@ export const DEFAULT_MAX_TOTAL_INPUT_CHARS = 40000
 export const MIN_ENDPOINT_PRIORITY = 1
 export const MAX_ENDPOINT_PRIORITY = 1000
 export const RECOMMENDED_FAILOVER_TIMEOUT_MS = 40000
+export const DEFAULT_NO_ROUTE_FALLBACK_MODE: PromptAuditNoRouteFallbackMode = 'block'
 
 export const DEFAULT_AUDIT_SYSTEM_PROMPT = `[SYSTEM — IMMUTABLE]
 
@@ -102,6 +105,87 @@ function normalizedPositiveIDs(values: number[] | null | undefined): number[] {
     .sort((left, right) => left - right)
 }
 
+function normalizedGroupID(value: unknown): number | null {
+  const parsed = typeof value === 'number' ? value : Number(value)
+  return Number.isSafeInteger(parsed) && parsed > 0 ? parsed : null
+}
+
+function normalizedThreshold(value: unknown, fallback: number, min: number, max: number): number {
+  const parsed = Number(value)
+  if (!Number.isFinite(parsed)) return fallback
+  return Math.min(max, Math.max(min, parsed))
+}
+
+function normalizedBlockStatus(value: unknown, fallback: number): number {
+  const parsed = Number(value)
+  return Number.isInteger(parsed) && parsed >= 400 && parsed <= 499 ? parsed : fallback
+}
+
+function normalizedInputLimit(value: unknown, fallback: number): number {
+  const parsed = Number(value)
+  return Number.isInteger(parsed)
+    ? Math.min(400000, Math.max(128, parsed))
+    : fallback
+}
+
+/**
+ * Fill one group policy from the legacy global values. This is intentionally
+ * exported so the group editor can open a synthetic policy without marking a
+ * clean draft dirty; it only gets persisted after the user changes a field.
+ */
+export function createGroupPolicyFromConfig(
+  config: Pick<PromptAuditConfig, 'enabled' | 'blocking_enabled' | 'blocking_latest_turn_only' | 'store_pass_events' | 'strategy' | 'scanners' | 'max_total_input_chars' | 'active_prompt_template_id' | 'flag_threshold' | 'block_threshold' | 'block_http_status' | 'block_message' | 'risk_route_account_ids' | 'cyber_feedback_account_ids' | 'excluded_user_ids'> & { no_route_fallback_mode?: PromptAuditNoRouteFallbackMode },
+  groupID: number | null,
+  source?: Partial<PromptAuditGroupPolicy> | null,
+): PromptAuditGroupPolicy {
+  const input = source ?? {}
+  const flagThreshold = normalizedThreshold(input.flag_threshold, Number(config.flag_threshold ?? DEFAULT_FLAG_THRESHOLD), 0, 1)
+  const blockThreshold = normalizedThreshold(input.block_threshold, Number(config.block_threshold ?? DEFAULT_BLOCK_THRESHOLD), 0, 1)
+  const safeBlockThreshold = Math.max(flagThreshold + 0.01, blockThreshold)
+  return {
+    group_id: normalizedGroupID(input.group_id) ?? groupID,
+    enabled: typeof input.enabled === 'boolean' ? input.enabled : Boolean(config.enabled),
+    blocking_enabled: typeof input.blocking_enabled === 'boolean' ? input.blocking_enabled : Boolean(config.blocking_enabled),
+    blocking_latest_turn_only: typeof input.blocking_latest_turn_only === 'boolean' ? input.blocking_latest_turn_only : Boolean(config.blocking_latest_turn_only),
+    store_pass_events: typeof input.store_pass_events === 'boolean' ? input.store_pass_events : Boolean(config.store_pass_events),
+    strategy: typeof input.strategy === 'string' && input.strategy.trim() ? input.strategy : String(config.strategy || 'priority'),
+    scanners: Array.isArray(input.scanners) ? [...input.scanners].filter((item): item is string => typeof item === 'string') : [...(config.scanners ?? [])],
+    max_total_input_chars: normalizedInputLimit(input.max_total_input_chars, normalizedInputLimit(config.max_total_input_chars, DEFAULT_MAX_TOTAL_INPUT_CHARS)),
+    active_prompt_template_id: typeof input.active_prompt_template_id === 'string' && input.active_prompt_template_id.trim()
+      ? input.active_prompt_template_id
+      : String(config.active_prompt_template_id ?? DEFAULT_PROMPT_TEMPLATE_ID),
+    flag_threshold: flagThreshold,
+    block_threshold: safeBlockThreshold > 1 ? 1 : safeBlockThreshold,
+    block_http_status: normalizedBlockStatus(input.block_http_status, Number(config.block_http_status ?? DEFAULT_BLOCK_HTTP_STATUS)),
+    block_message: typeof input.block_message === 'string' && input.block_message.trim() ? input.block_message : String(config.block_message ?? DEFAULT_BLOCK_MESSAGE),
+    risk_route_account_ids: normalizedPositiveIDs(Array.isArray(input.risk_route_account_ids) ? input.risk_route_account_ids : config.risk_route_account_ids),
+    cyber_feedback_account_ids: normalizedPositiveIDs(Array.isArray(input.cyber_feedback_account_ids) ? input.cyber_feedback_account_ids : config.cyber_feedback_account_ids),
+    excluded_user_ids: normalizedPositiveIDs(Array.isArray(input.excluded_user_ids) ? input.excluded_user_ids : config.excluded_user_ids),
+    no_route_fallback_mode: input.no_route_fallback_mode === 'allow' || input.no_route_fallback_mode === 'block'
+      ? input.no_route_fallback_mode
+      : config.no_route_fallback_mode ?? DEFAULT_NO_ROUTE_FALLBACK_MODE,
+    ...(typeof input.updated_at === 'string' ? { updated_at: input.updated_at } : {}),
+  }
+}
+
+/** Normalize only policies explicitly returned by the server. */
+export function normalizeGroupPolicies(
+  config: PromptAuditConfig,
+): PromptAuditGroupPolicy[] {
+  const policies = Array.isArray(config.group_policies) ? config.group_policies : []
+  const byGroup = new Map<string, PromptAuditGroupPolicy>()
+  policies.forEach((policy) => {
+    const groupID = normalizedGroupID(policy?.group_id)
+    const normalized = createGroupPolicyFromConfig(config, groupID, policy)
+    byGroup.set(groupID === null ? 'default' : String(groupID), normalized)
+  })
+  return [...byGroup.values()].sort((left, right) => {
+    if (left.group_id === null) return -1
+    if (right.group_id === null) return 1
+    return left.group_id - right.group_id
+  })
+}
+
 function normalizedEndpointPriority(priority: number | null | undefined, fallback: number): number {
   return Number.isInteger(priority) && Number(priority) >= MIN_ENDPOINT_PRIORITY && Number(priority) <= MAX_ENDPOINT_PRIORITY
     ? Number(priority)
@@ -146,6 +230,8 @@ export function configToDraft(config: PromptAuditConfig): PromptAuditDraft {
     risk_route_account_ids: normalizedPositiveIDs(config.risk_route_account_ids),
     cyber_feedback_account_ids: normalizedPositiveIDs(config.cyber_feedback_account_ids),
     excluded_user_ids: normalizedPositiveIDs(config.excluded_user_ids),
+    ...(Array.isArray(config.group_policies) ? { group_policies: normalizeGroupPolicies(config) } : {}),
+    no_route_fallback_mode: config.no_route_fallback_mode === 'allow' ? 'allow' : DEFAULT_NO_ROUTE_FALLBACK_MODE,
     scanners: [...(config.scanners ?? [])],
     prompt_templates: promptTemplates,
     active_prompt_template_id: activeTemplateID,
@@ -194,7 +280,7 @@ export function createDefaultEndpoint(
 }
 
 export function buildUpdateRequest(draft: PromptAuditDraft): PromptAuditUpdateRequest {
-  return {
+  const request: PromptAuditUpdateRequest = {
     expected_config_version: draft.config_version,
     enabled: draft.enabled,
     blocking_enabled: draft.enabled && draft.blocking_enabled,
@@ -209,6 +295,9 @@ export function buildUpdateRequest(draft: PromptAuditDraft): PromptAuditUpdateRe
     risk_route_account_ids: normalizedPositiveIDs(draft.risk_route_account_ids),
     cyber_feedback_account_ids: normalizedPositiveIDs(draft.cyber_feedback_account_ids),
     excluded_user_ids: normalizedPositiveIDs(draft.excluded_user_ids),
+    // Older servers omit this field; always send a safe explicit default when
+    // saving so the backend can apply the same behavior to unconfigured groups.
+    no_route_fallback_mode: draft.no_route_fallback_mode === 'allow' ? 'allow' : DEFAULT_NO_ROUTE_FALLBACK_MODE,
     prompt_templates: draft.prompt_templates.map((template) => ({
       id: template.id.trim(),
       name: template.name.trim(),
@@ -237,6 +326,18 @@ export function buildUpdateRequest(draft: PromptAuditDraft): PromptAuditUpdateRe
       enabled: endpoint.enabled,
     })),
   }
+  // Do not send a new field to a pre-group-policy server. Once a server has
+  // returned the field, retain an explicit empty array as a valid clear-all
+  // operation; editing any group also creates the field on the draft.
+  if (Array.isArray(draft.group_policies)) {
+    request.group_policies = draft.group_policies.map((policy) => ({
+      ...createGroupPolicyFromConfig(draft, policy.group_id, policy),
+      // The backend uses group_id=0 for the explicit unassigned/default
+      // bucket. The UI keeps null internally to make that boundary obvious.
+      group_id: policy.group_id ?? 0,
+    }))
+  }
+  return request
 }
 
 export function draftFingerprint(draft: PromptAuditDraft | null): string {
@@ -249,6 +350,7 @@ export function emptyEventFilters(): PromptEventFilters {
     decision: '',
     risk_level: '',
     endpoint: '',
+    guard_endpoint_id: '',
     group_id: '',
     user_id: '',
     api_key_id: '',
@@ -268,13 +370,18 @@ function toISO(value: string): string | undefined {
 
 export function eventQueryParams(filters: PromptEventFilters): Record<string, string | number> {
   const result: Record<string, string | number> = {}
-  for (const key of ['decision', 'risk_level', 'endpoint', 'request_id', 'prompt_hash', 'keyword'] as const) {
-    const value = filters[key].trim()
+  for (const key of ['decision', 'risk_level', 'endpoint', 'guard_endpoint_id', 'request_id', 'prompt_hash', 'keyword'] as const) {
+    const value = (filters[key] ?? '').trim()
     if (value) result[key] = value
   }
   for (const key of ['group_id', 'user_id', 'api_key_id'] as const) {
-    const value = Number(filters[key])
-    if (Number.isInteger(value) && value > 0) result[key] = value
+    const raw = filters[key]
+    if (typeof raw !== 'string' || !raw.trim()) continue
+    const value = Number(raw)
+    // `group_id=0` is the explicit unassigned/default bucket; user and API
+    // key IDs remain strictly positive.
+    const valid = key === 'group_id' ? value >= 0 : value > 0
+    if (Number.isInteger(value) && valid) result[key] = value
   }
   const start = toISO(filters.start_at)
   const end = toISO(filters.end_at)

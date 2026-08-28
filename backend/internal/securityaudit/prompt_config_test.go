@@ -68,6 +68,7 @@ func TestDefaultConfigIsOff(t *testing.T) {
 	require.Equal(t, DefaultBlockHTTPStatus, storage.BlockHTTPStatus)
 	require.Equal(t, DefaultBlockMessage, storage.BlockMessage)
 	require.Equal(t, DefaultMaxTotalInputChars, storage.MaxTotalInputChars)
+	require.Equal(t, DefaultNoRouteFallbackMode, storage.NoRouteFallbackMode)
 	require.Empty(t, storage.CyberFeedbackAccountIDs)
 	require.Equal(t, []PromptTemplate{DefaultPromptTemplate()}, storage.PromptTemplates)
 	publicJSON, err := json.Marshal(PublicFromStorage(storage, true, nil))
@@ -76,6 +77,7 @@ func TestDefaultConfigIsOff(t *testing.T) {
 	require.Contains(t, string(publicJSON), `"risk_route_account_ids":[]`)
 	require.Contains(t, string(publicJSON), `"cyber_feedback_account_ids":[]`)
 	require.Contains(t, string(publicJSON), `"excluded_user_ids":[]`)
+	require.Contains(t, string(publicJSON), `"no_route_fallback_mode":"block"`)
 	require.Contains(t, string(publicJSON), `"endpoints":[]`)
 }
 
@@ -197,6 +199,112 @@ func TestPromptAuditRiskRouteConfigRoundTrip(t *testing.T) {
 	require.Equal(t, next.RiskRouteAccountIDs, active.RiskRouteAccountIDs)
 	public := PublicFromStorage(next, true, nil)
 	require.Equal(t, next.RiskRouteAccountIDs, public.RiskRouteAccountIDs)
+}
+
+func TestPromptAuditGroupPoliciesRoundTripAndUngroupedBucket(t *testing.T) {
+	manager := &ConfigManager{encryptor: prefixEncryptor{}, encryptionKeyConfigured: true}
+	req := promptAuditUpdateRequest(1, 1, "")
+	// Group policies own their mode; use a blocking legacy default here so the
+	// round-trip assertion also exercises the strict global configuration path.
+	req.BlockingEnabled = true
+	req.AllGroups = false
+	req.GroupIDs = nil
+	policies := []GroupPolicy{
+		{GroupID: 0, Enabled: true, BlockingEnabled: true, BlockingLatestTurnOnly: true,
+			StorePassEvents: true, Strategy: "priority", Scanners: []string{"jailbreak"},
+			MaxTotalInputChars: 2048, ActivePromptTemplateID: DefaultPromptTemplateID,
+			FlagThreshold: 0.25, BlockThreshold: 0.75, BlockHTTPStatus: 429,
+			BlockMessage: "ungrouped blocked", RiskRouteAccountIDs: []int64{22},
+			CyberFeedbackAccountIDs: []int64{33}, ExcludedUserIDs: []int64{44},
+			NoRouteFallbackMode: NoRouteFallbackAllow},
+		{GroupID: 9, Enabled: true, BlockingEnabled: false, Strategy: "priority", Scanners: []string{"pii"},
+			MaxTotalInputChars: DefaultMaxTotalInputChars, ActivePromptTemplateID: DefaultPromptTemplateID,
+			FlagThreshold: DefaultFlagThreshold, BlockThreshold: DefaultBlockThreshold,
+			BlockHTTPStatus: DefaultBlockHTTPStatus, BlockMessage: DefaultBlockMessage,
+			NoRouteFallbackMode: NoRouteFallbackBlock},
+	}
+	// A real HTTP request is decoded from JSON, which records explicit false/
+	// zero-valued fields in GroupPolicy.present. Exercise that wire path here.
+	encodedPolicies, err := json.Marshal(policies)
+	require.NoError(t, err)
+	var wirePolicies []GroupPolicy
+	require.NoError(t, json.Unmarshal(encodedPolicies, &wirePolicies))
+	req.GroupPolicies = &wirePolicies
+	next, err := manager.buildNextStorage(DefaultStorageConfig(), req, 5)
+	require.NoError(t, err)
+	require.Len(t, next.GroupPolicies, 2)
+	require.Equal(t, int64(0), next.GroupPolicies[0].GroupID)
+	require.Equal(t, NoRouteFallbackAllow, next.GroupPolicies[0].NoRouteFallbackMode)
+
+	active, err := ActiveFromStorage(next, true, prefixEncryptor{})
+	require.NoError(t, err)
+	var ungrouped *int64
+	effective := active.EffectiveForGroup(ungrouped)
+	require.Equal(t, ModeBlocking, effective.EffectiveMode())
+	require.Equal(t, []string{"jailbreak"}, effective.Scanners)
+	require.Equal(t, []int64{22}, effective.RiskRouteAccountIDs)
+	require.True(t, effective.IncludesUser(1))
+	require.False(t, effective.IncludesUser(44))
+	require.Equal(t, NoRouteFallbackAllow, effective.NoRouteFallbackMode)
+	require.True(t, active.IncludesGroup(nil))
+
+	groupID := int64(9)
+	groupCfg := active.EffectiveForGroup(&groupID)
+	require.Equal(t, ModeAsync, groupCfg.EffectiveMode())
+	require.Equal(t, []string{"pii"}, groupCfg.Scanners)
+	require.Equal(t, NoRouteFallbackBlock, groupCfg.NoRouteFallbackMode)
+
+	public := PublicFromStorage(next, true, nil)
+	require.Len(t, public.GroupPolicies, 2)
+	raw, err := json.Marshal(next)
+	require.NoError(t, err)
+	parsed, err := ParseStorageConfig(string(raw))
+	require.NoError(t, err)
+	require.Equal(t, next.GroupPolicies, parsed.GroupPolicies)
+}
+
+func TestPromptAuditLegacyUpdatePreservesNoRouteFallbackMode(t *testing.T) {
+	manager := &ConfigManager{encryptor: prefixEncryptor{}, encryptionKeyConfigured: true}
+	current := DefaultStorageConfig()
+	current.NoRouteFallbackMode = NoRouteFallbackAllow
+	// Simulate an older admin bundle that does not know the new top-level field.
+	req := promptAuditUpdateRequest(1, 1, "")
+	req.NoRouteFallbackMode = ""
+
+	next, err := manager.buildNextStorage(current, req, 5)
+
+	require.NoError(t, err)
+	require.Equal(t, NoRouteFallbackAllow, next.NoRouteFallbackMode)
+}
+
+func TestPromptAuditGroupPolicyMissingFieldsInheritLegacyValues(t *testing.T) {
+	storage := DefaultStorageConfig()
+	storage.Enabled = true
+	storage.BlockingEnabled = true
+	storage.Scanners = []string{"pii"}
+	storage.GroupPolicies = []GroupPolicy{{GroupID: 7}}
+	storage.Endpoints = []StorageEndpoint{{ID: "guard", Name: "Guard", Protocol: "openai_compatible", BaseURL: "http://127.0.0.1:8080", Model: DefaultGuardModel, TimeoutMS: 1000, InputLimit: 1000, Enabled: true}}
+	normalizeStorageConfig(&storage)
+	require.NoError(t, validateStorageConfig(storage))
+	require.Equal(t, storage.Enabled, storage.GroupPolicies[0].Enabled)
+	require.Equal(t, storage.BlockingEnabled, storage.GroupPolicies[0].BlockingEnabled)
+	require.Equal(t, storage.Scanners, storage.GroupPolicies[0].Scanners)
+	require.Equal(t, DefaultNoRouteFallbackMode, storage.GroupPolicies[0].NoRouteFallbackMode)
+}
+
+func TestPromptAuditGroupPolicyRejectsDuplicateAndUnknownFallbackMode(t *testing.T) {
+	storage := DefaultStorageConfig()
+	storage.GroupPolicies = []GroupPolicy{
+		{GroupID: 5, Enabled: true, Strategy: "priority", Scanners: []string{"pii"}, MaxTotalInputChars: DefaultMaxTotalInputChars,
+			ActivePromptTemplateID: DefaultPromptTemplateID, FlagThreshold: DefaultFlagThreshold, BlockThreshold: DefaultBlockThreshold,
+			BlockHTTPStatus: DefaultBlockHTTPStatus, BlockMessage: DefaultBlockMessage, NoRouteFallbackMode: NoRouteFallbackBlock},
+		{GroupID: 5},
+	}
+	normalizeStorageConfig(&storage)
+	require.Error(t, validateStorageConfig(storage))
+	storage.GroupPolicies = storage.GroupPolicies[:1]
+	storage.GroupPolicies[0].NoRouteFallbackMode = "drop"
+	require.Error(t, validateStorageConfig(storage))
 }
 
 func TestPromptAuditExcludedUserIDsRoundTripAndAdmissionGate(t *testing.T) {
@@ -582,6 +690,35 @@ func TestConfigManagerColdStartOnlyFailsClosedForExplicitBlockingIntent(t *testi
 
 	manager.observeExpectedState(`{"enabled":true`, true)
 	require.Equal(t, ModeBlocking, manager.EffectiveMode(), "undecodable storage must not erase the last known strict intent")
+}
+
+func TestConfigManagerExpectedBlockingNormalizesPartialGroupPolicyIntent(t *testing.T) {
+	manager := &ConfigManager{}
+	// A reload can observe the raw JSON before the full config is decoded. A
+	// partial group entry inherits the top-level blocking flag and must keep the
+	// fail-closed guard armed while activation is being retried.
+	manager.observeExpectedState(`{"enabled":true,"blocking_enabled":true,"all_groups":false,"group_ids":[7],"group_policies":[{"group_id":7}],"config_version":45}`, true)
+	require.True(t, manager.expectedBlocking.Load())
+	require.True(t, manager.BlockingActivationDegraded())
+	require.Equal(t, ModeBlocking, manager.EffectiveMode())
+}
+
+func TestEffectiveGroupPoliciesCanMixBlockingAndAsyncModes(t *testing.T) {
+	groupBlocking := int64(7)
+	groupAsync := int64(8)
+	cfg := ActiveConfig{
+		RiskControlEnabled: true,
+		Enabled:            true,
+		BlockingEnabled:    false,
+		AllGroups:          false,
+		GroupPolicies: []GroupPolicy{
+			{GroupID: groupBlocking, Enabled: true, BlockingEnabled: true},
+			{GroupID: groupAsync, Enabled: true, BlockingEnabled: false},
+		},
+	}
+	require.True(t, cfg.RequiresBlockingActivation())
+	require.Equal(t, ModeBlocking, cfg.EffectiveForGroup(&groupBlocking).EffectiveMode())
+	require.Equal(t, ModeAsync, cfg.EffectiveForGroup(&groupAsync).EffectiveMode())
 }
 
 func TestConfigManagerStaleWeakerSnapshotFailsClosedWhenBlockingExpected(t *testing.T) {

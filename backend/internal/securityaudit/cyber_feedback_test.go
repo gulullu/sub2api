@@ -49,6 +49,17 @@ func TestCyberPrepareTurnFailOpenStillKeepsSafeMetadata(t *testing.T) {
 	require.False(t, ok)
 }
 
+func TestCyberFeedbackWhereKeepsUnassignedGroupFilter(t *testing.T) {
+	groupID := int64(0)
+	where, args := cyberFeedbackWhere(CyberFeedbackFilter{GroupID: &groupID})
+	require.Equal(t, "WHERE f.group_id=$1", where)
+	require.Equal(t, []any{int64(0)}, args)
+
+	where, args = cyberFeedbackWhere(CyberFeedbackFilter{})
+	require.Empty(t, where)
+	require.Empty(t, args)
+}
+
 func TestCyberSupplementMutationLockFailsFastWithSingleConnectionPool(t *testing.T) {
 	db, mock, err := sqlmock.New()
 	require.NoError(t, err)

@@ -32,6 +32,13 @@ const (
 	MaxMaxTotalInputChars     = 400000
 	MaxExcludedUserIDs        = 10000
 	DefaultPayloadTTL         = 30 * time.Minute
+	// Group policy fallback controls what happens when a finding cannot be
+	// routed to a configured account pool.  "block" is the secure default and
+	// preserves the historical fail-closed behavior; administrators may opt in
+	// to "allow" for groups that intentionally have no spare account.
+	DefaultNoRouteFallbackMode = "block"
+	NoRouteFallbackAllow       = "allow"
+	NoRouteFallbackBlock       = "block"
 )
 
 type SecretEncryptor interface {
@@ -72,33 +79,152 @@ type StorageEndpoint struct {
 	Enabled         bool   `json:"enabled"`
 }
 
+// GroupPolicy is the per-audit-group override.  Prompt Audit configuration is
+// persisted as one encrypted settings JSON document, so keeping this as an
+// additive array avoids a second table/transaction while retaining CAS and
+// Redis invalidation semantics.  A missing group entry intentionally falls
+// back to the legacy top-level fields.
+//
+// The fields are concrete on the wire so the admin UI can render a complete
+// editable row.  During JSON decoding we retain a private presence map; this
+// lets older/partial clients omit fields and inherit the top-level value while
+// still allowing an explicit empty list or false value to override it.
+type GroupPolicy struct {
+	GroupID                 int64    `json:"group_id"`
+	Enabled                 bool     `json:"enabled"`
+	BlockingEnabled         bool     `json:"blocking_enabled"`
+	BlockingLatestTurnOnly  bool     `json:"blocking_latest_turn_only"`
+	StorePassEvents         bool     `json:"store_pass_events"`
+	Strategy                string   `json:"strategy"`
+	Scanners                []string `json:"scanners"`
+	MaxTotalInputChars      int      `json:"max_total_input_chars"`
+	ActivePromptTemplateID  string   `json:"active_prompt_template_id"`
+	FlagThreshold           float64  `json:"flag_threshold"`
+	BlockThreshold          float64  `json:"block_threshold"`
+	BlockHTTPStatus         int      `json:"block_http_status"`
+	BlockMessage            string   `json:"block_message"`
+	RiskRouteAccountIDs     []int64  `json:"risk_route_account_ids"`
+	CyberFeedbackAccountIDs []int64  `json:"cyber_feedback_account_ids"`
+	ExcludedUserIDs         []int64  `json:"excluded_user_ids"`
+	NoRouteFallbackMode     string   `json:"no_route_fallback_mode"`
+	present                 map[string]bool
+}
+
+// UnmarshalJSON records which fields were actually sent.  This is important
+// for PUT requests from older admin bundles that only know group_id and one or
+// two new fields: omitted values inherit the top-level policy instead of
+// accidentally disabling a group.
+func (p *GroupPolicy) UnmarshalJSON(data []byte) error {
+	type plain GroupPolicy
+	var decoded plain
+	if err := json.Unmarshal(data, &decoded); err != nil {
+		return err
+	}
+	var fields map[string]json.RawMessage
+	if err := json.Unmarshal(data, &fields); err != nil {
+		return err
+	}
+	*p = GroupPolicy(decoded)
+	p.present = make(map[string]bool, len(fields))
+	for key := range fields {
+		p.present[key] = true
+	}
+	return nil
+}
+
+func (p GroupPolicy) hasField(name string) bool {
+	if p.present != nil {
+		return p.present[name]
+	}
+	// Struct literals in tests/internal callers have no presence map. Treat
+	// non-zero values and non-nil slices as explicitly supplied; zero-valued
+	// booleans/numbers inherit the top-level value for compatibility.
+	switch name {
+	case "enabled":
+		return p.Enabled
+	case "blocking_enabled":
+		return p.BlockingEnabled
+	case "blocking_latest_turn_only":
+		return p.BlockingLatestTurnOnly
+	case "store_pass_events":
+		return p.StorePassEvents
+	case "strategy":
+		return strings.TrimSpace(p.Strategy) != ""
+	case "scanners":
+		return p.Scanners != nil
+	case "max_total_input_chars":
+		return p.MaxTotalInputChars != 0
+	case "active_prompt_template_id":
+		return strings.TrimSpace(p.ActivePromptTemplateID) != ""
+	case "flag_threshold":
+		return p.FlagThreshold != 0
+	case "block_threshold":
+		return p.BlockThreshold != 0
+	case "block_http_status":
+		return p.BlockHTTPStatus != 0
+	case "block_message":
+		return strings.TrimSpace(p.BlockMessage) != ""
+	case "risk_route_account_ids":
+		return p.RiskRouteAccountIDs != nil
+	case "cyber_feedback_account_ids":
+		return p.CyberFeedbackAccountIDs != nil
+	case "excluded_user_ids":
+		return p.ExcludedUserIDs != nil
+	case "no_route_fallback_mode":
+		return strings.TrimSpace(p.NoRouteFallbackMode) != ""
+	default:
+		return false
+	}
+}
+
+func (p GroupPolicy) clone() GroupPolicy {
+	p.Scanners = append([]string(nil), p.Scanners...)
+	p.RiskRouteAccountIDs = append([]int64(nil), p.RiskRouteAccountIDs...)
+	p.CyberFeedbackAccountIDs = append([]int64(nil), p.CyberFeedbackAccountIDs...)
+	p.ExcludedUserIDs = append([]int64(nil), p.ExcludedUserIDs...)
+	if p.present != nil {
+		present := make(map[string]bool, len(p.present))
+		for key, value := range p.present {
+			present[key] = value
+		}
+		p.present = present
+	}
+	return p
+}
+
 type storageConfig struct {
-	Enabled                 bool                  `json:"enabled"`
-	BlockingEnabled         bool                  `json:"blocking_enabled"`
-	BlockingLatestTurnOnly  bool                  `json:"blocking_latest_turn_only"`
-	StorePassEvents         bool                  `json:"store_pass_events"`
-	Strategy                string                `json:"strategy"`
-	WorkerCount             int                   `json:"worker_count"`
-	QueueCapacity           int                   `json:"queue_capacity"`
-	Scanners                []string              `json:"scanners"`
-	AllGroups               bool                  `json:"all_groups"`
-	GroupIDs                []int64               `json:"group_ids"`
-	RiskRouteAccountIDs     []int64               `json:"risk_route_account_ids"`
-	CyberFeedbackAccountIDs []int64               `json:"cyber_feedback_account_ids"`
-	ExcludedUserIDs         []int64               `json:"excluded_user_ids"`
-	MaxTotalInputChars      int                   `json:"max_total_input_chars"`
-	PromptTemplates         []PromptTemplate      `json:"prompt_templates"`
-	ActivePromptTemplateID  string                `json:"active_prompt_template_id"`
-	CyberSupplementRules    []CyberSupplementRule `json:"cyber_supplement_rules"`
-	FlagThreshold           *float64              `json:"flag_threshold"`
-	BlockThreshold          *float64              `json:"block_threshold"`
-	BlockHTTPStatus         int                   `json:"block_http_status"`
-	BlockMessage            string                `json:"block_message"`
-	Endpoints               []StorageEndpoint     `json:"endpoints"`
-	ConfigVersion           int64                 `json:"config_version"`
-	UpdatedAt               time.Time             `json:"updated_at"`
-	UpdatedBy               int64                 `json:"updated_by"`
-	ChangeSummary           string                `json:"change_summary"`
+	Enabled                 bool          `json:"enabled"`
+	BlockingEnabled         bool          `json:"blocking_enabled"`
+	BlockingLatestTurnOnly  bool          `json:"blocking_latest_turn_only"`
+	StorePassEvents         bool          `json:"store_pass_events"`
+	Strategy                string        `json:"strategy"`
+	WorkerCount             int           `json:"worker_count"`
+	QueueCapacity           int           `json:"queue_capacity"`
+	Scanners                []string      `json:"scanners"`
+	AllGroups               bool          `json:"all_groups"`
+	GroupIDs                []int64       `json:"group_ids"`
+	GroupPolicies           []GroupPolicy `json:"group_policies"`
+	RiskRouteAccountIDs     []int64       `json:"risk_route_account_ids"`
+	CyberFeedbackAccountIDs []int64       `json:"cyber_feedback_account_ids"`
+	ExcludedUserIDs         []int64       `json:"excluded_user_ids"`
+	// NoRouteFallbackMode is the legacy/global fallback used by groups that do
+	// not provide an explicit override.  It is persisted explicitly on new
+	// saves; an omitted value from an older document normalizes to the secure
+	// "block" default.
+	NoRouteFallbackMode    string                `json:"no_route_fallback_mode"`
+	MaxTotalInputChars     int                   `json:"max_total_input_chars"`
+	PromptTemplates        []PromptTemplate      `json:"prompt_templates"`
+	ActivePromptTemplateID string                `json:"active_prompt_template_id"`
+	CyberSupplementRules   []CyberSupplementRule `json:"cyber_supplement_rules"`
+	FlagThreshold          *float64              `json:"flag_threshold"`
+	BlockThreshold         *float64              `json:"block_threshold"`
+	BlockHTTPStatus        int                   `json:"block_http_status"`
+	BlockMessage           string                `json:"block_message"`
+	Endpoints              []StorageEndpoint     `json:"endpoints"`
+	ConfigVersion          int64                 `json:"config_version"`
+	UpdatedAt              time.Time             `json:"updated_at"`
+	UpdatedBy              int64                 `json:"updated_by"`
+	ChangeSummary          string                `json:"change_summary"`
 }
 
 type ActiveEndpoint struct {
@@ -138,10 +264,12 @@ type ActiveConfig struct {
 	Scanners                []string
 	AllGroups               bool
 	GroupIDs                []int64
+	GroupPolicies           []GroupPolicy
 	RiskRouteAccountIDs     []int64
 	CyberFeedbackAccountIDs []int64
 	ExcludedUserIDs         []int64
 	MaxTotalInputChars      int
+	NoRouteFallbackMode     string
 	PromptTemplates         []PromptTemplate
 	ActivePromptTemplateID  string
 	CyberSupplementRules    []CyberSupplementRule
@@ -185,9 +313,11 @@ type PublicConfig struct {
 	Scanners                []string              `json:"scanners"`
 	AllGroups               bool                  `json:"all_groups"`
 	GroupIDs                []int64               `json:"group_ids"`
+	GroupPolicies           []GroupPolicy         `json:"group_policies"`
 	RiskRouteAccountIDs     []int64               `json:"risk_route_account_ids"`
 	CyberFeedbackAccountIDs []int64               `json:"cyber_feedback_account_ids"`
 	ExcludedUserIDs         []int64               `json:"excluded_user_ids"`
+	NoRouteFallbackMode     string                `json:"no_route_fallback_mode"`
 	MaxTotalInputChars      int                   `json:"max_total_input_chars"`
 	PromptTemplates         []PromptTemplate      `json:"prompt_templates"`
 	ActivePromptTemplateID  string                `json:"active_prompt_template_id"`
@@ -233,9 +363,11 @@ type UpdateConfigRequest struct {
 	Scanners                []string          `json:"scanners"`
 	AllGroups               bool              `json:"all_groups"`
 	GroupIDs                []int64           `json:"group_ids"`
+	GroupPolicies           *[]GroupPolicy    `json:"group_policies,omitempty"`
 	RiskRouteAccountIDs     *[]int64          `json:"risk_route_account_ids,omitempty"`
 	CyberFeedbackAccountIDs *[]int64          `json:"cyber_feedback_account_ids,omitempty"`
 	ExcludedUserIDs         *[]int64          `json:"excluded_user_ids,omitempty"`
+	NoRouteFallbackMode     string            `json:"no_route_fallback_mode"`
 	MaxTotalInputChars      *int              `json:"max_total_input_chars,omitempty"`
 	PromptTemplates         *[]PromptTemplate `json:"prompt_templates,omitempty"`
 	ActivePromptTemplateID  *string           `json:"active_prompt_template_id,omitempty"`
@@ -247,6 +379,22 @@ type UpdateConfigRequest struct {
 	// cyberSupplementRules is intentionally not part of the ordinary config
 	// API. Rules may only be changed through reviewed CYB feedback actions.
 	cyberSupplementRules *[]CyberSupplementRule `json:"-"`
+}
+
+func storageRequiresBlocking(cfg storageConfig, riskControlEnabled bool) bool {
+	// This helper is also used while observing a raw/possibly partial settings
+	// document after a reload failure.  Normalize first so omitted group fields
+	// inherit the legacy top-level policy before deciding whether fail-closed
+	// protection is required.
+	normalizeStorageConfig(&cfg)
+	return (ActiveConfig{
+		RiskControlEnabled: riskControlEnabled,
+		Enabled:            cfg.Enabled,
+		BlockingEnabled:    cfg.BlockingEnabled,
+		AllGroups:          cfg.AllGroups,
+		GroupIDs:           cfg.GroupIDs,
+		GroupPolicies:      cfg.GroupPolicies,
+	}).RequiresBlockingActivation()
 }
 
 func DefaultStorageConfig() storageConfig {
@@ -263,9 +411,11 @@ func DefaultStorageConfig() storageConfig {
 		Scanners:                append([]string(nil), AllScannerIDs...),
 		AllGroups:               true,
 		GroupIDs:                []int64{},
+		GroupPolicies:           []GroupPolicy{},
 		RiskRouteAccountIDs:     []int64{},
 		CyberFeedbackAccountIDs: []int64{},
 		ExcludedUserIDs:         []int64{},
+		NoRouteFallbackMode:     DefaultNoRouteFallbackMode,
 		MaxTotalInputChars:      DefaultMaxTotalInputChars,
 		PromptTemplates:         []PromptTemplate{DefaultPromptTemplate()},
 		ActivePromptTemplateID:  DefaultPromptTemplateID,
@@ -318,6 +468,7 @@ func normalizeStorageConfig(cfg *storageConfig) {
 	cfg.RiskRouteAccountIDs = canonicalInt64s(cfg.RiskRouteAccountIDs)
 	cfg.CyberFeedbackAccountIDs = canonicalInt64s(cfg.CyberFeedbackAccountIDs)
 	cfg.ExcludedUserIDs = canonicalInt64s(cfg.ExcludedUserIDs)
+	cfg.NoRouteFallbackMode = normalizeNoRouteFallbackMode(cfg.NoRouteFallbackMode)
 	if cfg.MaxTotalInputChars == 0 {
 		cfg.MaxTotalInputChars = DefaultMaxTotalInputChars
 	}
@@ -344,6 +495,7 @@ func normalizeStorageConfig(cfg *storageConfig) {
 	} else {
 		cfg.BlockMessage = strings.TrimSpace(cfg.BlockMessage)
 	}
+	cfg.GroupPolicies = normalizeGroupPolicies(cfg.GroupPolicies, *cfg)
 	// Preserve an invalid blocking-without-audit combination so validation can
 	// reject it instead of silently changing administrator intent.
 	for i := range cfg.Endpoints {
@@ -378,6 +530,168 @@ func normalizeStorageConfig(cfg *storageConfig) {
 	}
 }
 
+func normalizeGroupPolicies(policies []GroupPolicy, global storageConfig) []GroupPolicy {
+	if len(policies) == 0 {
+		return []GroupPolicy{}
+	}
+	result := make([]GroupPolicy, 0, len(policies))
+	for _, source := range policies {
+		policy := source.clone()
+		policy.Strategy = strings.TrimSpace(policy.Strategy)
+		if !policy.hasField("strategy") {
+			policy.Strategy = strings.TrimSpace(global.Strategy)
+		}
+		if !policy.hasField("enabled") {
+			policy.Enabled = global.Enabled
+		}
+		if !policy.hasField("blocking_enabled") {
+			policy.BlockingEnabled = global.BlockingEnabled
+		}
+		if !policy.hasField("blocking_latest_turn_only") {
+			policy.BlockingLatestTurnOnly = global.BlockingLatestTurnOnly
+		}
+		if !policy.hasField("store_pass_events") {
+			policy.StorePassEvents = global.StorePassEvents
+		}
+		if !policy.hasField("scanners") {
+			policy.Scanners = append([]string(nil), global.Scanners...)
+		}
+		policy.Scanners = canonicalScannerIDs(policy.Scanners)
+		if !policy.hasField("max_total_input_chars") || policy.MaxTotalInputChars == 0 {
+			policy.MaxTotalInputChars = global.MaxTotalInputChars
+		}
+		if !policy.hasField("active_prompt_template_id") || strings.TrimSpace(policy.ActivePromptTemplateID) == "" {
+			policy.ActivePromptTemplateID = global.ActivePromptTemplateID
+		}
+		if !policy.hasField("flag_threshold") {
+			policy.FlagThreshold = thresholdValue(global.FlagThreshold, DefaultFlagThreshold)
+		}
+		if !policy.hasField("block_threshold") {
+			policy.BlockThreshold = thresholdValue(global.BlockThreshold, DefaultBlockThreshold)
+		}
+		if !policy.hasField("block_http_status") || policy.BlockHTTPStatus == 0 {
+			policy.BlockHTTPStatus = global.BlockHTTPStatus
+		}
+		if !policy.hasField("block_message") || strings.TrimSpace(policy.BlockMessage) == "" {
+			policy.BlockMessage = global.BlockMessage
+		}
+		if !policy.hasField("risk_route_account_ids") {
+			policy.RiskRouteAccountIDs = append([]int64(nil), global.RiskRouteAccountIDs...)
+		}
+		if !policy.hasField("cyber_feedback_account_ids") {
+			policy.CyberFeedbackAccountIDs = append([]int64(nil), global.CyberFeedbackAccountIDs...)
+		}
+		if !policy.hasField("excluded_user_ids") {
+			policy.ExcludedUserIDs = append([]int64(nil), global.ExcludedUserIDs...)
+		}
+		policy.RiskRouteAccountIDs = canonicalInt64s(policy.RiskRouteAccountIDs)
+		policy.CyberFeedbackAccountIDs = canonicalInt64s(policy.CyberFeedbackAccountIDs)
+		policy.ExcludedUserIDs = canonicalInt64s(policy.ExcludedUserIDs)
+		if !policy.hasField("no_route_fallback_mode") {
+			policy.NoRouteFallbackMode = global.NoRouteFallbackMode
+		}
+		policy.NoRouteFallbackMode = normalizeNoRouteFallbackMode(policy.NoRouteFallbackMode)
+		result = append(result, policy)
+	}
+	sort.SliceStable(result, func(i, j int) bool { return result[i].GroupID < result[j].GroupID })
+	return result
+}
+
+func normalizeNoRouteFallbackMode(value string) string {
+	switch strings.ToLower(strings.TrimSpace(value)) {
+	case "":
+		return DefaultNoRouteFallbackMode
+	case NoRouteFallbackAllow:
+		return NoRouteFallbackAllow
+	case "reject", "deny", NoRouteFallbackBlock:
+		return NoRouteFallbackBlock
+	default:
+		// Keep unknown values visible so validation can reject them instead of
+		// silently changing administrator intent.
+		return strings.ToLower(strings.TrimSpace(value))
+	}
+}
+
+func validateGroupPolicies(policies []GroupPolicy) error {
+	seen := make(map[int64]struct{}, len(policies))
+	for _, policy := range policies {
+		if policy.GroupID < 0 {
+			return infraerrors.BadRequest("prompt_audit_invalid_group_policy_group", "分组策略分组 ID 无效")
+		}
+		if _, exists := seen[policy.GroupID]; exists {
+			return infraerrors.BadRequest("prompt_audit_duplicate_group_policy", "分组策略不能重复")
+		}
+		seen[policy.GroupID] = struct{}{}
+		if policy.BlockingEnabled && !policy.Enabled {
+			return infraerrors.BadRequest("prompt_audit_group_requires_enabled", "分组开启同步阻止前必须先启用该分组审计")
+		}
+		if policy.Strategy != "priority" {
+			return infraerrors.BadRequest("prompt_audit_invalid_group_policy_strategy", "分组审计策略仅支持 priority")
+		}
+		if len(policy.Scanners) == 0 {
+			return infraerrors.BadRequest("prompt_audit_group_scanners_required", "分组策略至少需要启用一个风险分类")
+		}
+		for _, scanner := range policy.Scanners {
+			if _, ok := ScannerCatalog[NormalizeCategory(scanner)]; !ok {
+				return infraerrors.BadRequest("prompt_audit_invalid_group_scanner", "分组策略风险分类无效")
+			}
+		}
+		if policy.MaxTotalInputChars < MinMaxTotalInputChars || policy.MaxTotalInputChars > MaxMaxTotalInputChars {
+			return infraerrors.BadRequest("prompt_audit_invalid_group_max_total_input_chars", "分组审计总字符上限超出允许范围")
+		}
+		if policy.FlagThreshold < 0 || policy.FlagThreshold > 1 {
+			return infraerrors.BadRequest("prompt_audit_invalid_group_flag_threshold", "分组标记阈值必须在 0 到 1 之间")
+		}
+		if policy.BlockThreshold < 0 || policy.BlockThreshold > 1 || policy.FlagThreshold >= policy.BlockThreshold {
+			return infraerrors.BadRequest("prompt_audit_invalid_group_block_threshold", "分组标记阈值必须小于阻断阈值")
+		}
+		if policy.BlockHTTPStatus < 400 || policy.BlockHTTPStatus > 499 {
+			return infraerrors.BadRequest("prompt_audit_invalid_group_block_http_status", "分组阻断状态码必须在 400 到 499 之间")
+		}
+		if strings.TrimSpace(policy.BlockMessage) == "" || len([]rune(policy.BlockMessage)) > MaxBlockMessageRunes {
+			return infraerrors.BadRequest("prompt_audit_invalid_group_block_message", "分组阻断提示文案为空或过长")
+		}
+		mode := normalizeNoRouteFallbackMode(policy.NoRouteFallbackMode)
+		if mode != NoRouteFallbackAllow && mode != NoRouteFallbackBlock {
+			return infraerrors.BadRequest("prompt_audit_invalid_no_route_fallback_mode", "无分流账号处理方式必须为 allow 或 block")
+		}
+		if err := validatePositiveIDs(policy.RiskRouteAccountIDs, "prompt_audit_invalid_group_risk_route_account", "分组高风险分流账号 ID 无效"); err != nil {
+			return err
+		}
+		if err := validatePositiveIDs(policy.CyberFeedbackAccountIDs, "prompt_audit_invalid_group_cyber_feedback_account", "分组 CYB 反馈账号 ID 无效"); err != nil {
+			return err
+		}
+		if err := validatePositiveIDs(policy.ExcludedUserIDs, "prompt_audit_invalid_group_excluded_user", "分组排除用户 ID 无效"); err != nil {
+			return err
+		}
+		if len(policy.ExcludedUserIDs) > MaxExcludedUserIDs {
+			return infraerrors.BadRequest("prompt_audit_too_many_group_excluded_users", "分组排除用户数量超出允许范围")
+		}
+	}
+	return nil
+}
+
+func valueOrInt(value *int, fallback int) int {
+	if value != nil {
+		return *value
+	}
+	return fallback
+}
+
+func valueOrString(value *string, fallback string) string {
+	if value != nil {
+		return *value
+	}
+	return fallback
+}
+
+func valueOrFloat(value *float64, fallback float64) float64 {
+	if value != nil {
+		return *value
+	}
+	return fallback
+}
+
 func validateStorageConfig(cfg storageConfig) error {
 	if cfg.BlockingEnabled && !cfg.Enabled {
 		return infraerrors.BadRequest(ErrorCodeRequiresEnabled, "开启同步阻止前必须先启用提示词审计")
@@ -391,14 +705,20 @@ func validateStorageConfig(cfg storageConfig) error {
 	if cfg.QueueCapacity < 1 || cfg.QueueCapacity > MaxQueueCapacity {
 		return infraerrors.BadRequest("prompt_audit_invalid_queue_capacity", "队列容量超出允许范围")
 	}
-	if !cfg.AllGroups && len(cfg.GroupIDs) == 0 {
+	if !cfg.AllGroups && len(cfg.GroupIDs) == 0 && len(cfg.GroupPolicies) == 0 {
 		return infraerrors.BadRequest("prompt_audit_groups_required", "指定分组模式至少需要选择一个分组")
+	}
+	if err := validateGroupPolicies(cfg.GroupPolicies); err != nil {
+		return err
 	}
 	if err := validatePositiveIDs(cfg.RiskRouteAccountIDs, "prompt_audit_invalid_risk_route_account", "高风险分流账号 ID 无效"); err != nil {
 		return err
 	}
 	if err := validatePositiveIDs(cfg.CyberFeedbackAccountIDs, "prompt_audit_invalid_cyber_feedback_account", "CYB 反馈账号 ID 无效"); err != nil {
 		return err
+	}
+	if mode := normalizeNoRouteFallbackMode(cfg.NoRouteFallbackMode); mode != NoRouteFallbackAllow && mode != NoRouteFallbackBlock {
+		return infraerrors.BadRequest("prompt_audit_invalid_no_route_fallback_mode", "无分流账号处理方式必须为 allow 或 block")
 	}
 	if len(cfg.ExcludedUserIDs) > MaxExcludedUserIDs {
 		return infraerrors.BadRequest("prompt_audit_too_many_excluded_users", "排除用户数量超出允许范围")
@@ -410,6 +730,9 @@ func validateStorageConfig(cfg storageConfig) error {
 		return infraerrors.BadRequest("prompt_audit_scanners_required", "至少需要启用一个风险分类")
 	}
 	if err := validatePromptPolicy(cfg.PromptTemplates, cfg.ActivePromptTemplateID, cfg.FlagThreshold, cfg.BlockThreshold, cfg.BlockHTTPStatus, cfg.BlockMessage); err != nil {
+		return err
+	}
+	if err := validateGroupPolicyTemplates(cfg.GroupPolicies, cfg.PromptTemplates); err != nil {
 		return err
 	}
 	if err := validateCyberSupplementRules(cfg.CyberSupplementRules); err != nil {
@@ -453,9 +776,32 @@ func validateStorageConfig(cfg storageConfig) error {
 	return nil
 }
 
+func validateGroupPolicyTemplates(policies []GroupPolicy, templates []PromptTemplate) error {
+	if len(policies) == 0 {
+		return nil
+	}
+	known := make(map[string]struct{}, len(templates))
+	for _, template := range templates {
+		known[strings.TrimSpace(template.ID)] = struct{}{}
+	}
+	for _, policy := range policies {
+		id := strings.TrimSpace(policy.ActivePromptTemplateID)
+		if id == "" {
+			return infraerrors.BadRequest("prompt_audit_group_template_required", "分组审核提示词模板不能为空")
+		}
+		if _, ok := known[id]; !ok {
+			return infraerrors.BadRequest("prompt_audit_group_template_not_found", "分组审核提示词模板不存在")
+		}
+	}
+	return nil
+}
+
 func validateUpdateConfigRequest(req UpdateConfigRequest) error {
 	if strings.TrimSpace(req.Strategy) != "priority" {
 		return infraerrors.BadRequest("prompt_audit_invalid_strategy", "提示词审计策略仅支持 priority")
+	}
+	if mode := normalizeNoRouteFallbackMode(req.NoRouteFallbackMode); mode != NoRouteFallbackAllow && mode != NoRouteFallbackBlock {
+		return infraerrors.BadRequest("prompt_audit_invalid_no_route_fallback_mode", "无分流账号处理方式必须为 allow 或 block")
 	}
 	if req.WorkerCount < 1 || req.WorkerCount > MaxWorkerCount {
 		return infraerrors.BadRequest("prompt_audit_invalid_worker_count", "Worker 数量超出允许范围")
@@ -472,12 +818,38 @@ func validateUpdateConfigRequest(req UpdateConfigRequest) error {
 		}
 	}
 	if !req.AllGroups {
-		if len(req.GroupIDs) == 0 {
+		if len(req.GroupIDs) == 0 && (req.GroupPolicies == nil || len(*req.GroupPolicies) == 0) {
 			return infraerrors.BadRequest("prompt_audit_groups_required", "指定分组模式至少需要选择一个分组")
 		}
 		for _, groupID := range req.GroupIDs {
 			if groupID <= 0 {
 				return infraerrors.BadRequest("prompt_audit_invalid_group", "提示词审计分组 ID 无效")
+			}
+		}
+	}
+	if req.GroupPolicies != nil {
+		templates := []PromptTemplate{DefaultPromptTemplate()}
+		if req.PromptTemplates != nil {
+			templates = clonePromptTemplates(*req.PromptTemplates)
+		}
+		policies := normalizeGroupPolicies(*req.GroupPolicies, storageConfig{
+			Enabled: req.Enabled, BlockingEnabled: req.BlockingEnabled,
+			BlockingLatestTurnOnly: req.BlockingLatestTurnOnly, StorePassEvents: req.StorePassEvents,
+			Strategy: req.Strategy, Scanners: req.Scanners, MaxTotalInputChars: valueOrInt(req.MaxTotalInputChars, DefaultMaxTotalInputChars),
+			ActivePromptTemplateID: valueOrString(req.ActivePromptTemplateID, DefaultPromptTemplateID),
+			NoRouteFallbackMode:    req.NoRouteFallbackMode,
+			PromptTemplates:        templates,
+			FlagThreshold:          float64Pointer(valueOrFloat(req.FlagThreshold, DefaultFlagThreshold)),
+			BlockThreshold:         float64Pointer(valueOrFloat(req.BlockThreshold, DefaultBlockThreshold)),
+			BlockHTTPStatus:        valueOrInt(req.BlockHTTPStatus, DefaultBlockHTTPStatus), BlockMessage: valueOrString(req.BlockMessage, DefaultBlockMessage),
+			RiskRouteAccountIDs: nil, CyberFeedbackAccountIDs: nil, ExcludedUserIDs: nil,
+		})
+		if err := validateGroupPolicies(policies); err != nil {
+			return err
+		}
+		if req.PromptTemplates != nil {
+			if err := validateGroupPolicyTemplates(policies, templates); err != nil {
+				return err
 			}
 		}
 	}
@@ -560,8 +932,47 @@ func (cfg ActiveConfig) EffectiveMode() Mode {
 	return ModeAsync
 }
 
+// RequiresBlockingActivation reports whether the currently persisted policy
+// has any in-scope synchronous-blocking path.  The legacy top-level blocking
+// flag remains the fallback for configurations without per-group policies;
+// once group policies are present, each policy controls its own mode.  This
+// distinction is used by ConfigManager's fail-closed reload guard, which must
+// still protect a blocking group even when the global default is async.
+func (cfg ActiveConfig) RequiresBlockingActivation() bool {
+	if !cfg.RiskControlEnabled || !cfg.Enabled {
+		return false
+	}
+	if len(cfg.GroupPolicies) == 0 {
+		return cfg.BlockingEnabled
+	}
+	covered := make(map[int64]struct{}, len(cfg.GroupPolicies))
+	for _, policy := range cfg.GroupPolicies {
+		covered[policy.GroupID] = struct{}{}
+		if policy.Enabled && policy.BlockingEnabled {
+			return true
+		}
+	}
+	// Groups without an explicit policy inherit the legacy top-level fields.
+	// Preserve that fallback for all-groups mode and for selected IDs that are
+	// not represented in the policy array.
+	if cfg.BlockingEnabled {
+		if cfg.AllGroups {
+			return true
+		}
+		for _, groupID := range cfg.GroupIDs {
+			if _, ok := covered[groupID]; !ok {
+				return true
+			}
+		}
+	}
+	return false
+}
+
 func (cfg ActiveConfig) IncludesGroup(groupID *int64) bool {
 	if cfg.AllGroups {
+		return true
+	}
+	if _, ok := cfg.GroupPolicyFor(groupID); ok {
 		return true
 	}
 	if groupID == nil {
@@ -569,6 +980,118 @@ func (cfg ActiveConfig) IncludesGroup(groupID *int64) bool {
 	}
 	i := sort.Search(len(cfg.GroupIDs), func(i int) bool { return cfg.GroupIDs[i] >= *groupID })
 	return i < len(cfg.GroupIDs) && cfg.GroupIDs[i] == *groupID
+}
+
+// GroupPolicyFor returns the normalized override for one request group.  The
+// caller receives a copy of the slice element and may safely mutate it.
+func (cfg ActiveConfig) GroupPolicyFor(groupID *int64) (GroupPolicy, bool) {
+	target := int64(0) // nil denotes the explicit ungrouped/default bucket.
+	if groupID != nil {
+		target = *groupID
+		if target < 0 {
+			return GroupPolicy{}, false
+		}
+	}
+	for _, policy := range cfg.GroupPolicies {
+		if policy.GroupID == target {
+			return policy.clone(), true
+		}
+	}
+	return GroupPolicy{}, false
+}
+
+// EffectiveForGroup overlays a group's policy on the legacy top-level config.
+// It is intentionally pure: each request/worker receives an independent
+// snapshot, preventing one group's thresholds or route pool from leaking into
+// another group's decision.
+func (cfg ActiveConfig) EffectiveForGroup(groupID *int64) ActiveConfig {
+	effective := cloneActiveConfig(cfg)
+	policy, ok := cfg.GroupPolicyFor(groupID)
+	if !ok {
+		return effective
+	}
+	// The global audit switch remains the master gate.  Blocking, however, is a
+	// policy dimension: once a group policy exists its mode must be controlled by
+	// that group's setting rather than by the legacy top-level default.  This is
+	// what makes a blocking group and an async group coexist in one audit config.
+	// A disabled global audit switch still wins and can never be re-enabled by a
+	// stale or independently edited group policy.
+	effective.Enabled = cfg.Enabled && policy.Enabled
+	effective.BlockingEnabled = effective.Enabled && policy.BlockingEnabled
+	effective.BlockingLatestTurnOnly = effective.BlockingEnabled && policy.BlockingLatestTurnOnly
+	effective.StorePassEvents = policy.StorePassEvents
+	effective.Strategy = policy.Strategy
+	effective.Scanners = append([]string(nil), policy.Scanners...)
+	effective.MaxTotalInputChars = policy.MaxTotalInputChars
+	effective.ActivePromptTemplateID = policy.ActivePromptTemplateID
+	effective.FlagThreshold = policy.FlagThreshold
+	effective.BlockThreshold = policy.BlockThreshold
+	effective.BlockHTTPStatus = policy.BlockHTTPStatus
+	effective.BlockMessage = policy.BlockMessage
+	effective.RiskRouteAccountIDs = append([]int64(nil), policy.RiskRouteAccountIDs...)
+	effective.CyberFeedbackAccountIDs = append([]int64(nil), policy.CyberFeedbackAccountIDs...)
+	effective.ExcludedUserIDs = append([]int64(nil), policy.ExcludedUserIDs...)
+	effective.NoRouteFallbackMode = normalizeNoRouteFallbackMode(policy.NoRouteFallbackMode)
+	applyGroupPromptTemplate(&effective, policy.ActivePromptTemplateID)
+	return effective
+}
+
+// EffectiveConfigForGroup is a descriptive alias used by callers that want
+// to make the per-group resolution explicit.
+func (cfg ActiveConfig) EffectiveConfigForGroup(groupID *int64) ActiveConfig {
+	return cfg.EffectiveForGroup(groupID)
+}
+
+func (cfg ActiveConfig) IncludesUserForGroup(groupID *int64, userID int64) bool {
+	effective := cfg.EffectiveForGroup(groupID)
+	return effective.IncludesUser(userID)
+}
+
+func (cfg ActiveConfig) IncludesCyberFeedbackSourceForGroup(groupID *int64, accountID int64, platform, accountType string) bool {
+	platform = strings.ToLower(strings.TrimSpace(platform))
+	accountType = strings.ToLower(strings.TrimSpace(accountType))
+	// Historical behavior always captures real OpenAI OAuth CYB responses.
+	// Group policies add/override the administrator-selected non-OAuth pool;
+	// they never disable this independent safety-evidence path.
+	if platform == service.PlatformOpenAI && accountType == service.AccountTypeOAuth {
+		return true
+	}
+	effective := cfg.EffectiveForGroup(groupID)
+	return accountID > 0 && containsCanonicalInt64(effective.CyberFeedbackAccountIDs, accountID)
+}
+
+func (cfg ActiveConfig) AllowsNoRouteFallback() bool {
+	return strings.EqualFold(strings.TrimSpace(cfg.NoRouteFallbackMode), NoRouteFallbackAllow)
+}
+
+func applyGroupPromptTemplate(cfg *ActiveConfig, templateID string) {
+	if cfg == nil {
+		return
+	}
+	template := activePromptTemplate(cfg.PromptTemplates, strings.TrimSpace(templateID))
+	if template.ID == "" {
+		template = activePromptTemplate(cfg.PromptTemplates, cfg.ActivePromptTemplateID)
+	}
+	if template.ID == "" {
+		return
+	}
+	cfg.ActivePromptTemplateID = template.ID
+	for index := range cfg.Endpoints {
+		endpoint := &cfg.Endpoints[index]
+		endpoint.PromptTemplateID = template.ID
+		endpoint.FlagThreshold = cfg.FlagThreshold
+		endpoint.BlockThreshold = cfg.BlockThreshold
+		if endpoint.Adapter == AdapterOpenAIModeration {
+			endpoint.SystemPrompt = ""
+			continue
+		}
+		endpoint.SystemPrompt = template.SystemPrompt
+		if adapterSupportsSystemPrompt(endpoint.Adapter) {
+			if compiled, err := CompileCyberSupplement(template.SystemPrompt, cfg.CyberSupplementRules); err == nil {
+				endpoint.SystemPrompt = compiled
+			}
+		}
+	}
 }
 
 // IncludesCyberFeedbackSource is deliberately independent of IncludesGroup
@@ -626,6 +1149,7 @@ func PublicFromStorage(cfg storageConfig, riskControlEnabled bool, invalidTokenE
 	}
 	scanners := append([]string{}, cfg.Scanners...)
 	groupIDs := append([]int64{}, cfg.GroupIDs...)
+	groupPolicies := cloneGroupPolicies(cfg.GroupPolicies)
 	riskRouteAccountIDs := append([]int64{}, cfg.RiskRouteAccountIDs...)
 	cyberFeedbackAccountIDs := append([]int64{}, cfg.CyberFeedbackAccountIDs...)
 	excludedUserIDs := append([]int64{}, cfg.ExcludedUserIDs...)
@@ -652,8 +1176,9 @@ func PublicFromStorage(cfg storageConfig, riskControlEnabled bool, invalidTokenE
 		Enabled: cfg.Enabled, BlockingEnabled: cfg.BlockingEnabled, BlockingLatestTurnOnly: cfg.BlockingLatestTurnOnly, StorePassEvents: cfg.StorePassEvents,
 		EffectiveMode: active.EffectiveMode(), Strategy: cfg.Strategy, WorkerCount: cfg.WorkerCount,
 		QueueCapacity: cfg.QueueCapacity, Scanners: scanners, AllGroups: cfg.AllGroups,
-		GroupIDs: groupIDs, RiskRouteAccountIDs: riskRouteAccountIDs,
+		GroupIDs: groupIDs, GroupPolicies: groupPolicies, RiskRouteAccountIDs: riskRouteAccountIDs,
 		CyberFeedbackAccountIDs: cyberFeedbackAccountIDs, ExcludedUserIDs: excludedUserIDs, MaxTotalInputChars: cfg.MaxTotalInputChars,
+		NoRouteFallbackMode:    normalizeNoRouteFallbackMode(cfg.NoRouteFallbackMode),
 		PromptTemplates:        clonePromptTemplates(cfg.PromptTemplates),
 		CyberSupplementRules:   cloneCyberSupplementRules(cfg.CyberSupplementRules),
 		ActivePromptTemplateID: cfg.ActivePromptTemplateID, FlagThreshold: thresholdValue(cfg.FlagThreshold, DefaultFlagThreshold),
@@ -664,14 +1189,16 @@ func PublicFromStorage(cfg storageConfig, riskControlEnabled bool, invalidTokenE
 }
 
 func ActiveFromStorage(cfg storageConfig, riskControlEnabled bool, encryptor SecretEncryptor) (ActiveConfig, error) {
+	normalizeStorageConfig(&cfg)
 	template := activePromptTemplate(cfg.PromptTemplates, cfg.ActivePromptTemplateID)
 	active := ActiveConfig{
 		RiskControlEnabled: riskControlEnabled, Enabled: cfg.Enabled, BlockingEnabled: cfg.BlockingEnabled,
 		BlockingLatestTurnOnly: cfg.BlockingLatestTurnOnly,
 		StorePassEvents:        cfg.StorePassEvents, Strategy: cfg.Strategy, WorkerCount: cfg.WorkerCount,
 		QueueCapacity: cfg.QueueCapacity, Scanners: append([]string(nil), cfg.Scanners...), AllGroups: cfg.AllGroups,
-		GroupIDs: append([]int64(nil), cfg.GroupIDs...), RiskRouteAccountIDs: append([]int64(nil), cfg.RiskRouteAccountIDs...),
+		GroupIDs: append([]int64(nil), cfg.GroupIDs...), GroupPolicies: cloneGroupPolicies(cfg.GroupPolicies), RiskRouteAccountIDs: append([]int64(nil), cfg.RiskRouteAccountIDs...),
 		CyberFeedbackAccountIDs: append([]int64(nil), cfg.CyberFeedbackAccountIDs...), ExcludedUserIDs: append([]int64(nil), cfg.ExcludedUserIDs...), MaxTotalInputChars: cfg.MaxTotalInputChars,
+		NoRouteFallbackMode:    normalizeNoRouteFallbackMode(cfg.NoRouteFallbackMode),
 		PromptTemplates:        clonePromptTemplates(cfg.PromptTemplates),
 		CyberSupplementRules:   cloneCyberSupplementRules(cfg.CyberSupplementRules),
 		ActivePromptTemplateID: template.ID, FlagThreshold: thresholdValue(cfg.FlagThreshold, DefaultFlagThreshold),
@@ -735,6 +1262,9 @@ func changeSummary(cfg storageConfig) string {
 		AllGroups                 bool    `json:"all_groups"`
 		GroupCount                int     `json:"group_count"`
 		GroupHash                 string  `json:"group_hash"`
+		GroupPolicyCount          int     `json:"group_policy_count"`
+		GroupPolicyHash           string  `json:"group_policy_hash"`
+		NoRouteFallbackMode       string  `json:"no_route_fallback_mode"`
 		RiskRouteAccountCount     int     `json:"risk_route_account_count"`
 		CyberFeedbackAccountCount int     `json:"cyber_feedback_account_count"`
 		CyberFeedbackAccountHash  string  `json:"cyber_feedback_account_hash"`
@@ -751,17 +1281,21 @@ func changeSummary(cfg storageConfig) string {
 		Enabled: cfg.Enabled, BlockingEnabled: cfg.BlockingEnabled,
 		BlockingLatestTurnOnly: cfg.BlockingLatestTurnOnly, StorePassEvents: cfg.StorePassEvents,
 		EndpointCount: len(cfg.Endpoints), ScannerCount: len(cfg.Scanners), AllGroups: cfg.AllGroups,
-		GroupCount: len(cfg.GroupIDs), RiskRouteAccountCount: len(cfg.RiskRouteAccountIDs),
+		GroupCount: len(cfg.GroupIDs), GroupPolicyCount: len(cfg.GroupPolicies), RiskRouteAccountCount: len(cfg.RiskRouteAccountIDs),
 		CyberFeedbackAccountCount: len(cfg.CyberFeedbackAccountIDs),
 		ExcludedUserCount:         len(cfg.ExcludedUserIDs),
 		MaxTotalInputChars:        cfg.MaxTotalInputChars, TemplateCount: len(cfg.PromptTemplates),
 		CyberSupplementCount: len(cfg.CyberSupplementRules), ActiveTemplateID: cfg.ActivePromptTemplateID,
-		FlagThreshold:  thresholdValue(cfg.FlagThreshold, DefaultFlagThreshold),
-		BlockThreshold: thresholdValue(cfg.BlockThreshold, DefaultBlockThreshold), BlockHTTPStatus: cfg.BlockHTTPStatus,
+		NoRouteFallbackMode: normalizeNoRouteFallbackMode(cfg.NoRouteFallbackMode),
+		FlagThreshold:       thresholdValue(cfg.FlagThreshold, DefaultFlagThreshold),
+		BlockThreshold:      thresholdValue(cfg.BlockThreshold, DefaultBlockThreshold), BlockHTTPStatus: cfg.BlockHTTPStatus,
 	}
 	rawGroups, _ := json.Marshal(cfg.GroupIDs)
 	digest := sha256.Sum256(rawGroups)
 	summary.GroupHash = hex.EncodeToString(digest[:])
+	rawGroupPolicies, _ := json.Marshal(cfg.GroupPolicies)
+	groupPolicyDigest := sha256.Sum256(rawGroupPolicies)
+	summary.GroupPolicyHash = hex.EncodeToString(groupPolicyDigest[:])
 	rawCyberAccounts, _ := json.Marshal(cfg.CyberFeedbackAccountIDs)
 	cyberAccountDigest := sha256.Sum256(rawCyberAccounts)
 	summary.CyberFeedbackAccountHash = hex.EncodeToString(cyberAccountDigest[:])

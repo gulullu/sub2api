@@ -65,8 +65,13 @@
             <input v-model="local.keyword" type="text" class="input mt-1 w-full" :aria-label="t('admin.promptAudit.events.keyword')" @input="criteriaChanged" />
           </label>
           <label class="text-xs text-gray-600 dark:text-dark-200">
-            <span>{{ t('admin.promptAudit.events.groupId') }}</span>
-            <input v-model="local.group_id" type="number" class="input mt-1 w-full" :aria-label="t('admin.promptAudit.events.groupId')" @input="criteriaChanged" />
+            <span>{{ t('admin.promptAudit.events.group') }}</span>
+            <select v-model="local.group_id" class="input mt-1 w-full" :aria-label="t('admin.promptAudit.events.group')" data-test="delete-group" @change="criteriaChanged">
+              <option value="">{{ t('common.all') }}</option>
+              <option value="0">{{ t('admin.promptAudit.groups.unassigned') }} · 0</option>
+              <option v-for="group in groupOptions" :key="group.id" :value="String(group.id)">{{ group.name }} · #{{ group.id }}</option>
+              <option v-if="local.group_id && local.group_id !== '0' && !groupOptions.some((group) => String(group.id) === local.group_id)" :value="local.group_id">#{{ local.group_id }}</option>
+            </select>
           </label>
           <label class="text-xs text-gray-600 dark:text-dark-200">
             <span>{{ t('admin.promptAudit.events.userId') }}</span>
@@ -120,7 +125,7 @@
 import { computed, reactive, ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 import BaseDialog from '@/components/common/BaseDialog.vue'
-import type { PromptDeletePreview, PromptEventFilters } from '../types'
+import type { PromptAuditGroup, PromptDeletePreview, PromptEventFilters } from '../types'
 import {
   DELETE_RANGE_PRESETS,
   cloneData,
@@ -136,6 +141,7 @@ const props = defineProps<{
   preview: PromptDeletePreview | null
   previewing: boolean
   deleting: boolean
+  groups?: PromptAuditGroup[]
 }>()
 const emit = defineEmits<{
   (event: 'close'): void
@@ -147,6 +153,7 @@ const { t, locale } = useI18n()
 
 const preset = ref<DeleteRangePreset>('7d')
 const local = reactive<PromptEventFilters>(emptyEventFilters())
+const groupOptions = computed(() => (props.groups ?? []).slice().sort((left, right) => left.id - right.id))
 
 watch(
   () => props.show,

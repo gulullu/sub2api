@@ -125,6 +125,32 @@ func (s *PromptService) EffectiveMode() Mode {
 	return s.config.EffectiveMode()
 }
 
+// ModeForRequest resolves the global gate and then overlays the policy for the
+// request's audit group. It is intentionally an additive method: legacy
+// PromptEngine fakes only implement EffectiveMode and continue to work.
+func (s *PromptService) ModeForRequest(req Request) Mode {
+	if s == nil || s.config == nil {
+		return ModeOff
+	}
+	if s.config.BlockingActivationDegraded() {
+		return ModeBlocking
+	}
+	cfg, ok := s.config.Active()
+	if !ok {
+		return s.config.EffectiveMode()
+	}
+	// `enabled` is the global operational kill switch.  Resolve it before the
+	// group overlay so a stale/independently enabled group policy cannot bring
+	// auditing back while the administrator has disabled the feature globally.
+	if !cfg.RiskControlEnabled || !cfg.Enabled {
+		return ModeOff
+	}
+	if !cfg.IncludesGroup(req.GroupID) {
+		return ModeOff
+	}
+	return cfg.EffectiveForGroup(req.GroupID).EffectiveMode()
+}
+
 // IncludesCyberFeedbackSource intentionally does not consult EffectiveMode or
 // the Prompt Audit group scope. It is a post-upstream capture policy, not an
 // instruction to audit the request before routing it.
@@ -141,16 +167,35 @@ func (s *PromptService) IncludesCyberFeedbackSource(accountID int64, platform, a
 	return cfg.IncludesCyberFeedbackSource(accountID, platform, accountType)
 }
 
+// IncludesCyberFeedbackSourceForGroup scopes administrator-selected CYB
+// feedback accounts to the request group while retaining the independent
+// OpenAI OAuth evidence path.
+func (s *PromptService) IncludesCyberFeedbackSourceForGroup(groupID *int64, accountID int64, platform, accountType string) bool {
+	if s == nil || s.config == nil {
+		return strings.EqualFold(strings.TrimSpace(platform), service.PlatformOpenAI) &&
+			strings.EqualFold(strings.TrimSpace(accountType), service.AccountTypeOAuth)
+	}
+	cfg, ok := s.config.Active()
+	if !ok {
+		return strings.EqualFold(strings.TrimSpace(platform), service.PlatformOpenAI) &&
+			strings.EqualFold(strings.TrimSpace(accountType), service.AccountTypeOAuth)
+	}
+	return cfg.IncludesCyberFeedbackSourceForGroup(groupID, accountID, platform, accountType)
+}
+
 func (s *PromptService) Enqueue(_ context.Context, req Request) error {
-	if s == nil || s.enqueuer == nil || s.EffectiveMode() != ModeAsync {
+	if s == nil || s.enqueuer == nil || s.ModeForRequest(req) != ModeAsync {
 		return nil
 	}
 	if s.config != nil {
-		if cfg, ok := s.config.Active(); ok && !cfg.IncludesUser(req.UserID) {
-			LogInfo(EventEnqueueSkipped, map[string]any{
-				"request_id": req.RequestID, "user_id": req.UserID, "status": "skipped", "error_code": "user_excluded",
-			})
-			return nil
+		if cfg, ok := s.config.Active(); ok {
+			effective := cfg.EffectiveForGroup(req.GroupID)
+			if !effective.IncludesUser(req.UserID) {
+				LogInfo(EventEnqueueSkipped, map[string]any{
+					"request_id": req.RequestID, "user_id": req.UserID, "status": "skipped", "error_code": "user_excluded",
+				})
+				return nil
+			}
 		}
 	}
 	select {
@@ -190,15 +235,19 @@ func (s *PromptService) Evaluate(ctx context.Context, req Request) (*PromptDecis
 	}
 	cfg, ok := s.config.Active()
 	if !ok {
-		if s.config.EffectiveMode() == ModeBlocking {
+		if s.ModeForRequest(req) == ModeBlocking {
 			return nil, &GuardError{Code: ErrorCodeUnavailable}
 		}
 		return &PromptDecision{Kind: DecisionAllow, AllowNextStage: true}, nil
 	}
-	if !cfg.IncludesUser(req.UserID) || cfg.EffectiveMode() != ModeBlocking || !cfg.IncludesGroup(req.GroupID) {
+	if !cfg.IncludesGroup(req.GroupID) {
 		return &PromptDecision{Kind: DecisionAllow, AllowNextStage: true}, nil
 	}
-	snapshot, err := ExtractBlockingPromptSnapshot(req, cfg.BlockingLatestTurnOnly)
+	effective := cfg.EffectiveForGroup(req.GroupID)
+	if !effective.IncludesUser(req.UserID) || effective.EffectiveMode() != ModeBlocking {
+		return &PromptDecision{Kind: DecisionAllow, AllowNextStage: true}, nil
+	}
+	snapshot, err := ExtractBlockingPromptSnapshot(req, effective.BlockingLatestTurnOnly)
 	if errors.Is(err, ErrNoPromptText) {
 		return &PromptDecision{Kind: DecisionAllow, AllowNextStage: true}, nil
 	}
@@ -206,11 +255,11 @@ func (s *PromptService) Evaluate(ctx context.Context, req Request) (*PromptDecis
 		return nil, &GuardError{Code: ErrorCodeInvalidResponse, Cause: err}
 	}
 	started := s.now()
-	decision, evaluateErr := s.evaluator.Evaluate(ctx, cfg, snapshot)
+	decision, evaluateErr := s.evaluator.Evaluate(ctx, effective, snapshot)
 	if evaluateErr == nil {
 		return decision, nil
 	}
-	if fallback, ok := s.unavailableRiskRouteFallback(ctx, cfg, snapshot, evaluateErr, started); ok {
+	if fallback, ok := s.unavailableRiskRouteFallback(ctx, effective, snapshot, evaluateErr, started); ok {
 		return fallback, nil
 	}
 	if ctxErr := ctx.Err(); ctxErr != nil {
@@ -220,6 +269,11 @@ func (s *PromptService) Evaluate(ctx context.Context, req Request) (*PromptDecis
 }
 
 func (s *PromptService) unavailableRiskRouteFallback(ctx context.Context, cfg ActiveConfig, snapshot PromptSnapshot, evaluateErr error, started time.Time) (*PromptDecision, bool) {
+	// This fallback is for an unavailable audit dependency when a configured
+	// hard pool can isolate the request.  A per-group "no route" choice must not
+	// turn an outage (timeout, invalid response, or no enabled node) into a
+	// fail-open allow; that setting is evaluated only after a real finding has
+	// been produced by finishDecision/finishOversized.
 	if s == nil || ctx.Err() != nil || len(cfg.RiskRouteAccountIDs) == 0 {
 		return nil, false
 	}
@@ -287,7 +341,19 @@ func (s *PromptService) ListUserProfiles(ctx context.Context, filter PromptAudit
 		return pageResult, nil
 	}
 	active, ok := s.config.Active()
-	if !ok || len(active.ExcludedUserIDs) == 0 {
+	if !ok {
+		return pageResult, nil
+	}
+	if filter.GroupID != nil {
+		for _, item := range pageResult.Items {
+			if item == nil {
+				continue
+			}
+			item.Excluded = !active.IncludesUserForGroup(filter.GroupID, item.UserID)
+		}
+		return pageResult, nil
+	}
+	if len(active.ExcludedUserIDs) == 0 {
 		return pageResult, nil
 	}
 	excluded := make(map[int64]struct{}, len(active.ExcludedUserIDs))

@@ -26,12 +26,21 @@ func (e *Enqueuer) Enqueue(ctx context.Context, req Request) error {
 	}
 	cfg, ok := e.config.Active()
 	baseFields := requestLogFields(req)
-	if !ok || cfg.EffectiveMode() != ModeAsync {
+	if !ok {
+		LogInfo(EventEnqueueSkipped, mergeLogFields(baseFields, map[string]any{"status": "skipped", "error_code": "mode_not_async"}))
+		return nil
+	}
+	if !cfg.IncludesGroup(req.GroupID) {
+		LogInfo(EventEnqueueSkipped, mergeLogFields(baseFields, map[string]any{"status": "skipped", "error_code": "group_out_of_scope"}))
+		return nil
+	}
+	effective := cfg.EffectiveForGroup(req.GroupID)
+	if effective.EffectiveMode() != ModeAsync {
 		LogInfo(EventEnqueueSkipped, mergeLogFields(baseFields, map[string]any{"status": "skipped", "error_code": "mode_not_async"}))
 		return nil
 	}
 	baseFields["config_version"] = cfg.ConfigVersion
-	if !cfg.IncludesUser(req.UserID) {
+	if !effective.IncludesUser(req.UserID) {
 		LogInfo(EventEnqueueSkipped, mergeLogFields(baseFields, map[string]any{"status": "skipped", "error_code": "user_excluded"}))
 		return nil
 	}
@@ -39,7 +48,7 @@ func (e *Enqueuer) Enqueue(ctx context.Context, req Request) error {
 		LogInfo(EventEnqueueSkipped, mergeLogFields(baseFields, map[string]any{"status": "skipped", "error_code": "group_out_of_scope"}))
 		return nil
 	}
-	if len(cfg.EnabledEndpoints()) == 0 {
+	if len(effective.EnabledEndpoints()) == 0 {
 		e.recordDropped()
 		LogWarn(EventEnqueueDropped, mergeLogFields(baseFields, map[string]any{"status": "dropped", "error_code": "no_enabled_endpoint"}))
 		return nil
@@ -88,7 +97,7 @@ func (e *Enqueuer) Enqueue(ctx context.Context, req Request) error {
 	}
 	LogInfo(EventJobEnqueued, mergeLogFields(baseFields, map[string]any{
 		"job_id":         job.ID,
-		"queue_capacity": cfg.QueueCapacity, "status": "queued",
+		"queue_capacity": effective.QueueCapacity, "status": "queued",
 	}))
 	if e.metrics != nil {
 		e.metrics.IncEnqueued()

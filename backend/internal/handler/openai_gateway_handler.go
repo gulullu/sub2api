@@ -3684,7 +3684,7 @@ func (h *OpenAIGatewayHandler) recordCyberPolicyIfMarked(c *gin.Context, apiKey 
 		CreatedAt:       time.Now(),
 	}
 	cyberEvidence, hasCyberEvidence := currentCyberTurnEvidence(c)
-	captureCyberFeedback := account != nil && cyberSvc != nil && cyberSvc.IncludesConfirmationSource(account.ID, account.Platform, account.Type)
+	captureCyberFeedback := account != nil && cyberSvc != nil && cyberSvc.IncludesConfirmationSourceForGroup(groupID, account.ID, account.Platform, account.Type)
 	if captureCyberFeedback && !hasCyberEvidence {
 		stage, transport, turnNumber := "http", "http", 0
 		if turn, ok := securityAuditWSTurn(c); ok && turn > 0 {

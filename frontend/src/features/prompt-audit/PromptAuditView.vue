@@ -59,27 +59,17 @@
                 @probe="runProbe"
               />
               <PromptTemplatePanel :draft="draft" @update:draft="replaceDraft" />
-              <DecisionPolicyPanel :draft="draft" @update:draft="replaceDraft" />
-              <RiskRouteAccountSelector
+              <GroupPolicyWorkspace
                 :draft="draft"
-                :accounts="riskRouteAccounts"
-                :loaded="riskRouteAccountsLoaded"
-                :loading="loading.accounts"
-                :error="loadErrors.accounts"
-                @update:draft="replaceDraft"
-                @retry="loadRiskRouteAccounts"
-              />
-              <CyberFeedbackScopePanel
-                :draft="draft"
+                :groups="groups"
                 :accounts="riskRouteAccounts"
                 :accounts-loaded="riskRouteAccountsLoaded"
-                :loading="loading.accounts"
-                :error="loadErrors.accounts"
+                :accounts-loading="loading.accounts"
+                :accounts-error="loadErrors.accounts"
                 @update:draft="replaceDraft"
-                @retry="loadRiskRouteAccounts"
+                @retry-accounts="loadRiskRouteAccounts"
               />
               <div v-if="loadErrors.groups" role="alert" class="mt-5 rounded-lg bg-amber-50 px-4 py-3 text-sm text-amber-800 dark:bg-amber-950/30 dark:text-amber-200">{{ loadErrors.groups }}</div>
-              <PolicyPanel :draft="draft" :groups="groups" @update:draft="replaceDraft" />
             </template>
           </div>
 
@@ -101,6 +91,8 @@
               :page="events.page"
               :page-size="events.page_size"
               :filters="filters"
+              :groups="groups"
+              :endpoints="draft?.endpoints ?? []"
               :selected-ids="selectedEventIds"
               :loading="loading.events"
               :error="loadErrors.events"
@@ -117,7 +109,11 @@
           </div>
 
           <div v-if="activeTab === 'cyber'" data-test="tab-panel-cyber">
-            <CyberLearningWorkspace :initial-event-id="initialCyberFeedbackId" />
+            <CyberLearningWorkspace
+              :initial-event-id="initialCyberFeedbackId"
+              :groups="groups"
+              :accounts="riskRouteAccounts"
+            />
           </div>
         </main>
       </template>
@@ -164,6 +160,7 @@
     <FilterDeleteDialog
       :show="showFilterDelete"
       :initial-filters="filters"
+      :groups="groups"
       :preview="deletePreview"
       :previewing="loading.previewing"
       :deleting="loading.deleting"
@@ -187,10 +184,7 @@ import { extractApiErrorCode, extractApiErrorMessage } from '@/utils/apiError'
 import RuntimeOverview from './components/RuntimeOverview.vue'
 import EndpointPool from './components/EndpointPool.vue'
 import PromptTemplatePanel from './components/PromptTemplatePanel.vue'
-import DecisionPolicyPanel from './components/DecisionPolicyPanel.vue'
-import RiskRouteAccountSelector from './components/RiskRouteAccountSelector.vue'
-import CyberFeedbackScopePanel from './components/CyberFeedbackScopePanel.vue'
-import PolicyPanel from './components/PolicyPanel.vue'
+import GroupPolicyWorkspace from './components/GroupPolicyWorkspace.vue'
 import EventWorkspace from './components/EventWorkspace.vue'
 import EventDetailDialog from './components/EventDetailDialog.vue'
 import FilterDeleteDialog from './components/FilterDeleteDialog.vue'

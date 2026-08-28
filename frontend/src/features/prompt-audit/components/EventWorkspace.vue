@@ -12,6 +12,18 @@
         <button type="button" class="btn btn-danger btn-sm" data-test="filter-delete" @click="$emit('preview-delete')">
           {{ t('admin.promptAudit.events.deleteByFilter') }}
         </button>
+        <div class="relative">
+          <button type="button" class="btn btn-secondary btn-sm" data-test="event-column-settings" :aria-expanded="eventColumnMenuOpen" @click="eventColumnMenuOpen = !eventColumnMenuOpen">
+            {{ t('admin.promptAudit.events.columns') }}
+          </button>
+          <div v-if="eventColumnMenuOpen" class="absolute right-0 z-20 mt-2 w-56 rounded-xl border border-gray-200 bg-white p-2 shadow-lg dark:border-dark-700 dark:bg-dark-800" data-test="event-column-menu">
+            <label v-for="column in eventConfigurableColumns" :key="column.key" class="flex cursor-pointer items-center gap-2 rounded-lg px-2 py-2 text-sm text-gray-700 hover:bg-gray-50 dark:text-dark-200 dark:hover:bg-dark-700">
+              <input type="checkbox" :checked="isEventColumnVisible(column.key)" @change="toggleEventColumn(column.key)" />
+              <span>{{ column.label }}</span>
+            </label>
+            <p class="px-2 pb-1 pt-2 text-[11px] text-gray-400 dark:text-dark-500">{{ t('admin.promptAudit.events.fixedColumns') }}</p>
+          </div>
+        </div>
       </div>
     </div>
 
@@ -35,8 +47,23 @@
           <option value="critical">{{ t('admin.promptAudit.riskLevels.critical') }}</option>
         </select>
       </label>
-      <FilterInput v-model="localFilters.endpoint" :label="t('admin.promptAudit.events.endpoint')" @change="filtersChanged" />
-      <FilterInput v-model="localFilters.group_id" :label="t('admin.promptAudit.events.groupId')" type="number" @change="filtersChanged" />
+      <FilterInput v-model="localFilters.endpoint" :label="t('admin.promptAudit.events.requestEndpoint')" @change="filtersChanged" />
+      <label class="text-xs text-gray-600 dark:text-dark-200">
+        <span>{{ t('admin.promptAudit.events.guardEndpoint') }}</span>
+        <select v-model="localFilters.guard_endpoint_id" class="input mt-1 w-full" :aria-label="t('admin.promptAudit.events.guardEndpoint')" @change="filtersChanged">
+          <option value="">{{ t('common.all') }}</option>
+          <option v-for="endpoint in endpointOptions" :key="endpoint.id" :value="endpoint.id">{{ endpoint.name }} · {{ endpoint.id }}</option>
+          <option v-if="localFilters.guard_endpoint_id && !endpointOptions.some((endpoint) => endpoint.id === localFilters.guard_endpoint_id)" :value="localFilters.guard_endpoint_id">{{ localFilters.guard_endpoint_id }}</option>
+        </select>
+      </label>
+      <label class="text-xs text-gray-600 dark:text-dark-200">
+        <span>{{ t('admin.promptAudit.events.groupId') }}</span>
+        <select v-model="localFilters.group_id" class="input mt-1 w-full" :aria-label="t('admin.promptAudit.events.groupId')" @change="filtersChanged">
+          <option value="">{{ t('common.all') }}</option>
+          <option v-for="group in groupOptions" :key="group.id" :value="String(group.id)">{{ group.name }} · #{{ group.id }}</option>
+          <option v-if="localFilters.group_id && !groupOptions.some((group) => String(group.id) === localFilters.group_id)" :value="localFilters.group_id">#{{ localFilters.group_id }}</option>
+        </select>
+      </label>
       <FilterInput v-model="localFilters.user_id" :label="t('admin.promptAudit.events.userId')" type="number" @change="filtersChanged" />
       <FilterInput v-model="localFilters.api_key_id" :label="t('admin.promptAudit.events.apiKeyId')" type="number" @change="filtersChanged" />
       <FilterInput v-model="localFilters.request_id" :label="t('admin.promptAudit.events.requestId')" @change="filtersChanged" />
@@ -58,13 +85,15 @@
     <div v-if="error" role="alert" class="mx-5 mb-5 rounded-lg bg-red-50 px-4 py-3 text-sm text-red-700 dark:bg-red-950/30 dark:text-red-300">{{ error }}</div>
     <div class="border-t border-gray-200 bg-gray-50/60 p-3 dark:border-dark-700 dark:bg-dark-950/20 md:bg-transparent md:p-0" data-test="event-data-table">
       <DataTable
-        :columns="eventColumns"
+        :columns="visibleEventColumns"
         :data="events"
         :loading="loading"
         row-key="id"
         selectable
         :selected-keys="selectedIds"
         :selection-label="eventSelectionLabel"
+        :sticky-first-column="true"
+        :sticky-actions-column="true"
         @update:selected-keys="updateSelection"
       >
         <template #cell-created_at="{ row }">
@@ -88,6 +117,12 @@
           <div class="min-w-0 max-w-64">
             <p class="truncate font-medium text-gray-900 dark:text-white" :title="row.snapshot.endpoint">{{ row.snapshot.endpoint }}</p>
             <p class="mt-1 truncate text-xs text-gray-500" :title="`${row.snapshot.model} · ${row.snapshot.protocol} · ${row.snapshot.stage || 'http'}`">{{ row.snapshot.model }} · {{ row.snapshot.protocol }} · {{ row.snapshot.stage || 'http' }}</p>
+          </div>
+        </template>
+        <template #cell-guard="{ row }">
+          <div class="min-w-0 max-w-52">
+            <p class="truncate font-medium text-gray-900 dark:text-white" :title="guardEndpointLabel(row)">{{ guardEndpointLabel(row) }}</p>
+            <p class="mt-1 truncate font-mono text-xs text-gray-500 dark:text-dark-400">{{ row.guard_endpoint_id || '—' }}</p>
           </div>
         </template>
         <template #cell-result="{ row }">
@@ -117,17 +152,19 @@
 </template>
 
 <script setup lang="ts">
-import { computed, defineComponent, h, reactive, watch } from 'vue'
+import { computed, defineComponent, h, onMounted, reactive, ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 import DataTable from '@/components/common/DataTable.vue'
 import Pagination from '@/components/common/Pagination.vue'
 import type { Column } from '@/components/common/types'
-import type { PromptAuditEvent, PromptEventFilters } from '../types'
+import type { PromptAuditEndpointDraft, PromptAuditEvent, PromptAuditGroup, PromptEventFilters } from '../types'
 import { cloneData, emptyEventFilters, LOCALIZED_SCANNER_IDS } from '../viewModel'
 
 const props = defineProps<{
   events: PromptAuditEvent[]; total: number; page: number; pageSize: number
   filters: PromptEventFilters; selectedIds: number[]; loading: boolean; error: string
+  groups?: PromptAuditGroup[]
+  endpoints?: PromptAuditEndpointDraft[]
 }>()
 const emit = defineEmits<{
   (event: 'filters-change', value: PromptEventFilters): void
@@ -142,17 +179,43 @@ const emit = defineEmits<{
 }>()
 const { t, locale } = useI18n()
 const localFilters = reactive<PromptEventFilters>(cloneData(props.filters))
+const eventColumnMenuOpen = ref(false)
+const hiddenEventColumns = ref<string[]>([])
 watch(() => props.filters, (value) => Object.assign(localFilters, cloneData(value)), { deep: true })
+const groupOptions = computed<PromptAuditGroup[]>(() => {
+  const options = (props.groups ?? []).slice().sort((left, right) => left.id - right.id)
+  // Group ID 0 is the server-side sentinel for events/users with no assigned
+  // group. Keep it distinct from the empty value (all groups).
+  if (!options.some((group) => group.id === 0)) {
+    options.unshift({ id: 0, name: t('admin.promptAudit.groups.unassigned'), platform: '', status: 'active' })
+  }
+  return options
+})
+const endpointOptions = computed(() => (props.endpoints ?? []).slice().sort((left, right) => left.priority - right.priority || left.id.localeCompare(right.id)))
 const eventColumns = computed<Column[]>(() => [
   { key: 'created_at', label: t('admin.promptAudit.events.time'), class: 'min-w-36' },
   { key: 'email', label: t('admin.promptAudit.events.email'), class: 'w-60 max-w-60' },
   { key: 'api_key', label: t('admin.promptAudit.events.apiKey'), class: 'w-44 max-w-44' },
   { key: 'group', label: t('admin.promptAudit.events.group'), class: 'min-w-32' },
   { key: 'route', label: t('admin.promptAudit.events.route'), class: 'min-w-64' },
+  { key: 'guard', label: t('admin.promptAudit.events.guardNode'), class: 'min-w-52' },
   { key: 'result', label: t('admin.promptAudit.events.result'), class: 'min-w-48' },
   { key: 'preview', label: t('admin.promptAudit.events.preview'), class: 'min-w-72 max-w-xs' },
   { key: 'actions', label: t('admin.promptAudit.common.actions'), class: 'min-w-36 text-right' },
 ])
+const eventConfigurableColumns = computed(() => eventColumns.value.filter((column) => !['created_at', 'actions'].includes(column.key)))
+const visibleEventColumns = computed(() => eventColumns.value.filter((column) => !hiddenEventColumns.value.includes(column.key) || ['created_at', 'actions'].includes(column.key)))
+
+function isEventColumnVisible(key: string): boolean {
+  return !hiddenEventColumns.value.includes(key) || ['created_at', 'actions'].includes(key)
+}
+function toggleEventColumn(key: string) {
+  if (['created_at', 'actions'].includes(key)) return
+  hiddenEventColumns.value = hiddenEventColumns.value.includes(key)
+    ? hiddenEventColumns.value.filter((item) => item !== key)
+    : [...hiddenEventColumns.value, key]
+  try { localStorage.setItem('prompt-audit-event-hidden-columns', JSON.stringify(hiddenEventColumns.value)) } catch { /* storage is optional */ }
+}
 
 const FilterInput = defineComponent({
   props: { modelValue: { type: String, required: true }, label: { type: String, required: true }, type: { type: String, default: 'text' } },
@@ -217,6 +280,12 @@ function formatCategories(categories: string[]): string {
   return categories.map(translateCategory).join(', ')
 }
 
+function guardEndpointLabel(event: PromptAuditEvent): string {
+  if (event.guard_endpoint_name?.trim()) return event.guard_endpoint_name
+  const endpoint = endpointOptions.value.find((item) => item.id === event.guard_endpoint_id)
+  return endpoint?.name || event.guard_endpoint_id || '—'
+}
+
 function maskPotentialAPIKey(value: string): string {
   const normalized = value.trim()
   if (!/^sk-[A-Za-z0-9._-]{12,}$/.test(normalized)) return value
@@ -228,4 +297,14 @@ function displayAPIKeyName(event: PromptAuditEvent): string {
   // legacy/custom record nevertheless looks like a secret, keep it masked.
   return maskPotentialAPIKey(event.snapshot.api_key_name || '') || '—'
 }
+
+onMounted(() => {
+  try {
+    const raw = localStorage.getItem('prompt-audit-event-hidden-columns')
+    const parsed = raw ? JSON.parse(raw) : []
+    if (Array.isArray(parsed)) {
+      hiddenEventColumns.value = parsed.filter((item): item is string => typeof item === 'string' && eventConfigurableColumns.value.some((column) => column.key === item))
+    }
+  } catch { hiddenEventColumns.value = [] }
+})
 </script>

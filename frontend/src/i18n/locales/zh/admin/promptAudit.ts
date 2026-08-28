@@ -61,7 +61,7 @@ export default {
       adapter: '响应适配器',
       adapters: { confidence_json: 'JSON 置信度（DeepSeek / OpenAI 兼容）', qwen3guard: 'Qwen3Guard Safety / Categories', openai_moderation: 'OpenAI Moderation（实验后备）' },
       adapterHints: { confidence_json: '发送当前启用的系统审核提示词，并读取 confidence 与 reason JSON。', qwen3guard: '沿用原有 Qwen3Guard Safety 与 Categories 文本格式。', openai_moderation: '实验后备，新增时默认停用。调用 /v1/moderations；官方 flagged 决定 Unsafe，分数只作证据，并按已启用风险类别决定阻断。不支持系统提示词或 CYB 补充学习规则，审核范围比现有 CYB 策略更宽，能力不等价于现有节点。' },
-      toggleNode: '切换节点 {name}', deleteConfirm: '从草稿中删除节点“{name}”？保存配置后生效。',
+      toggleNode: '切换节点 {name}', duplicate: '复制节点', copyName: '{name} 副本', copy: '复制安全配置', copied: '已复制', columns: '列设置', fixedColumns: '节点和操作列始终显示。', deleteConfirm: '从草稿中删除节点“{name}”？保存配置后生效。',
     },
     templates: {
       title: '审核提示词模板', description: '选择 JSON 置信度节点使用的系统提示词。内置模板只读，可复制后自定义。',
@@ -154,6 +154,19 @@ export default {
         next: '下一页',
       },
     },
+    groups: {
+      title: '审计分组策略',
+      description: '按分组维护判定阈值、高风险硬池、额外 CYB 上游和不审核用户，避免多个审计范围混在一起。',
+      summary: '显示 {count} 个分组',
+      workerCount: 'Worker 数量', queueCapacity: '队列容量', allGroups: '默认纳入全部分组', strategy: '节点策略',
+      search: '搜索分组', searchPlaceholder: '分组名称 / ID / 平台', platform: '平台', allPlatforms: '全部平台', status: '分组状态', allStatuses: '全部状态', active: '启用', inactive: '停用', unassigned: '未分配账号',
+      name: '分组', columns: '列设置', fixedColumns: '名称和操作列始终显示。', missingGroups: '已保存策略引用了不存在的分组：{ids}', defaultBadge: '默认', unknownGroup: '未知分组 #{id}', unknownPlatform: '未知', scope: '审计范围', inScope: '已纳入', outOfScope: '未纳入', toggleScope: '切换 {name} 的审计范围', enabled: '启用', disabled: '停用', blocking: '同步阻断', mode: '模式', threshold: '阈值（标记 / 阻断）', fallback: '无分流兜底', accountCount: '分组账号', riskCount: '高风险硬池', extraCount: '额外上游', updated: '更新时间', editTitle: '编辑分组策略 · {name}', copy: '复制策略', copied: '已复制', empty: '没有匹配当前筛选的分组。',
+      editorTabsLabel: '分组策略区域',
+      tabs: { policy: '判定策略', risk: '高风险分流', cyber: '额外 CYB 上游', profiles: '用户画像' },
+      latestTurnOnly: '仅审核最新输入和之前输出', storePass: '保存安全事件', flagThreshold: '标记阈值', blockThreshold: '阻断阈值', blockStatus: '阻断 HTTP 状态码', maxInput: '单请求最大审计字符数', blockMessage: '阻断提示文案', noRouteFallback: '无可分流账号时', fallbackAllow: '继续放行请求', fallbackBlock: '拒绝请求', template: '审核提示词模板', scanners: '输入风险分类',
+      accountSearch: '账号名称', accountSearchPlaceholder: '名称 / ID / 平台 / 类型', selectedCount: '已选 {count} 个', loadingAccounts: '正在加载账号…', noAccounts: '本分组没有匹配账号。', accountName: '账号', accountType: '类型', accountStatus: '状态', accountGroups: '所属分组', accountFixedColumns: '账号名称和操作列始终显示。', outsideScopeWarning: '已保存但不属于本分组的 ID 仍保留显示，移除即可：{ids}',
+      profileSearch: '用户名称', profileSearchPlaceholder: '用户名 / 邮箱 / 用户 ID', profileDays: '天数', profileRefresh: '刷新画像', profileColumns: '列设置', profileFixedColumns: '用户列始终显示。', selectPage: '选择本页', clearPage: '清空本页', loadingProfiles: '正在加载用户画像…', profileLoadError: '无法加载用户画像。', noProfiles: '本分组没有匹配用户画像。', profileSummary: '{total} 个用户 · 第 {page} / {pages} 页', previous: '上一页', next: '下一页', excludedCount: '已排除 {count} 个用户的本地审核', noEmail: '无邮箱', user: '用户', userEmail: '邮箱', userStatus: '状态', userRisk: '内容风险', userCyber: 'CYB 命中', userSamples: '样本数', userCoverage: '审计覆盖', userRecent: '最近活动', userExcluded: '本地审核', deleted: '已删除', unknownStatus: '未知状态', excluded: '已排除', included: '未排除', saveHint: '修改会保留在草稿中，点击页面底部保存后生效。',
+    },
     saveBar: { enabled: '启用提示词审计', blocking: '同步阻止', blockingLatestTurnOnly: '仅审最新输入和上一轮输出', storePass: '保存安全事件', dirty: '有未保存的更改', synced: '配置已同步' },
     blockingConfirm: {
       title: '开启同步阻止？',
@@ -161,7 +174,7 @@ export default {
       confirm: '理解风险并开启',
     },
     events: {
-      title: '审计事件', description: '按身份、入口、风险、Hash 和时间复核事件，详情中可查看完整提示词。', decision: '判定', risk: '风险等级', endpoint: '入口', groupId: '分组 ID', userId: '用户 ID', apiKeyId: 'API Key ID', keyword: '关键词',
+      title: '审计事件', description: '按身份、入口、风险、Hash 和时间复核事件，详情中可查看完整提示词。', decision: '判定', risk: '风险等级', endpoint: '入口', requestEndpoint: '请求入口', guardEndpoint: '审计节点', guardNode: '审计节点', groupId: '分组 ID', userId: '用户 ID', apiKeyId: 'API Key ID', keyword: '关键词', columns: '列设置', fixedColumns: '时间和操作列始终显示。',
       startAt: '开始时间', endAt: '结束时间', deleteSelected: '删除选中项（{count}）', deleteByFilter: '按筛选删除',
       filterDeleteDialogTitle: '按筛选删除审计事件', filterDeleteDialogDesc: '选择删除的时间范围与风险条件后即可执行删除；删除不可恢复。如需提前查看匹配数量，可先获取删除预览。',
       filterTimeRange: '删除时间范围', filterTimeRangeHint: '将删除所选截止时间之前产生的事件；预览后新产生的事件不受影响。',
@@ -191,7 +204,7 @@ export default {
     cyber: {
       title: 'CYB 反馈与规则学习',
       description: '复核上游已确认的 CYB 信号，查看管理员判断所需的完整证据，并将安全、抽象的模式采纳为审核规则。',
-      refresh: '刷新', statusLabel: 'CYB 复核状态', total: '共 {count} 条', empty: '当前状态下没有事件。', review: '复核', noPreview: '暂无安全预览。',
+      refresh: '刷新', statusLabel: 'CYB 复核状态', total: '共 {count} 条', empty: '当前状态下没有事件。', review: '复核', noPreview: '暂无安全预览。', groupFilter: '分组', accountFilter: '账号', allGroups: '全部分组', allAccounts: '全部账号', resetFilters: '重置筛选', columnSettings: '列设置', fixedColumns: '事件和操作列始终显示。',
       previous: '上一页', next: '下一页', page: '第 {page} / {pages} 页', detailTitle: 'CYB 反馈详情', reviewTitle: '复核 CYB 反馈',
       columns: { event: '事件', request: '请求与触发摘要', route: '分组与账号', confirmations: '确认情况', lastConfirmed: '最近确认' },
       triggerContent: '未脱敏触发内容', triggerContentHint: '仅管理员可查看；这里只保存并按角色显示从请求中提取的对话正文，不保存请求头或外围认证字段，也不会执行 HTML 或脚本。用户主动写入正文的敏感内容可能原样显示，请谨慎处理。', reviewMetadata: '完整复核元数据',

@@ -64,6 +64,7 @@ func AggregateResults(results []*NormalizedResult, latency time.Duration) (*Norm
 		if moreSevere || higherRisk || higherConfidence || !selectedResult {
 			aggregated.Safety = result.Safety
 			aggregated.GuardEndpointID = result.GuardEndpointID
+			aggregated.GuardEndpointName = result.GuardEndpointName
 			aggregated.ScannerBackend = result.ScannerBackend
 			aggregated.ScannerVersion = result.ScannerVersion
 			aggregated.PolicyID = result.PolicyID

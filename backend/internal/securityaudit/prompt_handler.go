@@ -138,13 +138,18 @@ func (h *PromptAdminHandler) ListCyberFeedback(c *gin.Context) {
 		response.ErrorFrom(c, err)
 		return
 	}
-	groupID, err := optionalPositiveInt64Query(c, "group_id")
+	groupID, err := optionalGroupIDQuery(c, "group_id")
+	if err != nil {
+		response.ErrorFrom(c, err)
+		return
+	}
+	accountID, err := optionalPositiveInt64Query(c, "account_id")
 	if err != nil {
 		response.ErrorFrom(c, err)
 		return
 	}
 	result, err := service.ListCyberFeedbackAdmin(c.Request.Context(), CyberFeedbackFilter{
-		GroupID: groupID, ReviewStatus: c.Query("status"), GenerationStatus: c.Query("candidate_status"),
+		GroupID: groupID, AccountID: accountID, ReviewStatus: c.Query("status"), GenerationStatus: c.Query("candidate_status"),
 	}, page, pageSize)
 	if err != nil {
 		response.ErrorFrom(c, err)
@@ -583,7 +588,7 @@ func cyberActionAuditFields(feedbackID int64, result *CyberFeedbackActionResult)
 }
 
 func eventFilterFromQuery(c *gin.Context) (EventFilter, error) {
-	groupID, err := optionalPositiveInt64Query(c, "group_id")
+	groupID, err := optionalGroupIDQuery(c, "group_id")
 	if err != nil {
 		return EventFilter{}, err
 	}
@@ -597,7 +602,9 @@ func eventFilterFromQuery(c *gin.Context) (EventFilter, error) {
 	}
 	filter := EventFilter{
 		Decision: c.Query("decision"), RiskLevel: c.Query("risk_level"), Endpoint: c.Query("endpoint"),
-		GroupID: groupID, UserID: userID, APIKeyID: apiKeyID, RequestID: c.Query("request_id"),
+		GuardEndpointID:   strings.TrimSpace(firstNonEmptyQuery(c, "guard_endpoint_id", "node_id")),
+		GuardEndpointName: strings.TrimSpace(c.Query("guard_endpoint_name")),
+		GroupID:           groupID, UserID: userID, APIKeyID: apiKeyID, RequestID: c.Query("request_id"),
 		PromptHash: c.Query("prompt_hash"), Keyword: c.Query("keyword"),
 	}
 	if value := strings.TrimSpace(c.Query("start_at")); value != "" {
@@ -615,6 +622,15 @@ func eventFilterFromQuery(c *gin.Context) (EventFilter, error) {
 	return filter, nil
 }
 
+func firstNonEmptyQuery(c *gin.Context, keys ...string) string {
+	for _, key := range keys {
+		if value := strings.TrimSpace(c.Query(key)); value != "" {
+			return value
+		}
+	}
+	return ""
+}
+
 func optionalPositiveInt64Query(c *gin.Context, key string) (*int64, error) {
 	value := strings.TrimSpace(c.Query(key))
 	if value == "" {
@@ -622,6 +638,20 @@ func optionalPositiveInt64Query(c *gin.Context, key string) (*int64, error) {
 	}
 	parsed, err := strconv.ParseInt(value, 10, 64)
 	if err != nil || parsed <= 0 {
+		return nil, infraerrors.BadRequest("prompt_audit_invalid_filter_id", "事件筛选 ID 无效")
+	}
+	return &parsed, nil
+}
+
+// optionalGroupIDQuery is tri-state: omitted means all groups, zero means the
+// unassigned/default bucket, and a positive value selects one concrete group.
+func optionalGroupIDQuery(c *gin.Context, key string) (*int64, error) {
+	value := strings.TrimSpace(c.Query(key))
+	if value == "" {
+		return nil, nil
+	}
+	parsed, err := strconv.ParseInt(value, 10, 64)
+	if err != nil || parsed < 0 {
 		return nil, infraerrors.BadRequest("prompt_audit_invalid_filter_id", "事件筛选 ID 无效")
 	}
 	return &parsed, nil
@@ -657,7 +687,7 @@ func userProfileFilterFromQuery(c *gin.Context) (PromptAuditUserProfileFilter, e
 		}
 		minSamples = parsed
 	}
-	groupID, err := optionalPositiveInt64Query(c, "group_id")
+	groupID, err := optionalGroupIDQuery(c, "group_id")
 	if err != nil {
 		return PromptAuditUserProfileFilter{}, err
 	}

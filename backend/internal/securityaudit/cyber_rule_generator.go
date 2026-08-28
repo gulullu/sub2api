@@ -30,6 +30,11 @@ func (s *PromptService) GenerateCyberRuleDraft(ctx context.Context, snapshot Pro
 	if !ok {
 		return "", &GuardError{Code: ErrorCodeUnavailable}
 	}
+	// CYB rule generation is part of the same group-scoped audit lifecycle as
+	// request evaluation. Use the originating feedback snapshot's group so the
+	// selected node pool/template follows that group's policy instead of the
+	// global fallback configuration.
+	cfg = cfg.EffectiveForGroup(snapshot.GroupID)
 	endpoints := cfg.EnabledEndpoints()
 	if len(endpoints) == 0 {
 		return "", &GuardError{Code: ErrorCodeUnavailable}

@@ -108,7 +108,10 @@
           <th
             v-if="selectable"
             scope="col"
-            class="sticky-header-cell w-11 min-w-11 px-3 py-3 text-center"
+            :class="[
+              'sticky-header-cell w-11 min-w-11 px-3 py-3 text-center',
+              stickyFirstColumn && 'sticky-col sticky-col-left-first'
+            ]"
           >
             <input
               type="checkbox"
@@ -172,10 +175,25 @@
       <tbody class="table-body divide-y divide-gray-200 bg-white dark:divide-dark-700 dark:bg-dark-900">
         <!-- Loading skeleton -->
         <tr v-if="loading" v-for="i in 5" :key="i">
-          <td v-if="selectable" class="w-11 min-w-11 px-3 py-4">
+          <td
+            v-if="selectable"
+            :class="[
+              'w-11 min-w-11 px-3 py-4 text-center',
+              stickyFirstColumn && 'sticky-col sticky-col-left-first'
+            ]"
+          >
             <div class="mx-auto h-4 w-4 animate-pulse rounded bg-gray-200 dark:bg-dark-700"></div>
           </td>
-          <td v-for="column in columns" :key="column.key" :class="['whitespace-nowrap py-4', getAdaptivePaddingClass()]">
+          <td
+            v-for="(column, index) in columns"
+            :key="column.key"
+            :class="[
+              'whitespace-nowrap py-4',
+              getAdaptivePaddingClass(),
+              getStickyColumnClass(column, index),
+              column.class
+            ]"
+          >
             <div class="animate-pulse">
               <div class="h-4 w-3/4 rounded bg-gray-200 dark:bg-dark-700"></div>
             </div>
@@ -226,7 +244,13 @@
             ]"
             @click="clickableRows && emit('rowClick', item.row)"
           >
-            <td v-if="selectable" class="w-11 min-w-11 px-3 py-4 text-center">
+            <td
+              v-if="selectable"
+              :class="[
+                'w-11 min-w-11 px-3 py-4 text-center',
+                stickyFirstColumn && 'sticky-col sticky-col-left-first'
+              ]"
+            >
               <input
                 type="checkbox"
                 class="h-4 w-4 rounded border-gray-300 text-primary-600 focus:ring-primary-500 dark:border-dark-600 dark:bg-dark-800"
@@ -869,8 +893,15 @@ const getStickyColumnClass = (column: Column, index: number) => {
   const classes: string[] = []
 
   if (props.stickyFirstColumn) {
-    // 如果第一列是勾选列，固定前两列（勾选+名称）
-    if (hasSelectColumn.value) {
+    // `selectable` injects a checkbox cell before `columns`; keep the first
+    // data column one checkbox-width to the right so the two sticky cells do
+    // not overlap. Older callers may still provide an explicit `select`
+    // column, which keeps the original two-column behavior.
+    if (props.selectable) {
+      if (index === 0) {
+        classes.push('sticky-col sticky-col-left-second')
+      }
+    } else if (hasSelectColumn.value) {
       if (index === 0) {
         classes.push('sticky-col sticky-col-left-first')
       } else if (index === 1) {
@@ -965,7 +996,9 @@ defineExpose({
 <style scoped>
 /* 表格横向滚动 */
 .table-wrapper {
-  --select-col-width: 52px; /* 勾选列宽度：px-6 (24px*2) + checkbox (16px) */
+  /* The injected checkbox cell uses w-11 (44px) + border-box sizing. Keep the
+     second sticky column aligned with the header/body selection cells. */
+  --select-col-width: 44px;
   position: relative;
   overflow-x: auto;
   overflow-y: auto;

@@ -124,7 +124,7 @@ func (m *ConfigManager) Reload(ctx context.Context) error {
 		return err
 	}
 	m.expected.Store(storage.ConfigVersion)
-	m.expectedBlocking.Store(values[SettingKeyRiskControl] == "true" && storage.Enabled && storage.BlockingEnabled)
+	m.expectedBlocking.Store(storageRequiresBlocking(storage, values[SettingKeyRiskControl] == "true"))
 	active, err := ActiveFromStorage(storage, values[SettingKeyRiskControl] == "true", m.encryptor)
 	if err != nil {
 		m.recordLoadError(err)
@@ -215,8 +215,11 @@ func (m *ConfigManager) BlockingActivationDegraded() bool {
 		return true
 	}
 	// A still-active weaker snapshot after a failed blocking activation must not
-	// keep serving allow decisions under the old off/async mode.
-	return active.EffectiveMode() != ModeBlocking
+	// keep serving allow decisions under the old off/async mode.  With group
+	// policies the global mode may legitimately be async while one group is
+	// synchronous, so inspect the complete policy set rather than only the
+	// legacy top-level flag.
+	return !active.RequiresBlockingActivation()
 }
 
 func (m *ConfigManager) EffectiveMode() Mode {
@@ -323,7 +326,7 @@ func (m *ConfigManager) Save(ctx context.Context, req UpdateConfigRequest, actor
 		return PublicConfig{}, err
 	}
 	m.expected.Store(next.ConfigVersion)
-	m.expectedBlocking.Store(active.RiskControlEnabled && next.Enabled && next.BlockingEnabled)
+	m.expectedBlocking.Store(storageRequiresBlocking(next, active.RiskControlEnabled))
 	previous := m.snapshot.Load()
 	m.snapshot.Store(&activeConfigSnapshot{storage: cloneStorageConfig(next), active: cloneActiveConfig(active), loadedAt: m.clock.Now()})
 	// A successful admin save installs a trustworthy snapshot; clear any prior
@@ -463,6 +466,15 @@ func (m *ConfigManager) buildNextStorage(current storageConfig, req UpdateConfig
 	if err := validateUpdateConfigRequest(req); err != nil {
 		return storageConfig{}, err
 	}
+	noRouteFallbackMode := current.NoRouteFallbackMode
+	// Older admin bundles do not send the newly introduced field. Preserve the
+	// persisted value for those partial updates; the current frontend always
+	// sends an explicit allow/block choice. An entirely legacy document is
+	// normalized to the secure default below.
+	if strings.TrimSpace(req.NoRouteFallbackMode) != "" {
+		noRouteFallbackMode = req.NoRouteFallbackMode
+	}
+	noRouteFallbackMode = normalizeNoRouteFallbackMode(noRouteFallbackMode)
 	currentByID := make(map[string]StorageEndpoint, len(current.Endpoints))
 	for _, endpoint := range current.Endpoints {
 		currentByID[endpoint.ID] = endpoint
@@ -472,9 +484,11 @@ func (m *ConfigManager) buildNextStorage(current storageConfig, req UpdateConfig
 		Strategy: strings.TrimSpace(req.Strategy), WorkerCount: req.WorkerCount,
 		QueueCapacity: req.QueueCapacity, Scanners: append([]string(nil), req.Scanners...),
 		AllGroups: req.AllGroups, GroupIDs: append([]int64(nil), req.GroupIDs...),
+		GroupPolicies:           cloneGroupPolicies(current.GroupPolicies),
 		RiskRouteAccountIDs:     append([]int64(nil), current.RiskRouteAccountIDs...),
 		CyberFeedbackAccountIDs: append([]int64(nil), current.CyberFeedbackAccountIDs...),
 		ExcludedUserIDs:         append([]int64(nil), current.ExcludedUserIDs...),
+		NoRouteFallbackMode:     noRouteFallbackMode,
 		MaxTotalInputChars:      current.MaxTotalInputChars,
 		PromptTemplates:         clonePromptTemplates(current.PromptTemplates), ActivePromptTemplateID: current.ActivePromptTemplateID,
 		CyberSupplementRules: cloneCyberSupplementRules(current.CyberSupplementRules),
@@ -486,6 +500,9 @@ func (m *ConfigManager) buildNextStorage(current storageConfig, req UpdateConfig
 	}
 	if req.RiskRouteAccountIDs != nil {
 		next.RiskRouteAccountIDs = append([]int64(nil), (*req.RiskRouteAccountIDs)...)
+	}
+	if req.GroupPolicies != nil {
+		next.GroupPolicies = cloneGroupPolicies(*req.GroupPolicies)
 	}
 	if req.CyberFeedbackAccountIDs != nil {
 		next.CyberFeedbackAccountIDs = append([]int64(nil), (*req.CyberFeedbackAccountIDs)...)
@@ -660,9 +677,10 @@ func updateRequestFromStorage(storage storageConfig) UpdateConfigRequest {
 		BlockingLatestTurnOnly: storage.BlockingLatestTurnOnly, StorePassEvents: storage.StorePassEvents,
 		Strategy: storage.Strategy, WorkerCount: storage.WorkerCount, QueueCapacity: storage.QueueCapacity,
 		Scanners: append([]string(nil), storage.Scanners...), AllGroups: storage.AllGroups,
-		GroupIDs: append([]int64(nil), storage.GroupIDs...), RiskRouteAccountIDs: &riskIDs,
+		GroupIDs: append([]int64(nil), storage.GroupIDs...), GroupPolicies: groupPoliciesPointer(storage.GroupPolicies), RiskRouteAccountIDs: &riskIDs,
 		CyberFeedbackAccountIDs: &cyberAccountIDs, ExcludedUserIDs: &excludedUserIDs,
-		MaxTotalInputChars: &maxChars, PromptTemplates: &templates, ActivePromptTemplateID: &activeTemplateID,
+		NoRouteFallbackMode: storage.NoRouteFallbackMode,
+		MaxTotalInputChars:  &maxChars, PromptTemplates: &templates, ActivePromptTemplateID: &activeTemplateID,
 		FlagThreshold: &flagThreshold, BlockThreshold: &blockThreshold,
 		BlockHTTPStatus: &blockStatus, BlockMessage: &blockMessage,
 		Endpoints: make([]UpdateEndpoint, 0, len(storage.Endpoints)),
@@ -698,9 +716,12 @@ func (m *ConfigManager) observeExpectedState(raw string, riskControlEnabled bool
 		return
 	}
 	var intent struct {
-		Enabled         bool  `json:"enabled"`
-		BlockingEnabled bool  `json:"blocking_enabled"`
-		ConfigVersion   int64 `json:"config_version"`
+		Enabled         bool          `json:"enabled"`
+		BlockingEnabled bool          `json:"blocking_enabled"`
+		AllGroups       bool          `json:"all_groups"`
+		GroupIDs        []int64       `json:"group_ids"`
+		GroupPolicies   []GroupPolicy `json:"group_policies"`
+		ConfigVersion   int64         `json:"config_version"`
 	}
 	if err := json.Unmarshal([]byte(raw), &intent); err != nil {
 		return
@@ -709,7 +730,10 @@ func (m *ConfigManager) observeExpectedState(raw string, riskControlEnabled bool
 		intent.ConfigVersion = 1
 	}
 	m.expected.Store(intent.ConfigVersion)
-	m.expectedBlocking.Store(riskControlEnabled && intent.Enabled && intent.BlockingEnabled)
+	m.expectedBlocking.Store(storageRequiresBlocking(storageConfig{
+		Enabled: intent.Enabled, BlockingEnabled: intent.BlockingEnabled,
+		AllGroups: intent.AllGroups, GroupIDs: intent.GroupIDs, GroupPolicies: intent.GroupPolicies,
+	}, riskControlEnabled))
 }
 
 func (m *ConfigManager) refreshLoop(ctx context.Context) {
@@ -785,6 +809,7 @@ func (m *ConfigManager) clearLoadError() bool {
 func cloneStorageConfig(cfg storageConfig) storageConfig {
 	cfg.Scanners = append([]string(nil), cfg.Scanners...)
 	cfg.GroupIDs = append([]int64(nil), cfg.GroupIDs...)
+	cfg.GroupPolicies = cloneGroupPolicies(cfg.GroupPolicies)
 	cfg.RiskRouteAccountIDs = append([]int64(nil), cfg.RiskRouteAccountIDs...)
 	cfg.CyberFeedbackAccountIDs = append([]int64(nil), cfg.CyberFeedbackAccountIDs...)
 	cfg.ExcludedUserIDs = append([]int64(nil), cfg.ExcludedUserIDs...)
@@ -799,6 +824,7 @@ func cloneStorageConfig(cfg storageConfig) storageConfig {
 func cloneActiveConfig(cfg ActiveConfig) ActiveConfig {
 	cfg.Scanners = append([]string(nil), cfg.Scanners...)
 	cfg.GroupIDs = append([]int64(nil), cfg.GroupIDs...)
+	cfg.GroupPolicies = cloneGroupPolicies(cfg.GroupPolicies)
 	cfg.RiskRouteAccountIDs = append([]int64(nil), cfg.RiskRouteAccountIDs...)
 	cfg.CyberFeedbackAccountIDs = append([]int64(nil), cfg.CyberFeedbackAccountIDs...)
 	cfg.ExcludedUserIDs = append([]int64(nil), cfg.ExcludedUserIDs...)
@@ -806,4 +832,20 @@ func cloneActiveConfig(cfg ActiveConfig) ActiveConfig {
 	cfg.CyberSupplementRules = cloneCyberSupplementRules(cfg.CyberSupplementRules)
 	cfg.Endpoints = append([]ActiveEndpoint(nil), cfg.Endpoints...)
 	return cfg
+}
+
+func cloneGroupPolicies(policies []GroupPolicy) []GroupPolicy {
+	if policies == nil {
+		return nil
+	}
+	result := make([]GroupPolicy, len(policies))
+	for i, policy := range policies {
+		result[i] = policy.clone()
+	}
+	return result
+}
+
+func groupPoliciesPointer(policies []GroupPolicy) *[]GroupPolicy {
+	copy := cloneGroupPolicies(policies)
+	return &copy
 }

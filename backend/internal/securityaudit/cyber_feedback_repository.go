@@ -701,11 +701,19 @@ func scanCyberFeedback(row cyberFeedbackScanner) (CyberFeedback, error) {
 }
 
 func cyberFeedbackWhere(filter CyberFeedbackFilter) (string, []any) {
-	clauses := make([]string, 0, 3)
-	args := make([]any, 0, 3)
-	if filter.GroupID != nil && *filter.GroupID > 0 {
+	clauses := make([]string, 0, 4)
+	args := make([]any, 0, 4)
+	// CYB feedback stores the unassigned/default bucket as group_id=0 (the
+	// column is NOT NULL, unlike prompt_audit_events/jobs). Preserve the
+	// tri-state API: nil means all groups, zero means only unassigned, and a
+	// positive value selects one concrete group.
+	if filter.GroupID != nil && *filter.GroupID >= 0 {
 		args = append(args, *filter.GroupID)
 		clauses = append(clauses, fmt.Sprintf("f.group_id=$%d", len(args)))
+	}
+	if filter.AccountID != nil && *filter.AccountID > 0 {
+		args = append(args, *filter.AccountID)
+		clauses = append(clauses, fmt.Sprintf("f.account_id=$%d", len(args)))
 	}
 	if value := strings.TrimSpace(filter.ReviewStatus); value != "" {
 		args = append(args, value)

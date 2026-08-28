@@ -198,6 +198,9 @@ func (e *endpointFailoverExecutor) scanChunk(callerCtx context.Context, cfg Acti
 			if result.GuardEndpointID == "" {
 				result.GuardEndpointID = endpoint.ID
 			}
+			if result.GuardEndpointName == "" {
+				result.GuardEndpointName = endpoint.Name
+			}
 			state.preferred = circuitKey
 			if e.circuit.succeed(permit) {
 				if e.metrics != nil {

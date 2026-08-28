@@ -19,6 +19,7 @@ import type {
   CyberFeedbackDetail,
   CyberFeedbackEvidence,
   CyberFeedbackEvent,
+  CyberFeedbackListFilter,
   CyberFeedbackPage,
   CyberFeedbackStatus,
   CyberPolicyRule,
@@ -107,7 +108,10 @@ export async function listUserProfiles(
       search: filter.search,
       ...(typeof filter.user_id === 'number' && filter.user_id > 0 ? { user_id: filter.user_id } : {}),
       min_samples: filter.min_samples ?? 0,
-      ...(typeof filter.group_id === 'number' && filter.group_id > 0 ? { group_id: filter.group_id } : {}),
+      // `0` is the explicit unassigned/default bucket; omitted remains all
+      // groups. Keep the distinction so a group-level exclusion editor never
+      // silently falls back to the global profile list.
+      ...(typeof filter.group_id === 'number' && filter.group_id >= 0 ? { group_id: filter.group_id } : {}),
     },
   })
   return data
@@ -133,9 +137,16 @@ export async function listCyberEvents(
   status: CyberFeedbackStatus,
   page: number,
   pageSize: number,
+  filter: CyberFeedbackListFilter = {},
 ): Promise<CyberFeedbackPage> {
   const { data } = await apiClient.get<CyberFeedbackPageWire>(`${basePath}/cyber/events`, {
-    params: { status, page, page_size: pageSize },
+    params: {
+      status,
+      page,
+      page_size: pageSize,
+      ...(typeof filter.group_id === 'number' && filter.group_id >= 0 ? { group_id: filter.group_id } : {}),
+      ...(typeof filter.account_id === 'number' && filter.account_id > 0 ? { account_id: filter.account_id } : {}),
+    },
   })
   return normalizeCyberFeedbackPage(data)
 }

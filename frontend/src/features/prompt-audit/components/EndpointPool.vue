@@ -8,6 +8,18 @@
       <button type="button" class="btn btn-primary btn-sm" data-test="add-endpoint" @click="openCreate">
         {{ t('admin.promptAudit.pool.add') }}
       </button>
+      <div class="relative">
+        <button type="button" class="btn btn-secondary btn-sm" data-test="endpoint-column-settings" :aria-expanded="columnMenuOpen" @click="columnMenuOpen = !columnMenuOpen">
+          {{ t('admin.promptAudit.pool.columns') }}
+        </button>
+        <div v-if="columnMenuOpen" class="absolute right-0 z-20 mt-2 w-56 rounded-xl border border-gray-200 bg-white p-2 shadow-lg dark:border-dark-700 dark:bg-dark-800" data-test="endpoint-column-menu">
+          <label v-for="column in endpointConfigurableColumns" :key="column.key" class="flex cursor-pointer items-center gap-2 rounded-lg px-2 py-2 text-sm text-gray-700 hover:bg-gray-50 dark:text-dark-200 dark:hover:bg-dark-700">
+            <input type="checkbox" :checked="isEndpointColumnVisible(column.key)" @change="toggleEndpointColumn(column.key)" />
+            <span>{{ column.label }}</span>
+          </label>
+          <p class="px-2 pb-1 pt-2 text-[11px] text-gray-400 dark:text-dark-500">{{ t('admin.promptAudit.pool.fixedColumns') }}</p>
+        </div>
+      </div>
     </div>
 
     <div v-if="endpoints.length === 0" class="mt-5 rounded-xl border border-dashed border-gray-300 px-5 py-10 text-center text-sm text-gray-500 dark:border-dark-600 dark:bg-dark-900/20 dark:text-dark-300">
@@ -33,14 +45,14 @@
         {{ t('admin.promptAudit.pool.failoverHint', { recommended: RECOMMENDED_FAILOVER_TIMEOUT_MS }) }}
       </p>
     </div>
-    <div v-if="endpoints.length > 0" class="mt-3 overflow-hidden rounded-xl border border-gray-200 bg-white dark:border-dark-700/60 dark:bg-dark-900/20">
-      <div class="hidden grid-cols-[minmax(118px,.55fr)_minmax(240px,1.35fr)_minmax(180px,1fr)_minmax(180px,.8fr)_minmax(210px,1.1fr)_auto] gap-4 border-b border-l-[3px] border-b-gray-200 border-l-transparent bg-gray-50/80 px-5 py-2.5 text-[11px] font-semibold uppercase tracking-[0.08em] text-gray-500 dark:border-b-dark-700/60 dark:bg-dark-900/70 dark:text-dark-400 xl:grid">
-        <span>{{ t('admin.promptAudit.pool.failoverOrder') }}</span>
-        <span>{{ t('admin.promptAudit.pool.node') }}</span>
-        <span>{{ t('admin.promptAudit.pool.model') }}</span>
-        <span>{{ t('admin.promptAudit.pool.limits') }}</span>
-        <span>{{ t('admin.promptAudit.pool.credential') }}</span>
-        <span class="text-right">{{ t('admin.promptAudit.common.actions') }}</span>
+    <div v-if="endpoints.length > 0" class="mt-3 overflow-x-auto overflow-y-visible rounded-xl border border-gray-200 bg-white dark:border-dark-700/60 dark:bg-dark-900/20">
+      <div class="endpoint-grid hidden gap-4 border-b border-l-[3px] border-b-gray-200 border-l-transparent bg-gray-50/80 px-5 py-2.5 text-[11px] font-semibold uppercase tracking-[0.08em] text-gray-500 dark:border-b-dark-700/60 dark:bg-dark-900/70 dark:text-dark-400 xl:grid" :style="{ gridTemplateColumns: endpointGridColumns }">
+        <span v-if="isEndpointColumnVisible('order')">{{ t('admin.promptAudit.pool.failoverOrder') }}</span>
+        <span v-if="isEndpointColumnVisible('node')" class="endpoint-sticky-left endpoint-sticky-header">{{ t('admin.promptAudit.pool.node') }}</span>
+        <span v-if="isEndpointColumnVisible('model')">{{ t('admin.promptAudit.pool.model') }}</span>
+        <span v-if="isEndpointColumnVisible('limits')">{{ t('admin.promptAudit.pool.limits') }}</span>
+        <span v-if="isEndpointColumnVisible('credential')">{{ t('admin.promptAudit.pool.credential') }}</span>
+        <span class="endpoint-sticky-right endpoint-sticky-header text-right">{{ t('admin.promptAudit.common.actions') }}</span>
       </div>
 
       <div class="divide-y divide-gray-100 dark:divide-dark-800">
@@ -48,9 +60,10 @@
           v-for="endpoint in orderedEndpoints"
           :key="endpoint.id"
           :data-test="`endpoint-${endpoint.id}`"
-          class="group grid gap-4 border-l-[3px] border-l-transparent px-4 py-4 transition-[background-color,border-color] duration-200 hover:border-l-primary-500 hover:bg-gray-50/80 dark:hover:bg-dark-800/55 sm:px-5 xl:grid-cols-[minmax(118px,.55fr)_minmax(240px,1.35fr)_minmax(180px,1fr)_minmax(180px,.8fr)_minmax(210px,1.1fr)_auto] xl:items-center xl:gap-4"
+          class="endpoint-grid group grid gap-4 border-l-[3px] border-l-transparent px-4 py-4 transition-[background-color,border-color] duration-200 hover:border-l-primary-500 hover:bg-gray-50/80 dark:hover:bg-dark-800/55 sm:px-5 xl:items-center xl:gap-4"
+          :style="{ gridTemplateColumns: endpointGridColumns }"
         >
-          <div>
+          <div v-if="isEndpointColumnVisible('order')">
             <p class="mb-1 text-[10px] font-semibold uppercase tracking-wider text-gray-400 xl:hidden">{{ t('admin.promptAudit.pool.failoverOrder') }}</p>
             <div class="flex flex-wrap items-center gap-1.5">
               <span
@@ -70,7 +83,7 @@
             </div>
           </div>
 
-          <div class="flex min-w-0 items-center gap-3">
+          <div v-if="isEndpointColumnVisible('node')" class="endpoint-sticky-left flex min-w-0 items-center gap-3">
             <button
               type="button"
               role="switch"
@@ -95,12 +108,12 @@
             </div>
           </div>
 
-          <div class="min-w-0 xl:block">
+          <div v-if="isEndpointColumnVisible('model')" class="min-w-0 xl:block">
             <p class="mb-1 text-[10px] font-semibold uppercase tracking-wider text-gray-400 xl:hidden">{{ t('admin.promptAudit.pool.model') }}</p>
             <p class="truncate text-sm font-medium text-gray-700 dark:text-dark-200" :title="endpoint.model">{{ endpoint.model }}</p>
           </div>
 
-          <div>
+          <div v-if="isEndpointColumnVisible('limits')">
             <p class="mb-1 text-[10px] font-semibold uppercase tracking-wider text-gray-400 xl:hidden">{{ t('admin.promptAudit.pool.limits') }}</p>
             <div class="flex flex-wrap gap-1.5 text-xs text-gray-600 dark:text-dark-300">
               <span class="rounded-md bg-gray-100 px-2 py-1 tabular-nums dark:bg-dark-800">{{ endpoint.timeout_ms }} ms</span>
@@ -108,7 +121,7 @@
             </div>
           </div>
 
-          <div class="min-w-0">
+          <div v-if="isEndpointColumnVisible('credential')" class="min-w-0">
             <p class="mb-1 text-[10px] font-semibold uppercase tracking-wider text-gray-400 xl:hidden">{{ t('admin.promptAudit.pool.credential') }}</p>
             <div class="flex items-center gap-1.5 text-xs font-medium" :class="credentialInvalid(endpoint) ? 'text-red-600 dark:text-red-300' : hasCredential(endpoint) ? 'text-emerald-700 dark:text-emerald-300' : 'text-gray-500 dark:text-dark-400'">
               <span class="h-1.5 w-1.5 rounded-full" :class="credentialInvalid(endpoint) ? 'bg-red-500' : hasCredential(endpoint) ? 'bg-emerald-500' : 'bg-gray-300 dark:bg-dark-500'" aria-hidden="true" />
@@ -123,10 +136,12 @@
             </p>
           </div>
 
-          <div class="flex flex-wrap items-center justify-end gap-1 border-t border-gray-100 pt-3 dark:border-dark-800 xl:flex-nowrap xl:border-0 xl:pt-0">
+          <div class="endpoint-sticky-right flex flex-wrap items-center justify-end gap-1 border-t border-gray-100 pt-3 dark:border-dark-800 xl:flex-nowrap xl:border-0 xl:pt-0">
             <button type="button" class="btn btn-secondary btn-sm" :disabled="probingIds.includes(endpoint.id)" @click="$emit('probe', endpoint)">
               {{ probingIds.includes(endpoint.id) ? t('admin.promptAudit.pool.probing') : t('admin.promptAudit.pool.probe') }}
             </button>
+            <button type="button" class="btn btn-ghost btn-sm" :data-test="`duplicate-endpoint-${endpoint.id}`" @click="duplicateEndpoint(endpoint)">{{ t('admin.promptAudit.pool.duplicate') }}</button>
+            <button type="button" class="btn btn-ghost btn-sm" :data-test="`copy-endpoint-${endpoint.id}`" @click="copyEndpointConfig(endpoint)">{{ copiedEndpointID === endpoint.id ? t('admin.promptAudit.pool.copied') : t('admin.promptAudit.pool.copy') }}</button>
             <button type="button" class="btn btn-ghost btn-sm" @click="openEdit(endpoint)">{{ t('common.edit') }}</button>
             <button type="button" class="btn btn-ghost btn-sm text-red-600 hover:bg-red-50 dark:text-red-300 dark:hover:bg-red-950/30" @click="removeEndpoint(endpoint)">{{ t('common.delete') }}</button>
           </div>
@@ -218,7 +233,7 @@
 </template>
 
 <script setup lang="ts">
-import { computed, ref } from 'vue'
+import { computed, onMounted, ref } from 'vue'
 import { useI18n } from 'vue-i18n'
 import BaseDialog from '@/components/common/BaseDialog.vue'
 import type { PromptAuditAdapter, PromptAuditEndpointDraft, PromptProbeResult } from '../types'
@@ -245,11 +260,33 @@ const emit = defineEmits<{
 const { t } = useI18n()
 const editing = ref<PromptAuditEndpointDraft | null>(null)
 const editingIndex = ref(-1)
+const columnMenuOpen = ref(false)
+const hiddenEndpointColumns = ref<string[]>([])
+const copiedEndpointID = ref('')
 const orderedEndpoints = computed(() => orderedPromptAuditEndpoints(props.endpoints))
 const enabledEndpoints = computed(() => orderedEndpoints.value.filter((endpoint) => endpoint.enabled))
 const enabledEndpointCount = computed(() => enabledEndpoints.value.length)
 const enabledTimeoutMS = computed(() => enabledFailoverTimeoutMS(props.endpoints))
 const timeoutWarning = computed(() => enabledTimeoutMS.value > RECOMMENDED_FAILOVER_TIMEOUT_MS)
+const endpointColumns = computed(() => [
+  { key: 'order', label: t('admin.promptAudit.pool.failoverOrder') },
+  { key: 'node', label: t('admin.promptAudit.pool.node') },
+  { key: 'model', label: t('admin.promptAudit.pool.model') },
+  { key: 'limits', label: t('admin.promptAudit.pool.limits') },
+  { key: 'credential', label: t('admin.promptAudit.pool.credential') },
+  { key: 'actions', label: t('admin.promptAudit.common.actions') },
+])
+const endpointConfigurableColumns = computed(() => endpointColumns.value.filter((column) => !['node', 'actions'].includes(column.key)))
+const endpointGridColumns = computed(() => endpointColumns.value
+  .filter((column) => !hiddenEndpointColumns.value.includes(column.key) || ['node', 'actions'].includes(column.key))
+  .map((column) => ({
+    order: 'minmax(118px,.55fr)',
+    node: 'minmax(240px,1.35fr)',
+    model: 'minmax(180px,1fr)',
+    limits: 'minmax(180px,.8fr)',
+    credential: 'minmax(210px,1.1fr)',
+    actions: 'max-content',
+  }[column.key] ?? 'minmax(120px,1fr)')).join(' '))
 const failoverPositions = computed(() => new Map(
   enabledEndpoints.value.map((endpoint, index) => [endpoint.id, index + 1]),
 ))
@@ -274,6 +311,62 @@ function openCreate() {
     'confidence_json',
     nextEndpointPriority(props.endpoints),
   )
+}
+
+function isEndpointColumnVisible(key: string): boolean {
+  return !hiddenEndpointColumns.value.includes(key) || ['node', 'actions'].includes(key)
+}
+function toggleEndpointColumn(key: string) {
+  if (['node', 'actions'].includes(key)) return
+  hiddenEndpointColumns.value = hiddenEndpointColumns.value.includes(key)
+    ? hiddenEndpointColumns.value.filter((item) => item !== key)
+    : [...hiddenEndpointColumns.value, key]
+  try { localStorage.setItem('prompt-audit-endpoint-hidden-columns', JSON.stringify(hiddenEndpointColumns.value)) } catch { /* optional */ }
+}
+function duplicateEndpoint(endpoint: PromptAuditEndpointDraft) {
+  const baseID = endpoint.id.trim() || 'guard'
+  const existingIDs = new Set(props.endpoints.map((item) => item.id))
+  const existingNames = new Set(props.endpoints.map((item) => item.name.trim()).filter(Boolean))
+  let suffix = 1
+  let id = `${baseID}-copy`
+  while (existingIDs.has(id)) id = `${baseID}-copy-${suffix++}`
+  const baseName = t('admin.promptAudit.pool.copyName', { name: endpoint.name.trim() || t('admin.promptAudit.pool.node') })
+  let name = baseName
+  let nameSuffix = 1
+  while (existingNames.has(name)) name = `${baseName} ${nameSuffix++}`
+  const duplicate: PromptAuditEndpointDraft = {
+    ...cloneData(endpoint),
+    id,
+    name,
+    enabled: false,
+    token: '',
+    has_token: false,
+    token_status: 'missing',
+    credential_source: '',
+    clear_token: false,
+  }
+  emit('update:endpoints', [...props.endpoints.map((item) => cloneData(item)), duplicate])
+}
+
+function copyEndpointConfig(endpoint: PromptAuditEndpointDraft) {
+  // Deliberately construct an allow-list. `token`, `has_token`, and all
+  // credential state are excluded so copy can never put a secret on the
+  // clipboard, even when this draft was populated by an editor.
+  const safe = {
+    id: endpoint.id,
+    name: endpoint.name,
+    protocol: endpoint.protocol,
+    adapter: endpoint.adapter,
+    base_url: endpoint.base_url,
+    model: endpoint.model,
+    priority: endpoint.priority,
+    timeout_ms: endpoint.timeout_ms,
+    input_limit: endpoint.input_limit,
+    enabled: endpoint.enabled,
+  }
+  copiedEndpointID.value = endpoint.id
+  void navigator.clipboard?.writeText(JSON.stringify(safe, null, 2))
+  window.setTimeout(() => { if (copiedEndpointID.value === endpoint.id) copiedEndpointID.value = '' }, 1600)
 }
 function openEdit(endpoint: PromptAuditEndpointDraft) {
   editingIndex.value = props.endpoints.findIndex((item) => item.id === endpoint.id)
@@ -342,4 +435,52 @@ function toggleContentModerationCredential() {
 function failoverPosition(id: string): number {
   return failoverPositions.value.get(id) ?? 0
 }
+
+onMounted(() => {
+  try {
+    const raw = localStorage.getItem('prompt-audit-endpoint-hidden-columns')
+    const parsed = raw ? JSON.parse(raw) : []
+    if (Array.isArray(parsed)) hiddenEndpointColumns.value = parsed.filter((item): item is string => typeof item === 'string' && endpointConfigurableColumns.value.some((column) => column.key === item))
+  } catch { hiddenEndpointColumns.value = [] }
+})
 </script>
+
+<style scoped>
+.endpoint-sticky-left,
+.endpoint-sticky-right {
+  position: sticky;
+  z-index: 2;
+  background: rgb(255 255 255);
+}
+
+.endpoint-sticky-header {
+  z-index: 3;
+  background: rgb(249 250 251);
+}
+
+.endpoint-sticky-left {
+  left: 0;
+}
+
+.endpoint-sticky-right {
+  right: 0;
+}
+
+.dark .endpoint-sticky-left,
+.dark .endpoint-sticky-right {
+  background: rgb(17 24 39);
+}
+
+.dark .endpoint-sticky-header {
+  background: rgb(17 24 39 / 0.7);
+}
+
+/* Keep the endpoint list in stacked card form below the desktop breakpoint;
+   the inline grid template is only meaningful once the table has room for all
+   columns. */
+@media (max-width: 1279px) {
+  .endpoint-grid {
+    grid-template-columns: minmax(0, 1fr) !important;
+  }
+}
+</style>

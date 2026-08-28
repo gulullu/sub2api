@@ -112,6 +112,7 @@ func promptDecisionCacheKey(cfg ActiveConfig, scanText string) string {
 		ConfigVersion       int64           `json:"config_version"`
 		Scanners            []string        `json:"scanners"`
 		RiskRouteAccountIDs []int64         `json:"risk_route_account_ids"`
+		NoRouteFallbackMode string          `json:"no_route_fallback_mode"`
 		MaxTotalInputChars  int             `json:"max_total_input_chars"`
 		BlockHTTPStatus     int             `json:"block_http_status"`
 		BlockMessage        string          `json:"block_message"`
@@ -120,7 +121,7 @@ func promptDecisionCacheKey(cfg ActiveConfig, scanText string) string {
 	policy := cachePolicy{
 		ConfigVersion: cfg.ConfigVersion, Scanners: cfg.Scanners,
 		RiskRouteAccountIDs: cfg.RiskRouteAccountIDs, MaxTotalInputChars: cfg.MaxTotalInputChars,
-		BlockHTTPStatus: cfg.BlockHTTPStatus, BlockMessage: cfg.BlockMessage,
+		NoRouteFallbackMode: cfg.NoRouteFallbackMode, BlockHTTPStatus: cfg.BlockHTTPStatus, BlockMessage: cfg.BlockMessage,
 	}
 	for _, endpoint := range cfg.EnabledEndpoints() {
 		effectiveSystemPrompt := endpoint.SystemPrompt

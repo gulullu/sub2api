@@ -141,6 +141,15 @@ func (r *Runner) processSafely(ctx context.Context, workerID int, cfg ActiveConf
 }
 
 func (r *Runner) processJob(ctx context.Context, workerID int, cfg ActiveConfig, job *Job) error {
+	if job == nil {
+		return errors.New("prompt audit job unavailable")
+	}
+	// Jobs retain the request group in their redacted snapshot. Resolve the
+	// policy from the active snapshot supplied by worker() so queued work uses
+	// the same group-specific scanners, limits, thresholds, endpoint pools, and
+	// event retention rules as synchronous requests. Keeping this pure also
+	// preserves direct processJob callers/tests that provide an explicit config.
+	cfg = cfg.EffectiveForGroup(job.Snapshot.GroupID)
 	baseFields := jobLogFields(job)
 	LogInfo(EventAuditStarted, mergeLogFields(baseFields, map[string]any{"worker_id": workerID, "attempts": job.Attempts, "status": "processing"}))
 	scanText, err := r.payload.Get(ctx, job.ID)

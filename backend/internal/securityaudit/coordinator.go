@@ -17,6 +17,14 @@ type PromptEngine interface {
 	Evaluate(ctx context.Context, req Request) (*PromptDecision, error)
 }
 
+// PromptModeResolver is optional so existing PromptEngine implementations and
+// test doubles remain source-compatible. Implementations that support
+// per-group policies return the mode for this request's group; the coordinator
+// falls back to the historical global EffectiveMode otherwise.
+type PromptModeResolver interface {
+	ModeForRequest(req Request) Mode
+}
+
 type Coordinator struct {
 	legacy LegacyEngine
 	prompt PromptEngine
@@ -33,6 +41,9 @@ func (c *Coordinator) Check(ctx context.Context, req Request) Decision {
 	mode := ModeOff
 	if c.prompt != nil {
 		mode = c.prompt.EffectiveMode()
+		if resolver, ok := c.prompt.(PromptModeResolver); ok {
+			mode = resolver.ModeForRequest(req)
+		}
 	}
 	switch mode {
 	case ModeAsync:

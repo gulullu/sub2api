@@ -10,6 +10,7 @@ import {
   draftFingerprint,
   enabledFailoverTimeoutMS,
   emptyEventFilters,
+  eventQueryParams,
   eventFilterPayload,
   hasExplicitDeleteRange,
   LOCALIZED_SCANNER_IDS,
@@ -196,5 +197,13 @@ describe('Prompt Audit view model', () => {
       start_at: new Date(filters.start_at).toISOString(),
       end_at: new Date(filters.end_at).toISOString(),
     })
+  })
+
+  it('keeps the explicit unassigned group event filter distinct from all groups', () => {
+    const filters = emptyEventFilters()
+    filters.group_id = '0'
+    expect(eventQueryParams(filters)).toMatchObject({ group_id: 0 })
+    filters.group_id = ''
+    expect(eventQueryParams(filters)).not.toHaveProperty('group_id')
   })
 })

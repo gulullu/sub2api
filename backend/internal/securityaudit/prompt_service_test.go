@@ -285,6 +285,47 @@ func TestPromptServiceUnavailableAuditFallbackRequiresLiveContextAndRiskPool(t *
 	})
 }
 
+func TestPromptServiceNoRouteAllowDoesNotFailOpenAuditOutage(t *testing.T) {
+	groupID := int64(7)
+	cfg := ActiveConfig{
+		RiskControlEnabled: true, Enabled: true, BlockingEnabled: true, AllGroups: false,
+		GroupPolicies: []GroupPolicy{{GroupID: groupID, Enabled: true, BlockingEnabled: true,
+			Strategy: "priority", Scanners: AllScannerIDs, NoRouteFallbackMode: NoRouteFallbackAllow}},
+		Endpoints: []ActiveEndpoint{{ID: "guard-1", Enabled: true, TimeoutMS: 1000, InputLimit: 4096}},
+	}
+	evaluator := newGuardEvaluator(PromptScannerFunc(func(context.Context, ActiveEndpoint, string, []string) (*NormalizedResult, error) {
+		return nil, &GuardError{Code: ErrorCodeUnavailable, Retryable: true}
+	}), nil, NewAtomicMetrics(), 2, 2)
+	service := &PromptService{config: &fakeConfigStore{active: true, cfg: cfg}, evaluator: evaluator}
+
+	decision, err := service.Evaluate(context.Background(), Request{GroupID: &groupID, Protocol: "openai_chat_completions", Body: []byte(`{"messages":[{"role":"user","content":"review me"}]}`)})
+
+	require.Nil(t, decision)
+	var guardErr *GuardError
+	require.ErrorAs(t, err, &guardErr)
+	require.Equal(t, ErrorCodeUnavailable, guardErr.Code)
+}
+
+func TestPromptServiceGroupPolicyCannotBypassGlobalMasterSwitch(t *testing.T) {
+	groupID := int64(7)
+	cfg := ActiveConfig{
+		RiskControlEnabled: true, Enabled: false, BlockingEnabled: true, AllGroups: false,
+		GroupPolicies: []GroupPolicy{{GroupID: groupID, Enabled: true, BlockingEnabled: true,
+			Strategy: "priority", Scanners: AllScannerIDs}},
+	}
+	service := &PromptService{
+		config:    &fakeConfigStore{active: true, cfg: cfg},
+		evaluator: newGuardEvaluator(nil, nil, NewAtomicMetrics(), 1, 1),
+	}
+	req := Request{GroupID: &groupID, Protocol: "openai_chat_completions", Body: []byte(`{"messages":[{"role":"user","content":"hi"}]}`)}
+
+	require.Equal(t, ModeOff, service.ModeForRequest(req))
+	decision, err := service.Evaluate(context.Background(), req)
+
+	require.NoError(t, err)
+	require.Equal(t, DecisionAllow, decision.Kind)
+}
+
 func TestPromptServiceUnavailableRiskRouteCoversNoEndpointAndGlobalBulkhead(t *testing.T) {
 	request := Request{Protocol: "openai_chat_completions", Body: []byte(`{"messages":[{"role":"user","content":"review me"}]}`)}
 	baseConfig := ActiveConfig{

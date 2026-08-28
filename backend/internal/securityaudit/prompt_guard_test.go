@@ -649,6 +649,29 @@ func TestGuardEvaluatorFlagRoutesWhenConfidenceMarkerSurvivesMixedAdapterAggrega
 	require.Equal(t, []int64{31, 32}, decision.RouteAccountIDs)
 }
 
+func TestGuardEvaluatorNoRouteBlockKeepsEventDecisionConsistent(t *testing.T) {
+	evaluator := newGuardEvaluator(PromptScannerFunc(func(context.Context, ActiveEndpoint, string, []string) (*NormalizedResult, error) {
+		return &NormalizedResult{
+			Decision: EventFlag, RiskLevel: RiskHigh, Action: ActionWarn,
+			MatchedScanners: []string{confidenceScoreKey},
+			ScannerScores:   map[string]float64{confidenceScoreKey: .8},
+			ScannerEvidence: map[string]string{confidenceScoreKey: "high risk"},
+		}, nil
+	}), nil, NewAtomicMetrics(), 2, 2)
+	cfg := guardConfig(ActiveEndpoint{ID: "guard", Enabled: true, TimeoutMS: 1000, InputLimit: 100})
+	cfg.NoRouteFallbackMode = NoRouteFallbackBlock
+
+	decision, err := evaluator.Evaluate(context.Background(), cfg, PromptSnapshot{ScanText: "review", PromptLength: 6})
+
+	require.NoError(t, err)
+	require.Equal(t, DecisionBlock, decision.Kind)
+	require.Equal(t, ErrorCodeNoRiskRoute, decision.ErrorCode)
+	require.False(t, decision.AllowNextStage)
+	require.NotNil(t, decision.Result)
+	require.Equal(t, EventCritical, decision.Result.Decision)
+	require.Equal(t, ActionBlock, decision.Result.Action)
+}
+
 func TestGuardEvaluatorRecordsExistingResultOnceAndRecordFailureDoesNotChangeDecision(t *testing.T) {
 	for _, recordErr := range []error{nil, errors.New("database unavailable")} {
 		repo := &fakeJobRepository{recordBlockingErr: recordErr}

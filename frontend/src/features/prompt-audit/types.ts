@@ -3,6 +3,7 @@ export type PromptDecision = 'pass' | 'flag' | 'critical'
 export type PromptRiskLevel = 'low' | 'medium' | 'high' | 'critical'
 export type PromptAuditAdapter = 'qwen3guard' | 'confidence_json' | 'openai_moderation'
 export type PromptAuditCredentialSource = '' | 'content_moderation'
+export type PromptAuditNoRouteFallbackMode = 'allow' | 'block'
 
 export interface PromptAuditTemplate {
   id: string
@@ -21,6 +22,32 @@ export interface PromptAuditAccount {
     id: number
     name: string
   }>
+}
+
+/**
+ * A policy boundary for one audit group. `group_id: null` is the explicit
+ * unassigned/default bucket. The API keeps the legacy global fields as a
+ * fallback, so this remains optional on the enclosing config for old servers.
+ */
+export interface PromptAuditGroupPolicy {
+  group_id: number | null
+  enabled: boolean
+  blocking_enabled: boolean
+  blocking_latest_turn_only: boolean
+  store_pass_events: boolean
+  strategy: string
+  scanners: string[]
+  max_total_input_chars: number
+  active_prompt_template_id: string
+  flag_threshold: number
+  block_threshold: number
+  block_http_status: number
+  block_message: string
+  risk_route_account_ids: number[]
+  cyber_feedback_account_ids: number[]
+  excluded_user_ids: number[]
+  no_route_fallback_mode: PromptAuditNoRouteFallbackMode
+  updated_at?: string
 }
 
 export interface PromptAuditEndpoint {
@@ -65,6 +92,10 @@ export interface PromptAuditConfig {
   risk_route_account_ids?: number[]
   cyber_feedback_account_ids?: number[]
   excluded_user_ids?: number[]
+  /** Per-group overrides; omitted by pre-group-policy servers. */
+  group_policies?: PromptAuditGroupPolicy[]
+  /** Optional legacy/default fallback mode exposed by newer servers. */
+  no_route_fallback_mode?: PromptAuditNoRouteFallbackMode
   prompt_templates?: PromptAuditTemplate[]
   active_prompt_template_id?: string
   flag_threshold?: number
@@ -92,6 +123,7 @@ export interface PromptAuditDraft extends Omit<
   | 'risk_route_account_ids'
   | 'cyber_feedback_account_ids'
   | 'excluded_user_ids'
+  | 'group_policies'
 > {
   endpoints: PromptAuditEndpointDraft[]
   prompt_templates: PromptAuditTemplate[]
@@ -104,6 +136,9 @@ export interface PromptAuditDraft extends Omit<
   risk_route_account_ids: number[]
   cyber_feedback_account_ids: number[]
   excluded_user_ids: number[]
+  group_policies?: PromptAuditGroupPolicy[]
+  /** Legacy/default behavior when no eligible audit route remains. */
+  no_route_fallback_mode?: PromptAuditNoRouteFallbackMode
 }
 
 export interface PromptAuditUpdateRequest {
@@ -121,6 +156,9 @@ export interface PromptAuditUpdateRequest {
   risk_route_account_ids: number[]
   cyber_feedback_account_ids: number[]
   excluded_user_ids: number[]
+  /** Default behavior for groups without an eligible route. */
+  no_route_fallback_mode: PromptAuditNoRouteFallbackMode
+  group_policies?: PromptAuditGroupPolicy[]
   prompt_templates: PromptAuditTemplate[]
   active_prompt_template_id: string
   flag_threshold: number
@@ -310,6 +348,7 @@ export interface PromptAuditEvent {
   scanner_backend: string
   scanner_version: string
   guard_endpoint_id: string
+  guard_endpoint_name?: string
   policy_id: string
   policy_version: number
   config_version: number
@@ -323,6 +362,8 @@ export interface PromptEventFilters {
   decision: string
   risk_level: string
   endpoint: string
+  /** Guard/audit node ID; kept separate from the requested upstream endpoint. */
+  guard_endpoint_id?: string
   group_id: string
   user_id: string
   api_key_id: string
@@ -364,6 +405,13 @@ export interface PromptAuditGroup {
 
 export type CyberFeedbackStatus = 'pending' | 'approved' | 'rejected'
 export type CyberPolicyRuleStatus = 'active' | 'disabled' | 'deleted' | 'revoked' | string
+
+/** Optional server-side filters for the CYB feedback list. */
+export interface CyberFeedbackListFilter {
+  /** Group ID 0 is the explicit unassigned/default bucket. */
+  group_id?: number
+  account_id?: number
+}
 
 // List responses deliberately expose only compact metadata. Administrator-only
 // detail and evidence are loaded from separate endpoints when the review dialog

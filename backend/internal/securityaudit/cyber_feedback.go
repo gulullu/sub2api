@@ -245,6 +245,7 @@ type CyberActiveSignature struct {
 
 type CyberFeedbackFilter struct {
 	GroupID          *int64
+	AccountID        *int64
 	ReviewStatus     string
 	GenerationStatus string
 }
@@ -272,6 +273,13 @@ type CyberRuleDraftGenerator interface {
 
 type CyberFeedbackScopeProvider interface {
 	IncludesCyberFeedbackSource(accountID int64, platform, accountType string) bool
+}
+
+// CyberFeedbackGroupScopeProvider is an optional extension implemented by the
+// prompt-audit service. Keeping it separate preserves compatibility with
+// existing providers and test doubles that only know the legacy global scope.
+type CyberFeedbackGroupScopeProvider interface {
+	IncludesCyberFeedbackSourceForGroup(groupID *int64, accountID int64, platform, accountType string) bool
 }
 
 type CyberFeedbackService struct {
@@ -415,6 +423,16 @@ func (s *CyberFeedbackService) IncludesConfirmationSource(accountID int64, platf
 	}
 	return strings.EqualFold(strings.TrimSpace(platform), service.PlatformOpenAI) &&
 		strings.EqualFold(strings.TrimSpace(accountType), service.AccountTypeOAuth)
+}
+
+func (s *CyberFeedbackService) IncludesConfirmationSourceForGroup(groupID *int64, accountID int64, platform, accountType string) bool {
+	if s == nil || accountID <= 0 {
+		return false
+	}
+	if scoped, ok := s.scope.(CyberFeedbackGroupScopeProvider); ok {
+		return scoped.IncludesCyberFeedbackSourceForGroup(groupID, accountID, platform, accountType)
+	}
+	return s.IncludesConfirmationSource(accountID, platform, accountType)
 }
 
 func (s *CyberFeedbackService) ConfirmUpstreamCYB(

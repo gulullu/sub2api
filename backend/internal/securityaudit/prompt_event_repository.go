@@ -15,17 +15,19 @@ import (
 )
 
 type EventFilter struct {
-	Decision   string     `json:"decision,omitempty"`
-	RiskLevel  string     `json:"risk_level,omitempty"`
-	Endpoint   string     `json:"endpoint,omitempty"`
-	GroupID    *int64     `json:"group_id,omitempty"`
-	UserID     *int64     `json:"user_id,omitempty"`
-	APIKeyID   *int64     `json:"api_key_id,omitempty"`
-	RequestID  string     `json:"request_id,omitempty"`
-	PromptHash string     `json:"prompt_hash,omitempty"`
-	Keyword    string     `json:"keyword,omitempty"`
-	StartAt    *time.Time `json:"start_at,omitempty"`
-	EndAt      *time.Time `json:"end_at,omitempty"`
+	Decision          string     `json:"decision,omitempty"`
+	RiskLevel         string     `json:"risk_level,omitempty"`
+	Endpoint          string     `json:"endpoint,omitempty"`
+	GuardEndpointID   string     `json:"guard_endpoint_id,omitempty"`
+	GuardEndpointName string     `json:"guard_endpoint_name,omitempty"`
+	GroupID           *int64     `json:"group_id,omitempty"`
+	UserID            *int64     `json:"user_id,omitempty"`
+	APIKeyID          *int64     `json:"api_key_id,omitempty"`
+	RequestID         string     `json:"request_id,omitempty"`
+	PromptHash        string     `json:"prompt_hash,omitempty"`
+	Keyword           string     `json:"keyword,omitempty"`
+	StartAt           *time.Time `json:"start_at,omitempty"`
+	EndAt             *time.Time `json:"end_at,omitempty"`
 }
 
 type EventPage struct {
@@ -250,6 +252,8 @@ func canonicalEventFilter(filter EventFilter) EventFilter {
 	filter.Decision = strings.TrimSpace(strings.ToLower(filter.Decision))
 	filter.RiskLevel = strings.TrimSpace(strings.ToLower(filter.RiskLevel))
 	filter.Endpoint = strings.TrimSpace(filter.Endpoint)
+	filter.GuardEndpointID = strings.TrimSpace(filter.GuardEndpointID)
+	filter.GuardEndpointName = strings.TrimSpace(filter.GuardEndpointName)
 	filter.RequestID = strings.TrimSpace(filter.RequestID)
 	filter.PromptHash = strings.ToLower(strings.TrimSpace(filter.PromptHash))
 	filter.Keyword = strings.TrimSpace(filter.Keyword)
@@ -281,8 +285,18 @@ func buildEventWhere(filter EventFilter, firstIndex int) (string, []any) {
 	if filter.Endpoint != "" {
 		add(" AND e.endpoint=$%d", filter.Endpoint)
 	}
+	if filter.GuardEndpointID != "" {
+		add(" AND e.guard_endpoint_id=$%d", filter.GuardEndpointID)
+	}
+	if filter.GuardEndpointName != "" {
+		add(" AND e.guard_endpoint_name ILIKE $%d", "%"+TrimRunes(filter.GuardEndpointName, 128)+"%")
+	}
 	if filter.GroupID != nil {
-		add(" AND e.group_id=$%d", *filter.GroupID)
+		if *filter.GroupID == 0 {
+			clauses = append(clauses, " AND e.group_id IS NULL")
+		} else {
+			add(" AND e.group_id=$%d", *filter.GroupID)
+		}
 	}
 	if filter.UserID != nil {
 		add(" AND e.user_id=$%d", *filter.UserID)
@@ -318,7 +332,7 @@ func eventColumns(alias, scannerEvidenceExpression string) string {
 		%[1]s.provider,%[1]s.endpoint,%[1]s.protocol,%[1]s.model,%[1]s.prompt_hash,%[1]s.redacted_preview,
 		%[1]s.stage,%[1]s.decision,%[1]s.risk_level,%[1]s.action,%[1]s.categories,%[1]s.matched_scanners,
 		%[1]s.scanner_scores,%[2]s,%[1]s.scanner_backend,%[1]s.scanner_version,
-		%[1]s.guard_endpoint_id,%[1]s.policy_id,%[1]s.policy_version,%[1]s.config_version,
+		%[1]s.guard_endpoint_id,%[1]s.guard_endpoint_name,%[1]s.policy_id,%[1]s.policy_version,%[1]s.config_version,
 		%[1]s.chunk_total,%[1]s.latency_ms,%[1]s.created_at`, alias, scannerEvidenceExpression)
 }
 
@@ -349,7 +363,7 @@ func scanEvent(row rowScanner, withFullPrompt ...bool) (*Event, error) {
 		&event.Snapshot.Provider, &event.Snapshot.Endpoint, &event.Snapshot.Protocol, &event.Snapshot.Model,
 		&event.Snapshot.PromptHash, &event.Snapshot.RedactedPreview, &event.Snapshot.Stage, &event.Decision,
 		&event.RiskLevel, &event.Action, &categories, &matched, &scores, &evidence, &event.ScannerBackend,
-		&event.ScannerVersion, &event.GuardEndpointID, &event.PolicyID, &event.PolicyVersion,
+		&event.ScannerVersion, &event.GuardEndpointID, &event.GuardEndpointName, &event.PolicyID, &event.PolicyVersion,
 		&event.ConfigVersion, &event.ChunkTotal, &event.LatencyMS, &event.CreatedAt}
 	if len(withFullPrompt) > 0 && withFullPrompt[0] {
 		dest = append(dest, &event.Snapshot.FullPrompt)
@@ -367,7 +381,7 @@ func scanEvent(row rowScanner, withFullPrompt ...bool) (*Event, error) {
 	_ = json.Unmarshal(evidence, &event.ScannerEvidence)
 	result := NormalizedResult{Decision: event.Decision, RiskLevel: event.RiskLevel, Action: event.Action,
 		Categories: event.Categories, MatchedScanners: event.MatchedScanners, ScannerScores: event.ScannerScores,
-		ScannerEvidence: event.ScannerEvidence}
+		ScannerEvidence: event.ScannerEvidence, GuardEndpointID: event.GuardEndpointID, GuardEndpointName: event.GuardEndpointName}
 	event.IssueSummaries = BuildIssueSummaries(result)
 	return event, nil
 }

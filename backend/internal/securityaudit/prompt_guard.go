@@ -3,6 +3,7 @@ package securityaudit
 import (
 	"context"
 	"errors"
+	"strings"
 	"sync"
 	"time"
 )
@@ -159,11 +160,38 @@ func (g *GuardEvaluator) finishDecision(ctx context.Context, cfg ActiveConfig, s
 		kind = DecisionBlock
 	}
 	decision := &PromptDecision{Kind: kind, Result: aggregated, AllowNextStage: kind == DecisionAllow || kind == DecisionFlag}
-	if kind == DecisionFlag && matchedPromptScanner(aggregated.MatchedScanners, confidenceScoreKey) && len(cfg.RiskRouteAccountIDs) > 0 {
-		decision.RouteAccountIDs = append([]int64(nil), cfg.RiskRouteAccountIDs...)
+	if kind == DecisionFlag && matchedPromptScanner(aggregated.MatchedScanners, confidenceScoreKey) {
+		if len(cfg.RiskRouteAccountIDs) > 0 {
+			decision.RouteAccountIDs = append([]int64(nil), cfg.RiskRouteAccountIDs...)
+		} else if strings.TrimSpace(cfg.NoRouteFallbackMode) != "" && !cfg.AllowsNoRouteFallback() {
+			// A group policy explicitly chose the secure default: a high-risk
+			// finding with no destination account must not silently pass through.
+			// Keep the persisted event aligned with the actual terminal decision;
+			// otherwise the request would be rejected while the event still looked
+			// like a warning-only finding.
+			kind = DecisionBlock
+			decision.Kind = kind
+			decision.AllowNextStage = false
+			decision.ErrorCode = ErrorCodeNoRiskRoute
+			decision.BlockHTTPStatus = cfg.BlockHTTPStatus
+			if decision.BlockHTTPStatus < 400 || decision.BlockHTTPStatus > 499 {
+				decision.BlockHTTPStatus = DefaultBlockHTTPStatus
+			}
+			decision.BlockMessage = cfg.BlockMessage
+			if decision.BlockMessage == "" {
+				decision.BlockMessage = DefaultBlockMessage
+			}
+			aggregated.Decision = EventCritical
+			aggregated.Action = ActionBlock
+			if strings.TrimSpace(aggregated.Reason) == "" {
+				aggregated.Reason = "high-risk finding has no eligible risk-route account"
+			}
+		}
 	}
 	if kind == DecisionBlock {
-		decision.ErrorCode = ErrorCodeBlocked
+		if decision.ErrorCode == "" {
+			decision.ErrorCode = ErrorCodeBlocked
+		}
 		decision.BlockHTTPStatus = cfg.BlockHTTPStatus
 		if decision.BlockHTTPStatus < 400 || decision.BlockHTTPStatus > 499 {
 			decision.BlockHTTPStatus = DefaultBlockHTTPStatus
@@ -197,7 +225,7 @@ func (g *GuardEvaluator) finishDecision(ctx context.Context, cfg ActiveConfig, s
 		LogWarn(EventGuardBlocked, mergeLogFields(baseFields, map[string]any{
 			"guard_endpoint_id": aggregated.GuardEndpointID,
 			"decision":          kind, "risk_level": aggregated.RiskLevel, "action": aggregated.Action, "chunk_total": aggregated.ChunkTotal,
-			"latency_ms": aggregated.LatencyMS, "status": "blocked", "error_code": ErrorCodeBlocked,
+			"latency_ms": aggregated.LatencyMS, "status": "blocked", "error_code": decision.ErrorCode,
 			"stage": snapshot.Stage, "upstream_dispatched": false, "billing_preconsumed": false,
 		}))
 	} else {
@@ -215,6 +243,10 @@ func (g *GuardEvaluator) finishOversized(ctx context.Context, cfg ActiveConfig, 
 	decision := &PromptDecision{Kind: DecisionFlag, Result: result, AllowNextStage: true}
 	if len(cfg.RiskRouteAccountIDs) > 0 {
 		decision.RouteAccountIDs = append([]int64(nil), cfg.RiskRouteAccountIDs...)
+	} else if strings.TrimSpace(cfg.NoRouteFallbackMode) != "" && cfg.AllowsNoRouteFallback() {
+		// Explicit per-group allow means an oversized prompt may continue when
+		// there is no spare risk-route account. Keep the finding as a flag for
+		// audit visibility while allowing the upstream request to proceed.
 	} else {
 		result = inputTooLargeResult(true, g.clock.Now().Sub(start))
 		decision.Result = result

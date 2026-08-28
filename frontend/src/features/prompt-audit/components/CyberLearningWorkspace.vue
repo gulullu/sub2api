@@ -38,7 +38,41 @@
             {{ t(`admin.promptAudit.cyber.status.${item}`) }}
           </button>
         </div>
-        <span class="text-xs text-gray-500 dark:text-gray-400">{{ t('admin.promptAudit.cyber.total', { count: page.total }) }}</span>
+        <div class="flex flex-wrap items-center justify-end gap-2">
+          <span class="text-xs text-gray-500 dark:text-gray-400">{{ t('admin.promptAudit.cyber.total', { count: page.total }) }}</span>
+          <div class="relative">
+            <button type="button" class="btn btn-secondary btn-sm" data-test="cyber-column-settings" :aria-expanded="cyberColumnMenuOpen" @click="cyberColumnMenuOpen = !cyberColumnMenuOpen">
+              {{ t('admin.promptAudit.cyber.columnSettings') }}
+            </button>
+            <div v-if="cyberColumnMenuOpen" class="absolute right-0 z-20 mt-2 w-56 rounded-xl border border-gray-200 bg-white p-2 shadow-lg dark:border-dark-700 dark:bg-dark-800" data-test="cyber-column-menu">
+              <label v-for="column in cyberConfigurableColumns" :key="column.key" class="flex cursor-pointer items-center gap-2 rounded-lg px-2 py-2 text-sm text-gray-700 hover:bg-gray-50 dark:text-dark-200 dark:hover:bg-dark-700">
+                <input type="checkbox" :checked="isCyberColumnVisible(column.key)" @change="toggleCyberColumn(column.key)" />
+                <span>{{ column.label }}</span>
+              </label>
+              <p class="px-2 pb-1 pt-2 text-[11px] text-gray-400 dark:text-dark-500">{{ t('admin.promptAudit.cyber.fixedColumns') }}</p>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <div class="flex flex-wrap items-end gap-3 border-b border-gray-200 bg-white px-5 py-4 dark:border-dark-700 dark:bg-dark-900">
+        <label class="min-w-[14rem] flex-1 text-xs text-gray-600 dark:text-dark-200">
+          <span>{{ t('admin.promptAudit.cyber.groupFilter') }}</span>
+          <select v-model="groupFilter" class="input mt-1 w-full" :aria-label="t('admin.promptAudit.cyber.groupFilter')" data-test="cyber-group-filter" @change="applyListFilters">
+            <option value="">{{ t('admin.promptAudit.cyber.allGroups') }}</option>
+            <option v-for="group in groupOptions" :key="group.id" :value="group.id">{{ group.name }} · #{{ group.id }}</option>
+            <option v-if="groupFilter !== '' && !groupOptions.some((group) => group.id === groupFilter)" :value="groupFilter">#{{ groupFilter }}</option>
+          </select>
+        </label>
+        <label class="min-w-[14rem] flex-1 text-xs text-gray-600 dark:text-dark-200">
+          <span>{{ t('admin.promptAudit.cyber.accountFilter') }}</span>
+          <select v-model="accountFilter" class="input mt-1 w-full" :aria-label="t('admin.promptAudit.cyber.accountFilter')" data-test="cyber-account-filter" @change="applyListFilters">
+            <option value="">{{ t('admin.promptAudit.cyber.allAccounts') }}</option>
+            <option v-for="account in accountOptions" :key="account.id" :value="account.id">{{ account.name || `#${account.id}` }} · #{{ account.id }}</option>
+            <option v-if="accountFilter !== '' && !accountOptions.some((account) => account.id === accountFilter)" :value="accountFilter">#{{ accountFilter }}</option>
+          </select>
+        </label>
+        <button type="button" class="btn btn-ghost btn-sm" :disabled="!hasListFilters || loading" data-test="cyber-reset-filters" @click="resetListFilters">{{ t('admin.promptAudit.cyber.resetFilters') }}</button>
       </div>
 
       <div v-if="error" role="alert" class="m-4 rounded-lg bg-red-50 px-4 py-3 text-sm text-red-700 dark:bg-red-950/30 dark:text-red-300">
@@ -46,10 +80,12 @@
       </div>
       <div class="bg-gray-50/60 p-3 dark:bg-dark-950/20 md:bg-transparent md:p-0" data-test="cyber-data-table">
         <DataTable
-          :columns="cyberColumns"
+          :columns="visibleCyberColumns"
           :data="page.items"
           :loading="loading"
           row-key="id"
+          :sticky-first-column="true"
+          :sticky-actions-column="true"
           :row-class="cyberRowClass"
         >
           <template #cell-event="{ row }">
@@ -67,8 +103,8 @@
           </template>
           <template #cell-route="{ row }">
             <div class="text-xs text-gray-600 dark:text-gray-300">
-              <p>{{ t('admin.promptAudit.cyber.fields.groupId') }} #{{ displayID(row.group_id) }}</p>
-              <p class="mt-1">{{ t('admin.promptAudit.cyber.fields.accountId') }} #{{ displayID(row.account_id) }}</p>
+              <p>{{ t('admin.promptAudit.cyber.fields.group') }}: {{ groupLabel(row.group_id) }}</p>
+              <p class="mt-1">{{ t('admin.promptAudit.cyber.fields.selectedAccount') }}: {{ accountLabel(row.account_id) }}</p>
               <p class="mt-1">HTTP {{ row.upstream_status ?? '—' }}</p>
             </div>
           </template>
@@ -280,13 +316,19 @@ import type { Column } from '@/components/common/types'
 import { useAppStore } from '@/stores/app'
 import { extractApiErrorCode, extractApiErrorMessage } from '@/utils/apiError'
 import promptAuditAPI from '../api'
-import type { CyberFeedbackDetail, CyberFeedbackEvent, CyberFeedbackEvidence, CyberFeedbackPage, CyberFeedbackStatus, CyberPolicyRule } from '../types'
+import type { CyberFeedbackDetail, CyberFeedbackEvent, CyberFeedbackEvidence, CyberFeedbackListFilter, CyberFeedbackPage, CyberFeedbackStatus, CyberPolicyRule, PromptAuditAccount, PromptAuditGroup } from '../types'
 
 const { t, locale } = useI18n()
 const appStore = useAppStore()
-const props = withDefaults(defineProps<{ initialEventId?: number | null }>(), { initialEventId: null })
+const props = withDefaults(defineProps<{
+  initialEventId?: number | null
+  groups?: PromptAuditGroup[]
+  accounts?: PromptAuditAccount[]
+}>(), { initialEventId: null, groups: () => [], accounts: () => [] })
 const statusTabs: CyberFeedbackStatus[] = ['pending', 'approved', 'rejected']
 const status = ref<CyberFeedbackStatus>('pending')
+const groupFilter = ref<number | ''>('')
+const accountFilter = ref<number | ''>('')
 const loading = ref(false)
 const mutating = ref(false)
 const error = ref('')
@@ -299,6 +341,16 @@ const rejectReason = ref('')
 const page = reactive<CyberFeedbackPage>({ items: [], total: 0, page: 1, page_size: 20, active_rules: [], config_version: 0 })
 const pageCount = computed(() => Math.max(1, Math.ceil(page.total / page.page_size)))
 const canRegenerate = computed(() => evidence.value?.available === true && evidence.value.full_prompt.length > 0)
+const cyberColumnMenuOpen = ref(false)
+const hiddenCyberColumns = ref<string[]>([])
+const groupOptions = computed<PromptAuditGroup[]>(() => {
+  const options = props.groups.slice().sort((left, right) => left.id - right.id)
+  if (!options.some((group) => group.id === 0)) {
+    options.unshift({ id: 0, name: t('admin.promptAudit.groups.unassigned'), platform: '', status: 'active' })
+  }
+  return options
+})
+const accountOptions = computed(() => props.accounts.slice().sort((left, right) => left.id - right.id || left.name.localeCompare(right.name)))
 const cyberColumns = computed<Column[]>(() => [
   { key: 'event', label: t('admin.promptAudit.cyber.columns.event'), class: 'min-w-36' },
   { key: 'request', label: t('admin.promptAudit.cyber.columns.request'), class: 'w-[27rem] max-w-[27rem]' },
@@ -307,6 +359,9 @@ const cyberColumns = computed<Column[]>(() => [
   { key: 'last_confirmed', label: t('admin.promptAudit.cyber.columns.lastConfirmed'), class: 'min-w-48' },
   { key: 'actions', label: t('admin.promptAudit.common.actions'), class: 'min-w-48 text-right' },
 ])
+const cyberConfigurableColumns = computed(() => cyberColumns.value.filter((column) => !['event', 'actions'].includes(column.key)))
+const visibleCyberColumns = computed(() => cyberColumns.value.filter((column) => !hiddenCyberColumns.value.includes(column.key) || ['event', 'actions'].includes(column.key)))
+const hasListFilters = computed(() => groupFilter.value !== '' || accountFilter.value !== '')
 type RuleDisplayStatus = 'active' | 'disabled'
 type NormalizedRuleStatus = RuleDisplayStatus | 'deleted'
 const ruleTabs: RuleDisplayStatus[] = ['active', 'disabled']
@@ -342,13 +397,42 @@ async function loadPage() {
   loading.value = true
   error.value = ''
   try {
-    Object.assign(page, await promptAuditAPI.listCyberEvents(status.value, page.page, page.page_size))
+    const filter: CyberFeedbackListFilter = {}
+    if (typeof groupFilter.value === 'number' && groupFilter.value >= 0) filter.group_id = groupFilter.value
+    if (typeof accountFilter.value === 'number' && accountFilter.value > 0) filter.account_id = accountFilter.value
+    const result = Object.keys(filter).length
+      ? await promptAuditAPI.listCyberEvents(status.value, page.page, page.page_size, filter)
+      : await promptAuditAPI.listCyberEvents(status.value, page.page, page.page_size)
+    Object.assign(page, result)
     await resolveDeepLink()
   } catch (errorValue) {
     error.value = operationError(errorValue, 'admin.promptAudit.cyber.errors.load')
   } finally {
     loading.value = false
   }
+}
+
+function applyListFilters() {
+  page.page = 1
+  void loadPage()
+}
+
+function resetListFilters() {
+  groupFilter.value = ''
+  accountFilter.value = ''
+  applyListFilters()
+}
+
+function isCyberColumnVisible(key: string): boolean {
+  return !hiddenCyberColumns.value.includes(key) || ['event', 'actions'].includes(key)
+}
+
+function toggleCyberColumn(key: string) {
+  if (['event', 'actions'].includes(key)) return
+  hiddenCyberColumns.value = hiddenCyberColumns.value.includes(key)
+    ? hiddenCyberColumns.value.filter((item) => item !== key)
+    : [...hiddenCyberColumns.value, key]
+  try { localStorage.setItem('prompt-audit-cyber-hidden-columns', JSON.stringify(hiddenCyberColumns.value)) } catch { /* storage is optional */ }
 }
 
 async function resolveDeepLink() {
@@ -631,6 +715,19 @@ function displayID(value: number | null | undefined): string {
   return value == null || value <= 0 ? '—' : String(value)
 }
 
+function groupLabel(value: number | null | undefined): string {
+  if (value === 0) return t('admin.promptAudit.groups.unassigned')
+  const group = groupOptions.value.find((item) => item.id === value)
+  if (group) return `${group.name} (#${group.id})`
+  return displayID(value) === '—' ? '—' : `#${displayID(value)}`
+}
+
+function accountLabel(value: number | null | undefined): string {
+  const account = accountOptions.value.find((item) => item.id === value)
+  if (account) return `${account.name || `#${account.id}`} (#${account.id})`
+  return displayID(value) === '—' ? '—' : `#${displayID(value)}`
+}
+
 function namedID(id: number | null | undefined, name: string | null | undefined): string {
   const displayedID = displayID(id)
   const displayedName = name?.trim() || ''
@@ -675,5 +772,14 @@ function statusClass(value: CyberFeedbackStatus): string {
   return 'bg-amber-50 text-amber-700 dark:bg-amber-950/30 dark:text-amber-300'
 }
 
-onMounted(loadPage)
+onMounted(() => {
+  try {
+    const raw = localStorage.getItem('prompt-audit-cyber-hidden-columns')
+    const parsed = raw ? JSON.parse(raw) : []
+    if (Array.isArray(parsed)) {
+      hiddenCyberColumns.value = parsed.filter((item): item is string => typeof item === 'string' && cyberConfigurableColumns.value.some((column) => column.key === item))
+    }
+  } catch { hiddenCyberColumns.value = [] }
+  void loadPage()
+})
 </script>

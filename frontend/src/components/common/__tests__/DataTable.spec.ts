@@ -309,6 +309,36 @@ describe('DataTable', () => {
     expect(wrapper.emitted('selectionChange')?.at(-1)?.[0]).toEqual([99, 2])
   })
 
+  it('keeps injected selection and first data column sticky without overlap', async () => {
+    const wrapper = mount(DataTable, {
+      props: {
+        columns: [
+          { key: 'name', label: 'Name' },
+          { key: 'platform', label: 'Platform' }
+        ],
+        data: [{ id: 1, name: 'One', platform: 'OpenAI' }],
+        rowKey: 'id',
+        selectable: true,
+        stickyFirstColumn: true
+      }
+    })
+
+    await wrapper.vm.$nextTick()
+
+    const headerCells = wrapper.findAll('thead th')
+    expect(headerCells[0].classes()).toEqual(expect.arrayContaining(['sticky-col-left-first']))
+    expect(headerCells[1].classes()).toEqual(expect.arrayContaining(['sticky-col-left-second']))
+    const rowCells = wrapper.findAll('tbody tr[data-index="0"] td')
+    expect(rowCells[0].classes()).toEqual(expect.arrayContaining(['sticky-col-left-first']))
+    expect(rowCells[1].classes()).toEqual(expect.arrayContaining(['sticky-col-left-second']))
+
+    await wrapper.setProps({ loading: true })
+    await wrapper.vm.$nextTick()
+    const loadingCells = wrapper.findAll('tbody tr td')
+    expect(loadingCells[0].classes()).toEqual(expect.arrayContaining(['sticky-col-left-first']))
+    expect(loadingCells[1].classes()).toEqual(expect.arrayContaining(['sticky-col-left-second']))
+  })
+
   it('keeps the single usage field shrinkable in a 320px mobile card', () => {
     stubMobileMatchMedia()
     const viewport = document.createElement('div')

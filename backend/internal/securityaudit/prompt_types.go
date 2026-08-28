@@ -17,6 +17,7 @@ const (
 	ErrorCodeUnavailable           = "prompt_guard_unavailable"
 	ErrorCodeInvalidResponse       = "prompt_guard_invalid_response"
 	ErrorCodeInputTooLarge         = "prompt_guard_input_too_large"
+	ErrorCodeNoRiskRoute           = "prompt_guard_no_risk_route"
 	ErrorCodeConfigConflict        = "prompt_audit_config_conflict"
 	ErrorCodeConfigUnavailable     = "prompt_audit_config_unavailable"
 	ErrorCodeEncryptionKeyRequired = "prompt_audit_encryption_key_required"
@@ -148,6 +149,7 @@ type NormalizedResult struct {
 	ScannerBackend    string             `json:"scanner_backend"`
 	ScannerVersion    string             `json:"scanner_version"`
 	GuardEndpointID   string             `json:"guard_endpoint_id"`
+	GuardEndpointName string             `json:"guard_endpoint_name,omitempty"`
 	PolicyID          string             `json:"policy_id"`
 	PolicyVersion     int                `json:"policy_version"`
 	ChunkTotal        int                `json:"chunk_total"`

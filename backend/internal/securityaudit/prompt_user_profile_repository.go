@@ -111,18 +111,23 @@ func promptAuditUserProfileCacheKey(filter PromptAuditUserProfileFilter, page, p
 	if minSamples < 0 {
 		minSamples = 0
 	}
-	var userID, groupID int64
+	var userID int64
 	if filter.UserID != nil {
 		userID = *filter.UserID
 	}
+	groupKey := "all"
 	if filter.GroupID != nil {
-		groupID = *filter.GroupID
+		if *filter.GroupID == 0 {
+			groupKey = "unassigned"
+		} else {
+			groupKey = strconv.FormatInt(*filter.GroupID, 10)
+		}
 	}
 	// The entry expiry, rather than a clock bucket, bounds staleness. Including
 	// a bucket here can make two otherwise identical requests miss when the
 	// first query happens to cross a bucket boundary while the database is
 	// still being read.
-	return fmt.Sprintf("%d|%d|%d|%q|%d|%d|%d", days, userID, groupID, strings.ToLower(strings.TrimSpace(filter.Search)), minSamples, page, pageSize), true
+	return fmt.Sprintf("%d|%d|%s|%q|%d|%d|%d", days, userID, groupKey, strings.ToLower(strings.TrimSpace(filter.Search)), minSamples, page, pageSize), true
 }
 
 func (r *PostgreSQLRepository) getPromptAuditUserProfileCache(key string, now time.Time) *PromptAuditUserProfilePage {
@@ -225,12 +230,20 @@ func buildUserProfileQuery(filter PromptAuditUserProfileFilter, now time.Time) (
 	jobGroupClause := ""
 	usageGroupClause := ""
 	moderationGroupClause := ""
-	if filter.GroupID != nil && *filter.GroupID > 0 {
-		groupIdx := len(args) + 1
-		args = append(args, *filter.GroupID)
-		jobGroupClause = fmt.Sprintf(" AND j.group_id = $%d", groupIdx)
-		usageGroupClause = fmt.Sprintf(" AND ul.group_id = $%d", groupIdx)
-		moderationGroupClause = fmt.Sprintf(" AND l.group_id = $%d", groupIdx)
+	if filter.GroupID != nil {
+		if *filter.GroupID == 0 {
+			// The unassigned/default bucket is persisted as SQL NULL because
+			// group_id has a foreign-key relationship to groups.
+			jobGroupClause = " AND j.group_id IS NULL"
+			usageGroupClause = " AND ul.group_id IS NULL"
+			moderationGroupClause = " AND l.group_id IS NULL"
+		} else if *filter.GroupID > 0 {
+			groupIdx := len(args) + 1
+			args = append(args, *filter.GroupID)
+			jobGroupClause = fmt.Sprintf(" AND j.group_id = $%d", groupIdx)
+			usageGroupClause = fmt.Sprintf(" AND ul.group_id = $%d", groupIdx)
+			moderationGroupClause = fmt.Sprintf(" AND l.group_id = $%d", groupIdx)
+		}
 	}
 	requestedUserID := int64(0)
 	if filter.UserID != nil && *filter.UserID > 0 {

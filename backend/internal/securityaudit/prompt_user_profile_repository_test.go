@@ -40,3 +40,21 @@ func TestBuildUserProfileQueryClampsProfileWindow(t *testing.T) {
 	require.Equal(t, now.AddDate(0, 0, -MaxPromptAuditUserProfileDays), args[0])
 	require.Equal(t, now, args[1])
 }
+
+func TestBuildUserProfileQueryTriStateUnassignedGroupUsesNullPredicates(t *testing.T) {
+	groupID := int64(0)
+	query, args := buildUserProfileQuery(PromptAuditUserProfileFilter{GroupID: &groupID}, time.Unix(1_000, 0).UTC())
+	require.Len(t, args, 6, "unassigned filtering must not add a bind parameter")
+	require.Contains(t, query.count, "j.group_id IS NULL")
+	require.Contains(t, query.count, "ul.group_id IS NULL")
+	require.Contains(t, query.count, "l.group_id IS NULL")
+}
+
+func TestPromptAuditUserProfileCacheKeyDistinguishesAllAndUnassignedGroups(t *testing.T) {
+	allKey, allCacheable := promptAuditUserProfileCacheKey(PromptAuditUserProfileFilter{}, 1, 20)
+	groupID := int64(0)
+	unassignedKey, unassignedCacheable := promptAuditUserProfileCacheKey(PromptAuditUserProfileFilter{GroupID: &groupID}, 1, 20)
+	require.True(t, allCacheable)
+	require.True(t, unassignedCacheable)
+	require.NotEqual(t, allKey, unassignedKey)
+}

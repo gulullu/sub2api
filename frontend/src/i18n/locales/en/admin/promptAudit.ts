@@ -61,7 +61,7 @@ export default {
       adapter: 'Response adapter',
       adapters: { confidence_json: 'JSON confidence (DeepSeek / OpenAI-compatible)', qwen3guard: 'Qwen3Guard Safety / Categories', openai_moderation: 'OpenAI Moderation (experimental fallback)' },
       adapterHints: { confidence_json: 'Sends the active system prompt and expects JSON with confidence and reason.', qwen3guard: 'Uses the original Qwen3Guard Safety and Categories text format.', openai_moderation: 'Experimental fallback, disabled when first added. Calls /v1/moderations; provider flagged determines Unsafe, scores are evidence only, and enabled risk categories determine blocking. It supports neither system prompts nor CYB supplemental rules, covers a broader policy surface than the current CYB policy, and is not equivalent to existing nodes.' },
-      toggleNode: 'Toggle node {name}', deleteConfirm: 'Remove “{name}” from the draft? It takes effect after saving.',
+      toggleNode: 'Toggle node {name}', duplicate: 'Duplicate node', copyName: '{name} copy', copy: 'Copy safe config', copied: 'Copied', columns: 'Columns', fixedColumns: 'Node and actions are always visible.', deleteConfirm: 'Remove “{name}” from the draft? It takes effect after saving.',
     },
     templates: {
       title: 'Audit prompt templates', description: 'Choose the system prompt used by JSON-confidence nodes. Built-in templates are read-only; copy one to customize it.',
@@ -154,6 +154,19 @@ export default {
         next: 'Next',
       },
     },
+    groups: {
+      title: 'Audit group policies',
+      description: 'Keep decision thresholds, hard-routing accounts, CYB feedback accounts, and do-not-audit users within each group boundary.',
+      summary: '{count} groups shown',
+      workerCount: 'Worker count', queueCapacity: 'Queue capacity', allGroups: 'Include all groups by default', strategy: 'Node strategy',
+      search: 'Search groups', searchPlaceholder: 'Group name / ID / platform', platform: 'Platform', allPlatforms: 'All platforms', status: 'Group status', allStatuses: 'All statuses', active: 'Active', inactive: 'Inactive', unassigned: 'Unassigned',
+      name: 'Group', columns: 'Columns', fixedColumns: 'Name and actions are always visible.', missingGroups: 'Saved policies reference missing groups: {ids}', defaultBadge: 'Default', unknownGroup: 'Unknown group #{id}', unknownPlatform: 'Unknown', scope: 'Audit scope', inScope: 'In scope', outOfScope: 'Out of scope', toggleScope: 'Toggle audit scope for {name}', enabled: 'Enabled', disabled: 'Disabled', blocking: 'Blocking', mode: 'Mode', threshold: 'Threshold (flag / block)', fallback: 'No-route fallback', accountCount: 'Group accounts', riskCount: 'Hard pool', extraCount: 'Extra upstream', updated: 'Updated', editTitle: 'Edit group policy · {name}', copy: 'Copy policy', copied: 'Copied', empty: 'No groups match the current filters.',
+      editorTabsLabel: 'Group policy sections',
+      tabs: { policy: 'Decision policy', risk: 'High-risk routing', cyber: 'Extra CYB upstream', profiles: 'User profiles' },
+      latestTurnOnly: 'Only latest turn and prior output', storePass: 'Store safe events', flagThreshold: 'Flag threshold', blockThreshold: 'Block threshold', blockStatus: 'Block HTTP status', maxInput: 'Maximum audited characters', blockMessage: 'Block response message', noRouteFallback: 'No-route behavior', fallbackAllow: 'Keep request available', fallbackBlock: 'Reject when no route is eligible', template: 'Prompt template', scanners: 'Input-risk categories',
+      accountSearch: 'Account name', accountSearchPlaceholder: 'Name / ID / platform / type', selectedCount: '{count} selected', loadingAccounts: 'Loading accounts…', noAccounts: 'No accounts in this group.', accountName: 'Account', accountType: 'Type', accountStatus: 'Status', accountGroups: 'Assigned groups', accountFixedColumns: 'Account name and actions are always visible.', outsideScopeWarning: 'Saved IDs outside this group remain visible so they can be removed: {ids}',
+      profileSearch: 'User name', profileSearchPlaceholder: 'Username / email / user ID', profileDays: 'Days', profileRefresh: 'Refresh profiles', profileColumns: 'Columns', profileFixedColumns: 'User column is always visible.', selectPage: 'Select page', clearPage: 'Clear page', loadingProfiles: 'Loading user profiles…', profileLoadError: 'Unable to load user profiles.', noProfiles: 'No profiles match this group.', profileSummary: '{total} users · page {page} / {pages}', previous: 'Previous', next: 'Next', excludedCount: '{count} users excluded from local audit', noEmail: 'No email', user: 'User', userEmail: 'Email', userStatus: 'Status', userRisk: 'Content risk', userCyber: 'CYB hits', userSamples: 'Samples', userCoverage: 'Audit coverage', userRecent: 'Latest activity', userExcluded: 'Local audit', deleted: 'Deleted', unknownStatus: 'Unknown status', excluded: 'Excluded', included: 'Included', saveHint: 'Changes stay in the draft until you click Save below.',
+    },
     saveBar: { enabled: 'Enable prompt audit', blocking: 'Synchronous blocking', blockingLatestTurnOnly: 'Only latest input and prior output', storePass: 'Store safe events', dirty: 'Unsaved changes', synced: 'Configuration synced' },
     blockingConfirm: {
       title: 'Enable synchronous blocking?',
@@ -161,7 +174,7 @@ export default {
       confirm: 'I understand; enable it',
     },
     events: {
-      title: 'Audit events', description: 'Review events by identity, route, risk, hash, and time; the detail view shows the full prompt.', decision: 'Decision', risk: 'Risk level', endpoint: 'Endpoint', groupId: 'Group ID', userId: 'User ID', apiKeyId: 'API Key ID', keyword: 'Keyword',
+      title: 'Audit events', description: 'Review events by identity, route, risk, hash, and time; the detail view shows the full prompt.', decision: 'Decision', risk: 'Risk level', endpoint: 'Endpoint', requestEndpoint: 'Request endpoint', guardEndpoint: 'Audit node', guardNode: 'Audit node', groupId: 'Group ID', userId: 'User ID', apiKeyId: 'API Key ID', keyword: 'Keyword', columns: 'Columns', fixedColumns: 'Time and actions are always visible.',
       startAt: 'Start time', endAt: 'End time', deleteSelected: 'Delete selected ({count})', deleteByFilter: 'Delete by filter',
       filterDeleteDialogTitle: 'Delete audit events by filter', filterDeleteDialogDesc: 'Choose the time range and risk criteria, then delete directly. Deletion is permanent. Generate a preview first if you want to see the match count.',
       filterTimeRange: 'Deletion time range', filterTimeRangeHint: 'Deletes events created before the selected cutoff. Events created after the preview are not affected.',
@@ -191,7 +204,7 @@ export default {
     cyber: {
       title: 'CYB feedback and rules',
       description: 'Review confirmed upstream CYB signals with the complete evidence administrators need, then turn safe, abstract patterns into audit rules.',
-      refresh: 'Refresh', statusLabel: 'CYB review status', total: '{count} events', empty: 'No events in this state.', review: 'Review', noPreview: 'No safe preview is available.',
+      refresh: 'Refresh', statusLabel: 'CYB review status', total: '{count} events', empty: 'No events in this state.', review: 'Review', noPreview: 'No safe preview is available.', groupFilter: 'Group', accountFilter: 'Account', allGroups: 'All groups', allAccounts: 'All accounts', resetFilters: 'Reset filters', columnSettings: 'Columns', fixedColumns: 'Event and actions are always visible.',
       previous: 'Previous', next: 'Next', page: 'Page {page} of {pages}', detailTitle: 'CYB feedback details', reviewTitle: 'Review CYB feedback',
       columns: { event: 'Event', request: 'Request and trigger summary', route: 'Group and account', confirmations: 'Confirmations', lastConfirmed: 'Last confirmed' },
       triggerContent: 'Unredacted trigger content', triggerContentHint: 'Available only to administrators. Only conversation text extracted from the request is stored and rendered by role; request headers and outer authentication fields are not stored, and HTML or scripts are never executed. Sensitive content deliberately included in the conversation may appear verbatim, so handle it carefully.', reviewMetadata: 'Complete review metadata',

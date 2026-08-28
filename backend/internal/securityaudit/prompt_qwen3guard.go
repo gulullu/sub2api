@@ -292,6 +292,7 @@ func (s *OpenAICompatibleScanner) Scan(ctx context.Context, endpoint ActiveEndpo
 		return nil, err
 	}
 	result.GuardEndpointID = endpoint.ID
+	result.GuardEndpointName = endpoint.Name
 	result.ScannerVersion = endpoint.Model
 	return result, nil
 }
