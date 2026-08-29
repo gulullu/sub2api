@@ -19,37 +19,37 @@
 
     <div class="mt-5 rounded-xl border border-gray-200 bg-gray-50/70 p-4 dark:border-dark-700/60 dark:bg-dark-900/30 sm:p-5" data-test="prompt-audit-global-settings">
       <div class="flex flex-wrap items-end gap-4">
-        <label class="min-w-[10rem] flex-1 text-sm text-gray-700 dark:text-dark-200">
-          <span>{{ t('admin.promptAudit.groups.workerCount') }}</span>
+        <label class="min-w-[10rem] flex-1">
+          <span class="input-label">{{ t('admin.promptAudit.groups.workerCount') }}</span>
           <input
             :value="draft.worker_count"
             type="number"
             min="1"
             max="32"
-            class="input mt-1.5 w-full"
+            class="input w-full"
             :aria-label="t('admin.promptAudit.groups.workerCount')"
             @change="patchDraft({ worker_count: boundedNumber(($event.target as HTMLInputElement).value, 1, 32, draft.worker_count) })"
           />
         </label>
-        <label class="min-w-[10rem] flex-1 text-sm text-gray-700 dark:text-dark-200">
-          <span>{{ t('admin.promptAudit.groups.queueCapacity') }}</span>
+        <label class="min-w-[10rem] flex-1">
+          <span class="input-label">{{ t('admin.promptAudit.groups.queueCapacity') }}</span>
           <input
             :value="draft.queue_capacity"
             type="number"
             min="1"
             max="100000"
-            class="input mt-1.5 w-full"
+            class="input w-full"
             :aria-label="t('admin.promptAudit.groups.queueCapacity')"
             @change="patchDraft({ queue_capacity: boundedNumber(($event.target as HTMLInputElement).value, 1, 100000, draft.queue_capacity) })"
           />
         </label>
-        <label class="flex items-center gap-2 pb-2 text-sm text-gray-700 dark:text-dark-200">
-          <input type="checkbox" :checked="draft.all_groups" data-test="prompt-audit-all-groups" @change="toggleAllGroups(($event.target as HTMLInputElement).checked)" />
-          {{ t('admin.promptAudit.groups.allGroups') }}
-        </label>
-        <div class="rounded-lg border border-gray-200 bg-white px-3 py-2 text-xs text-gray-500 dark:border-dark-700 dark:bg-dark-900 dark:text-dark-300">
-          <span class="font-medium text-gray-700 dark:text-dark-200">{{ t('admin.promptAudit.groups.strategy') }}</span>
-          <span class="ml-2 font-mono">priority</span>
+        <div class="flex min-w-[15rem] items-center justify-between gap-3 rounded-xl border border-gray-200 bg-white px-4 py-2.5 dark:border-dark-700 dark:bg-dark-900">
+          <span class="text-sm font-medium text-gray-700 dark:text-dark-200">{{ t('admin.promptAudit.groups.allGroups') }}</span>
+          <Toggle :model-value="draft.all_groups" :aria-label="t('admin.promptAudit.groups.allGroups')" data-test="prompt-audit-all-groups" @update:model-value="toggleAllGroups" />
+        </div>
+        <div class="max-w-md rounded-xl border border-gray-200 bg-white px-4 py-2.5 text-xs text-gray-500 dark:border-dark-700 dark:bg-dark-900 dark:text-dark-300">
+          <span class="block font-medium text-gray-700 dark:text-dark-200">{{ t('admin.promptAudit.groups.strategy') }}</span>
+          <span class="mt-0.5 block leading-5">{{ t('admin.promptAudit.policy.strategyHint') }}</span>
         </div>
       </div>
     </div>
@@ -203,63 +203,71 @@
 
         <div v-if="editorTab === 'policy'" class="mt-5 grid gap-4 xl:grid-cols-[minmax(0,1fr)_minmax(320px,.65fr)]">
           <div class="space-y-5 rounded-xl border border-gray-200 p-4 dark:border-dark-700/60 sm:p-5">
-            <div class="grid gap-4 sm:grid-cols-2">
-              <label class="flex items-center gap-2 text-sm text-gray-700 dark:text-dark-200">
-                <input type="checkbox" :checked="selectedPolicy.enabled" data-test="prompt-audit-group-enabled" @change="patchPolicy({ enabled: ($event.target as HTMLInputElement).checked })" />
-                {{ t('admin.promptAudit.groups.enabled') }}
-              </label>
-              <label class="flex items-center gap-2 text-sm text-gray-700 dark:text-dark-200">
-                <input type="checkbox" :checked="selectedPolicy.blocking_enabled" :disabled="!selectedPolicy.enabled" data-test="prompt-audit-group-blocking" @change="patchPolicy({ blocking_enabled: ($event.target as HTMLInputElement).checked })" />
-                {{ t('admin.promptAudit.groups.blocking') }}
-              </label>
-              <label class="flex items-center gap-2 text-sm text-gray-700 dark:text-dark-200">
-                <input type="checkbox" :checked="selectedPolicy.blocking_latest_turn_only" :disabled="!selectedPolicy.enabled || !selectedPolicy.blocking_enabled" @change="patchPolicy({ blocking_latest_turn_only: ($event.target as HTMLInputElement).checked })" />
-                {{ t('admin.promptAudit.groups.latestTurnOnly') }}
-              </label>
-              <label class="flex items-center gap-2 text-sm text-gray-700 dark:text-dark-200">
-                <input type="checkbox" :checked="selectedPolicy.store_pass_events" @change="patchPolicy({ store_pass_events: ($event.target as HTMLInputElement).checked })" />
-                {{ t('admin.promptAudit.groups.storePass') }}
-              </label>
+            <div class="grid gap-3 sm:grid-cols-2">
+              <div class="flex items-center justify-between gap-3 rounded-xl border border-gray-200 bg-gray-50/60 px-4 py-3 dark:border-dark-700 dark:bg-dark-900/40">
+                <span class="text-sm font-medium text-gray-700 dark:text-dark-200">{{ t('admin.promptAudit.groups.enabled') }}</span>
+                <Toggle :model-value="selectedPolicy.enabled" :aria-label="t('admin.promptAudit.groups.enabled')" data-test="prompt-audit-group-enabled" @update:model-value="patchPolicy({ enabled: $event })" />
+              </div>
+              <div class="flex items-center justify-between gap-3 rounded-xl border border-gray-200 bg-gray-50/60 px-4 py-3 dark:border-dark-700 dark:bg-dark-900/40" :class="{ 'opacity-60': !selectedPolicy.enabled }">
+                <span class="text-sm font-medium text-gray-700 dark:text-dark-200">{{ t('admin.promptAudit.groups.blocking') }}</span>
+                <Toggle :model-value="selectedPolicy.blocking_enabled" :disabled="!selectedPolicy.enabled" :aria-label="t('admin.promptAudit.groups.blocking')" data-test="prompt-audit-group-blocking" @update:model-value="patchPolicy({ blocking_enabled: $event })" />
+              </div>
+              <div class="flex items-center justify-between gap-3 rounded-xl border border-gray-200 bg-gray-50/60 px-4 py-3 dark:border-dark-700 dark:bg-dark-900/40" :class="{ 'opacity-60': !selectedPolicy.enabled || !selectedPolicy.blocking_enabled }">
+                <span class="text-sm font-medium text-gray-700 dark:text-dark-200">{{ t('admin.promptAudit.groups.latestTurnOnly') }}</span>
+                <Toggle :model-value="selectedPolicy.blocking_latest_turn_only" :disabled="!selectedPolicy.enabled || !selectedPolicy.blocking_enabled" :aria-label="t('admin.promptAudit.groups.latestTurnOnly')" @update:model-value="patchPolicy({ blocking_latest_turn_only: $event })" />
+              </div>
+              <div class="flex items-center justify-between gap-3 rounded-xl border border-gray-200 bg-gray-50/60 px-4 py-3 dark:border-dark-700 dark:bg-dark-900/40">
+                <span class="text-sm font-medium text-gray-700 dark:text-dark-200">{{ t('admin.promptAudit.groups.storePass') }}</span>
+                <Toggle :model-value="selectedPolicy.store_pass_events" :aria-label="t('admin.promptAudit.groups.storePass')" @update:model-value="patchPolicy({ store_pass_events: $event })" />
+              </div>
             </div>
 
             <div class="grid gap-4 sm:grid-cols-2">
-              <label class="block text-sm text-gray-700 dark:text-dark-200">
-                <span>{{ t('admin.promptAudit.groups.flagThreshold') }}</span>
-                <input :value="selectedPolicy.flag_threshold" type="number" min="0" max="0.99" step="0.01" class="input mt-1.5 w-full" data-test="prompt-audit-group-flag-threshold" @change="patchPolicy({ flag_threshold: threshold(($event.target as HTMLInputElement).value, 0, Math.max(0, selectedPolicy.block_threshold - 0.01), selectedPolicy.flag_threshold) })" />
+              <label class="block">
+                <span class="input-label">{{ t('admin.promptAudit.groups.flagThreshold') }}</span>
+                <input :value="selectedPolicy.flag_threshold" type="number" min="0" max="0.99" step="0.01" class="input w-full" data-test="prompt-audit-group-flag-threshold" @change="patchPolicy({ flag_threshold: threshold(($event.target as HTMLInputElement).value, 0, Math.max(0, selectedPolicy.block_threshold - 0.01), selectedPolicy.flag_threshold) })" />
               </label>
-              <label class="block text-sm text-gray-700 dark:text-dark-200">
-                <span>{{ t('admin.promptAudit.groups.blockThreshold') }}</span>
-                <input :value="selectedPolicy.block_threshold" type="number" min="0.01" max="1" step="0.01" class="input mt-1.5 w-full" data-test="prompt-audit-group-block-threshold" @change="patchPolicy({ block_threshold: threshold(($event.target as HTMLInputElement).value, Math.min(1, selectedPolicy.flag_threshold + 0.01), 1, selectedPolicy.block_threshold) })" />
+              <label class="block">
+                <span class="input-label">{{ t('admin.promptAudit.groups.blockThreshold') }}</span>
+                <input :value="selectedPolicy.block_threshold" type="number" min="0.01" max="1" step="0.01" class="input w-full" data-test="prompt-audit-group-block-threshold" @change="patchPolicy({ block_threshold: threshold(($event.target as HTMLInputElement).value, Math.min(1, selectedPolicy.flag_threshold + 0.01), 1, selectedPolicy.block_threshold) })" />
               </label>
-              <label class="block text-sm text-gray-700 dark:text-dark-200">
-                <span>{{ t('admin.promptAudit.groups.blockStatus') }}</span>
-                <input :value="selectedPolicy.block_http_status" type="number" min="400" max="499" step="1" class="input mt-1.5 w-full" @change="patchPolicy({ block_http_status: boundedNumber(($event.target as HTMLInputElement).value, 400, 499, selectedPolicy.block_http_status) })" />
+              <label class="block">
+                <span class="input-label">{{ t('admin.promptAudit.groups.blockStatus') }}</span>
+                <input :value="selectedPolicy.block_http_status" type="number" min="400" max="499" step="1" class="input w-full" @change="patchPolicy({ block_http_status: boundedNumber(($event.target as HTMLInputElement).value, 400, 499, selectedPolicy.block_http_status) })" />
               </label>
-              <label class="block text-sm text-gray-700 dark:text-dark-200">
-                <span>{{ t('admin.promptAudit.groups.maxInput') }}</span>
-                <input :value="selectedPolicy.max_total_input_chars" type="number" min="128" max="400000" step="1" class="input mt-1.5 w-full" @change="patchPolicy({ max_total_input_chars: boundedNumber(($event.target as HTMLInputElement).value, 128, 400000, selectedPolicy.max_total_input_chars) })" />
+              <label class="block">
+                <span class="input-label">{{ t('admin.promptAudit.groups.maxInput') }}</span>
+                <input :value="selectedPolicy.max_total_input_chars" type="number" min="128" max="400000" step="1" class="input w-full" @change="patchPolicy({ max_total_input_chars: boundedNumber(($event.target as HTMLInputElement).value, 128, 400000, selectedPolicy.max_total_input_chars) })" />
               </label>
             </div>
 
-            <label class="block text-sm text-gray-700 dark:text-dark-200">
-              <span>{{ t('admin.promptAudit.groups.blockMessage') }}</span>
-              <textarea :value="selectedPolicy.block_message" maxlength="1000" class="input mt-1.5 min-h-24 w-full resize-y" @input="patchPolicy({ block_message: ($event.target as HTMLTextAreaElement).value.slice(0, 1000) })" />
+            <label class="block">
+              <span class="input-label">{{ t('admin.promptAudit.groups.blockMessage') }}</span>
+              <textarea :value="selectedPolicy.block_message" maxlength="1000" class="input min-h-24 w-full resize-y" @input="patchPolicy({ block_message: ($event.target as HTMLTextAreaElement).value.slice(0, 1000) })" />
             </label>
 
             <div class="grid gap-4 sm:grid-cols-2">
-              <label class="block text-sm text-gray-700 dark:text-dark-200">
-                <span>{{ t('admin.promptAudit.groups.noRouteFallback') }}</span>
-                <select :value="selectedPolicy.no_route_fallback_mode" class="input mt-1.5 w-full" data-test="prompt-audit-group-no-route-fallback" @change="patchPolicy({ no_route_fallback_mode: ($event.target as HTMLSelectElement).value as PromptAuditNoRouteFallbackMode })">
-                  <option value="allow">{{ t('admin.promptAudit.groups.fallbackAllow') }}</option>
-                  <option value="block">{{ t('admin.promptAudit.groups.fallbackBlock') }}</option>
-                </select>
-              </label>
-              <label class="block text-sm text-gray-700 dark:text-dark-200">
-                <span>{{ t('admin.promptAudit.groups.template') }}</span>
-                <select :value="selectedPolicy.active_prompt_template_id" class="input mt-1.5 w-full" @change="patchPolicy({ active_prompt_template_id: ($event.target as HTMLSelectElement).value })">
-                  <option v-for="template in draft.prompt_templates" :key="template.id" :value="template.id">{{ template.name }}</option>
-                </select>
-              </label>
+              <div>
+                <label class="input-label">{{ t('admin.promptAudit.groups.noRouteFallback') }}</label>
+                <Select
+                  :model-value="selectedPolicy.no_route_fallback_mode"
+                  :options="fallbackOptions"
+                  :searchable="false"
+                  :aria-label="t('admin.promptAudit.groups.noRouteFallback')"
+                  data-test="prompt-audit-group-no-route-fallback"
+                  @update:model-value="patchPolicy({ no_route_fallback_mode: $event as PromptAuditNoRouteFallbackMode })"
+                />
+              </div>
+              <div>
+                <label class="input-label">{{ t('admin.promptAudit.groups.template') }}</label>
+                <Select
+                  :model-value="selectedPolicy.active_prompt_template_id"
+                  :options="templateOptions"
+                  :aria-label="t('admin.promptAudit.groups.template')"
+                  data-test="prompt-audit-group-template"
+                  @update:model-value="patchPolicy({ active_prompt_template_id: String($event ?? '') })"
+                />
+              </div>
             </div>
           </div>
 
@@ -267,7 +275,7 @@
             <h3 class="text-sm font-semibold text-gray-900 dark:text-white">{{ t('admin.promptAudit.groups.scanners') }}</h3>
             <div class="mt-3 grid gap-2 sm:grid-cols-2">
               <label v-for="scanner in SCANNER_CATALOG" :key="scanner.id" class="flex items-center gap-2 rounded-lg px-2 py-1.5 text-sm text-gray-700 hover:bg-gray-50 dark:text-dark-200 dark:hover:bg-dark-800">
-                <input type="checkbox" :checked="selectedPolicy.scanners.includes(scanner.id)" :aria-label="t(`admin.promptAudit.scanners.${scanner.id}`)" @change="toggleScanner(scanner.id)" />
+                <input type="checkbox" class="h-4 w-4 rounded border-gray-300 text-primary-600 focus:ring-primary-500 dark:border-dark-600 dark:bg-dark-800" :checked="selectedPolicy.scanners.includes(scanner.id)" :aria-label="t(`admin.promptAudit.scanners.${scanner.id}`)" @change="toggleScanner(scanner.id)" />
                 <span>{{ t(`admin.promptAudit.scanners.${scanner.id}`) }}</span>
               </label>
             </div>
@@ -276,9 +284,9 @@
 
         <div v-else-if="editorTab === 'risk'" class="mt-5 space-y-4">
           <div class="flex flex-wrap items-end gap-3">
-            <label class="min-w-[16rem] flex-1 text-sm text-gray-700 dark:text-dark-200">
-              <span>{{ t('admin.promptAudit.groups.accountSearch') }}</span>
-              <input v-model="accountSearch" type="search" class="input mt-1.5 w-full" :placeholder="t('admin.promptAudit.groups.accountSearchPlaceholder')" data-test="prompt-audit-group-risk-search" />
+            <label class="min-w-[16rem] flex-1">
+              <span class="input-label">{{ t('admin.promptAudit.groups.accountSearch') }}</span>
+              <input v-model="accountSearch" type="search" class="input w-full" :placeholder="t('admin.promptAudit.groups.accountSearchPlaceholder')" data-test="prompt-audit-group-risk-search" />
             </label>
             <span class="badge badge-warning">{{ t('admin.promptAudit.groups.selectedCount', { count: selectedPolicy.risk_route_account_ids.length }) }}</span>
             <ColumnSettingsDropdown
@@ -290,8 +298,9 @@
               @toggle="toggleAccountColumn"
             />
           </div>
-          <div v-if="accountsError" role="alert" class="rounded-lg bg-red-50 px-3 py-2 text-sm text-red-700 dark:bg-red-950/30 dark:text-red-200">
-            {{ accountsError }} <button type="button" class="ml-2 underline" @click="$emit('retry-accounts')">{{ t('admin.promptAudit.actions.retry') }}</button>
+          <div v-if="accountsError" role="alert" class="flex flex-wrap items-center justify-between gap-3 rounded-lg bg-red-50 px-3 py-2 text-sm text-red-700 dark:bg-red-950/30 dark:text-red-200">
+            <span>{{ accountsError }}</span>
+            <button type="button" class="btn btn-secondary btn-sm" @click="$emit('retry-accounts')">{{ t('admin.promptAudit.actions.retry') }}</button>
           </div>
           <div v-else-if="accountsLoading" class="rounded-lg border border-dashed border-gray-200 px-4 py-10 text-center text-sm text-gray-500 dark:border-dark-700 dark:text-dark-300" aria-busy="true">{{ t('admin.promptAudit.groups.loadingAccounts') }}</div>
           <DataTable
@@ -320,9 +329,9 @@
 
         <div v-else-if="editorTab === 'cyber'" class="mt-5 space-y-4">
           <div class="flex flex-wrap items-end gap-3">
-            <label class="min-w-[16rem] flex-1 text-sm text-gray-700 dark:text-dark-200">
-              <span>{{ t('admin.promptAudit.groups.accountSearch') }}</span>
-              <input v-model="accountSearch" type="search" class="input mt-1.5 w-full" :placeholder="t('admin.promptAudit.groups.accountSearchPlaceholder')" data-test="prompt-audit-group-cyber-search" />
+            <label class="min-w-[16rem] flex-1">
+              <span class="input-label">{{ t('admin.promptAudit.groups.accountSearch') }}</span>
+              <input v-model="accountSearch" type="search" class="input w-full" :placeholder="t('admin.promptAudit.groups.accountSearchPlaceholder')" data-test="prompt-audit-group-cyber-search" />
             </label>
             <span class="badge badge-primary">{{ t('admin.promptAudit.groups.selectedCount', { count: selectedPolicy.cyber_feedback_account_ids.length }) }}</span>
             <ColumnSettingsDropdown
@@ -334,7 +343,7 @@
               @toggle="toggleAccountColumn"
             />
           </div>
-          <div v-if="accountsError" role="alert" class="rounded-lg bg-red-50 px-3 py-2 text-sm text-red-700 dark:bg-red-950/30 dark:text-red-200">{{ accountsError }} <button type="button" class="ml-2 underline" @click="$emit('retry-accounts')">{{ t('admin.promptAudit.actions.retry') }}</button></div>
+          <div v-if="accountsError" role="alert" class="flex flex-wrap items-center justify-between gap-3 rounded-lg bg-red-50 px-3 py-2 text-sm text-red-700 dark:bg-red-950/30 dark:text-red-200"><span>{{ accountsError }}</span><button type="button" class="btn btn-secondary btn-sm" @click="$emit('retry-accounts')">{{ t('admin.promptAudit.actions.retry') }}</button></div>
           <div v-else-if="accountsLoading" class="rounded-lg border border-dashed border-gray-200 px-4 py-10 text-center text-sm text-gray-500 dark:border-dark-700 dark:text-dark-300" aria-busy="true">{{ t('admin.promptAudit.groups.loadingAccounts') }}</div>
           <DataTable
             v-else
@@ -362,11 +371,11 @@
 
         <div v-else class="mt-5 space-y-4">
           <div class="flex flex-wrap items-end gap-3">
-            <label class="min-w-[16rem] flex-1 text-sm text-gray-700 dark:text-dark-200">
-              <span>{{ t('admin.promptAudit.groups.profileSearch') }}</span>
-              <input v-model="profileSearch" type="search" class="input mt-1.5 w-full" :placeholder="t('admin.promptAudit.groups.profileSearchPlaceholder')" data-test="prompt-audit-group-profile-search" @keyup.enter="applyProfileFilters" />
+            <label class="min-w-[16rem] flex-1">
+              <span class="input-label">{{ t('admin.promptAudit.groups.profileSearch') }}</span>
+              <input v-model="profileSearch" type="search" class="input w-full" :placeholder="t('admin.promptAudit.groups.profileSearchPlaceholder')" data-test="prompt-audit-group-profile-search" @keyup.enter="applyProfileFilters" />
             </label>
-            <label class="w-32 text-sm text-gray-700 dark:text-dark-200"><span>{{ t('admin.promptAudit.groups.profileDays') }}</span><input v-model.number="profileDays" type="number" min="1" max="180" class="input mt-1.5 w-full" @change="applyProfileFilters" /></label>
+            <label class="w-32"><span class="input-label">{{ t('admin.promptAudit.groups.profileDays') }}</span><input v-model.number="profileDays" type="number" min="1" max="180" class="input w-full" @change="applyProfileFilters" /></label>
             <ColumnSettingsDropdown
               :label="t('admin.promptAudit.groups.profileColumns')"
               :columns="profileConfigurableColumns"
@@ -418,7 +427,7 @@
       <template #footer>
         <div class="flex w-full items-center justify-between gap-3">
           <span class="text-xs text-gray-500 dark:text-dark-400">{{ t('admin.promptAudit.groups.saveHint') }}</span>
-          <button type="button" class="btn btn-primary" @click="closeEditor">{{ t('common.close') }}</button>
+          <button type="button" class="btn btn-secondary" @click="closeEditor">{{ t('common.close') }}</button>
         </div>
       </template>
     </BaseDialog>
@@ -431,6 +440,7 @@ import { useI18n } from 'vue-i18n'
 import BaseDialog from '@/components/common/BaseDialog.vue'
 import DataTable from '@/components/common/DataTable.vue'
 import Select, { type SelectOption } from '@/components/common/Select.vue'
+import Toggle from '@/components/common/Toggle.vue'
 import type { Column } from '@/components/common/types'
 import promptAuditAPI from '../api'
 import ColumnSettingsDropdown from './ColumnSettingsDropdown.vue'
@@ -508,6 +518,14 @@ const editorTabs = computed(() => [
   { id: 'cyber' as const, label: t('admin.promptAudit.groups.tabs.cyber') },
   { id: 'profiles' as const, label: t('admin.promptAudit.groups.tabs.profiles') },
 ])
+const fallbackOptions = computed<SelectOption[]>(() => [
+  { value: 'allow', label: t('admin.promptAudit.groups.fallbackAllow') },
+  { value: 'block', label: t('admin.promptAudit.groups.fallbackBlock') },
+])
+const templateOptions = computed<SelectOption[]>(() => props.draft.prompt_templates.map((template) => ({
+  value: template.id,
+  label: template.name,
+})))
 
 const allColumns = computed<Column[]>(() => [
   { key: 'name', label: t('admin.promptAudit.groups.name'), sortable: true, class: 'min-w-[220px]' },

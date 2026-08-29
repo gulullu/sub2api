@@ -2,6 +2,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { defineComponent } from 'vue'
 import { flushPromises, mount } from '@vue/test-utils'
 import DataTable from '@/components/common/DataTable.vue'
+import Select from '@/components/common/Select.vue'
 import EndpointPool from '../components/EndpointPool.vue'
 import PromptTemplatePanel from '../components/PromptTemplatePanel.vue'
 import DecisionPolicyPanel from '../components/DecisionPolicyPanel.vue'
@@ -126,6 +127,30 @@ describe('Prompt Audit components', () => {
     })
   })
 
+  it('requires the shared confirmation dialog before deleting an audit node', async () => {
+    const wrapper = mount(EndpointPool, {
+      props: { endpoints: [endpoint()], probeResults: {}, probingIds: [] },
+      global: { stubs: { BaseDialog: DialogStub } },
+    })
+    const deleteButton = () => wrapper.get('[data-test="endpoint-guard-1"]')
+      .findAll('button')
+      .find((button) => button.text() === 'common.delete')!
+
+    await deleteButton().trigger('click')
+    expect(wrapper.emitted('update:endpoints')).toBeUndefined()
+    expect(wrapper.get('[data-test="dialog"]').text()).toContain('admin.promptAudit.pool.deleteConfirm')
+
+    const cancel = wrapper.get('[data-test="dialog"]').findAll('button').find((button) => button.text() === 'common.cancel')!
+    await cancel.trigger('click')
+    expect(wrapper.find('[data-test="dialog"]').exists()).toBe(false)
+    expect(wrapper.emitted('update:endpoints')).toBeUndefined()
+
+    await deleteButton().trigger('click')
+    const confirm = wrapper.get('[data-test="dialog"]').findAll('button').find((button) => button.text() === 'common.delete')!
+    await confirm.trigger('click')
+    expect(wrapper.emitted('update:endpoints')?.at(-1)?.[0]).toEqual([])
+  })
+
   it('supports group search, stale configured groups, nine scanners, and bounded worker inputs', async () => {
     const draft: PromptAuditDraft = {
       enabled: true, blocking_enabled: false, blocking_latest_turn_only: false, store_pass_events: false, effective_mode: 'async_audit', strategy: 'priority',
@@ -216,15 +241,16 @@ describe('Prompt Audit components', () => {
       global: { stubs: { BaseDialog: DialogStub } },
     })
     await wrapper.get('[data-test="add-endpoint"]').trigger('click')
-    const adapter = wrapper.get<HTMLSelectElement>('[aria-label="admin.promptAudit.pool.adapter"]')
-    expect(adapter.element.value).toBe('confidence_json')
+    const adapter = wrapper.get('[data-test="endpoint-adapter"]').getComponent(Select)
+    expect(adapter.props('modelValue')).toBe('confidence_json')
     const timeout = wrapper.get<HTMLInputElement>('[aria-label="admin.promptAudit.pool.timeout"]')
     const inputLimit = wrapper.get<HTMLInputElement>('[aria-label="admin.promptAudit.pool.inputLimit"]')
     expect(timeout.element.value).toBe('4000')
     expect(timeout.attributes('max')).toBe('40000')
     expect(inputLimit.element.value).toBe('40000')
     expect(inputLimit.attributes('max')).toBe('400000')
-    await adapter.setValue('qwen3guard')
+    adapter.vm.$emit('update:modelValue', 'qwen3guard')
+    await wrapper.vm.$nextTick()
     expect(wrapper.get<HTMLInputElement>('[aria-label="admin.promptAudit.pool.timeout"]').element.value).toBe('3000')
     expect(wrapper.get<HTMLInputElement>('[aria-label="admin.promptAudit.pool.inputLimit"]').element.value).toBe('4000')
     await timeout.setValue('40001')
@@ -240,7 +266,8 @@ describe('Prompt Audit components', () => {
       global: { stubs: { BaseDialog: DialogStub } },
     })
     await wrapper.get('[data-test="add-endpoint"]').trigger('click')
-    await wrapper.get<HTMLSelectElement>('[aria-label="admin.promptAudit.pool.adapter"]').setValue('openai_moderation')
+    wrapper.get('[data-test="endpoint-adapter"]').getComponent(Select).vm.$emit('update:modelValue', 'openai_moderation')
+    await wrapper.vm.$nextTick()
 
     expect(wrapper.get<HTMLInputElement>('[data-test="endpoint-priority"]').element.value).toBe('3')
     expect(wrapper.get<HTMLInputElement>('[aria-label="admin.promptAudit.pool.baseUrl"]').attributes()).toHaveProperty('disabled')
@@ -320,6 +347,35 @@ describe('Prompt Audit components', () => {
     const copied = wrapper.emitted('update:draft')?.at(-1)?.[0] as PromptAuditDraft
     expect(copied.prompt_templates.at(-1)).toMatchObject({ builtin: false, system_prompt: 'Built-in prompt' })
     expect(copied.active_prompt_template_id).toBe(copied.prompt_templates.at(-1)?.id)
+  })
+
+  it('requires the shared confirmation dialog before deleting a custom template', async () => {
+    const draft = configToDraft({
+      enabled: true, blocking_enabled: true, blocking_latest_turn_only: false, store_pass_events: false, effective_mode: 'blocking', strategy: 'priority',
+      worker_count: 4, queue_capacity: 100, scanners: ['jailbreak'], all_groups: true, group_ids: [], endpoints: [],
+      prompt_templates: [
+        { id: 'builtin', name: 'Built-in', system_prompt: 'Built-in prompt', builtin: true },
+        { id: 'custom-one', name: 'Custom', system_prompt: 'Custom prompt', builtin: false },
+      ],
+      active_prompt_template_id: 'custom-one', config_version: 1, updated_at: '', updated_by: 0, change_summary: '',
+    })
+    const wrapper = mount(PromptTemplatePanel, { props: { draft }, global: { stubs: { BaseDialog: DialogStub } } })
+    const deleteButton = () => wrapper.get('[data-test="prompt-template-custom-one"]')
+      .findAll('button')
+      .find((button) => button.text() === 'common.delete')!
+
+    await deleteButton().trigger('click')
+    expect(wrapper.emitted('update:draft')).toBeUndefined()
+    const cancel = wrapper.get('[data-test="dialog"]').findAll('button').find((button) => button.text() === 'common.cancel')!
+    await cancel.trigger('click')
+    expect(wrapper.emitted('update:draft')).toBeUndefined()
+
+    await deleteButton().trigger('click')
+    const confirm = wrapper.get('[data-test="dialog"]').findAll('button').find((button) => button.text() === 'common.delete')!
+    await confirm.trigger('click')
+    const updated = wrapper.emitted('update:draft')?.at(-1)?.[0] as PromptAuditDraft
+    expect(updated.prompt_templates).toEqual([expect.objectContaining({ id: 'builtin' })])
+    expect(updated.active_prompt_template_id).toBe('builtin')
   })
 
   it('keeps confidence thresholds ordered and bounds the client block response', async () => {

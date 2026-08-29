@@ -23,7 +23,7 @@
             <input
               type="radio"
               name="prompt-audit-template"
-              class="mt-1"
+              class="mt-1 h-4 w-4 border-gray-300 text-primary-600 focus:ring-primary-500 dark:border-dark-600 dark:bg-dark-800"
               :checked="template.id === draft.active_prompt_template_id"
               :aria-label="t('admin.promptAudit.templates.activate', { name: template.name })"
               @change="activate(template.id)"
@@ -49,13 +49,13 @@
 
     <BaseDialog :show="Boolean(editing)" :title="editorTitle" width="wide" @close="closeEditor">
       <form v-if="editing" class="space-y-4" @submit.prevent="saveEditor">
-        <label class="block text-sm text-gray-700 dark:text-dark-200">
-          <span>{{ t('admin.promptAudit.templates.name') }}</span>
-          <input v-model="editing.name" class="input mt-1.5 w-full" maxlength="80" required :aria-label="t('admin.promptAudit.templates.name')" />
+        <label class="block">
+          <span class="input-label">{{ t('admin.promptAudit.templates.name') }}</span>
+          <input v-model="editing.name" class="input w-full" maxlength="80" required :aria-label="t('admin.promptAudit.templates.name')" />
         </label>
-        <label class="block text-sm text-gray-700 dark:text-dark-200">
-          <span>{{ t('admin.promptAudit.templates.systemPrompt') }}</span>
-          <textarea v-model="editing.system_prompt" class="input mt-1.5 min-h-[22rem] w-full resize-y font-mono text-xs leading-5" maxlength="100000" required :aria-label="t('admin.promptAudit.templates.systemPrompt')" />
+        <label class="block">
+          <span class="input-label">{{ t('admin.promptAudit.templates.systemPrompt') }}</span>
+          <textarea v-model="editing.system_prompt" class="input min-h-[22rem] w-full resize-y font-mono text-xs leading-5" maxlength="100000" required :aria-label="t('admin.promptAudit.templates.systemPrompt')" />
           <span class="mt-1 block text-right text-xs tabular-nums text-gray-500 dark:text-dark-400">{{ editing.system_prompt.length.toLocaleString() }} / 100,000</span>
         </label>
       </form>
@@ -66,6 +66,15 @@
         </div>
       </template>
     </BaseDialog>
+    <ConfirmDialog
+      :show="Boolean(pendingDelete)"
+      :title="t('common.delete')"
+      :message="pendingDelete ? t('admin.promptAudit.templates.deleteConfirm', { name: pendingDelete.name }) : ''"
+      :confirm-text="t('common.delete')"
+      danger
+      @confirm="confirmRemoveTemplate"
+      @cancel="pendingDelete = null"
+    />
   </section>
 </template>
 
@@ -73,6 +82,7 @@
 import { computed, ref } from 'vue'
 import { useI18n } from 'vue-i18n'
 import BaseDialog from '@/components/common/BaseDialog.vue'
+import ConfirmDialog from '@/components/common/ConfirmDialog.vue'
 import type { PromptAuditDraft, PromptAuditTemplate } from '../types'
 import { cloneData, DEFAULT_PROMPT_TEMPLATE_ID } from '../viewModel'
 
@@ -81,6 +91,7 @@ const emit = defineEmits<{ (event: 'update:draft', value: PromptAuditDraft): voi
 const { t } = useI18n()
 const editing = ref<PromptAuditTemplate | null>(null)
 const editingOriginalID = ref('')
+const pendingDelete = ref<PromptAuditTemplate | null>(null)
 
 const editorTitle = computed(() => editingOriginalID.value
   ? t('admin.promptAudit.templates.edit')
@@ -147,12 +158,18 @@ function saveEditor() {
   closeEditor()
 }
 function removeTemplate(template: PromptAuditTemplate) {
-  if (template.builtin || !window.confirm(t('admin.promptAudit.templates.deleteConfirm', { name: template.name }))) return
+  if (template.builtin) return
+  pendingDelete.value = cloneData(template)
+}
+function confirmRemoveTemplate() {
+  const template = pendingDelete.value
+  if (!template) return
   const templates = props.draft.prompt_templates.filter((item) => item.id !== template.id).map((item) => cloneData(item))
   const fallback = templates.find((item) => item.id === DEFAULT_PROMPT_TEMPLATE_ID)?.id ?? templates[0]?.id ?? ''
   emitDraft({
     prompt_templates: templates,
     active_prompt_template_id: props.draft.active_prompt_template_id === template.id ? fallback : props.draft.active_prompt_template_id,
   })
+  pendingDelete.value = null
 }
 </script>

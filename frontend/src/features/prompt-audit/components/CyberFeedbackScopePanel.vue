@@ -18,15 +18,17 @@
       <div class="rounded-xl border border-gray-200 p-4 dark:border-dark-700/60 dark:bg-dark-900/20">
         <h3 class="text-sm font-semibold text-gray-900 dark:text-white">{{ t('admin.promptAudit.cyberScope.accountsTitle') }}</h3>
         <p class="mt-1 text-xs leading-5 text-gray-500 dark:text-dark-400">{{ t('admin.promptAudit.cyberScope.accountsHint') }}</p>
-        <input v-model="accountSearch" type="search" class="input mt-3 w-full" :disabled="loading" :placeholder="t('admin.promptAudit.cyberScope.searchAccounts')" />
-        <div v-if="error" role="alert" class="mt-2 rounded-lg bg-red-50 px-3 py-2 text-xs text-red-700 dark:bg-red-950/30 dark:text-red-200">
-          {{ error }} <button type="button" class="ml-2 underline" @click="$emit('retry')">{{ t('admin.promptAudit.actions.retry') }}</button>
+        <label class="input-label mt-4" for="prompt-audit-cyber-account-search">{{ t('admin.promptAudit.cyberScope.searchAccounts') }}</label>
+        <input id="prompt-audit-cyber-account-search" v-model="accountSearch" type="search" class="input w-full" :disabled="loading" :placeholder="t('admin.promptAudit.cyberScope.searchAccounts')" />
+        <div v-if="error" role="alert" class="mt-2 flex flex-wrap items-center justify-between gap-3 rounded-lg bg-red-50 px-3 py-2 text-xs text-red-700 dark:bg-red-950/30 dark:text-red-200">
+          <span>{{ error }}</span>
+          <button type="button" class="btn btn-secondary btn-sm" @click="$emit('retry')">{{ t('admin.promptAudit.actions.retry') }}</button>
         </div>
         <div v-else-if="loading" class="mt-2 rounded-lg border border-gray-200 px-3 py-8 text-center text-sm text-gray-500 dark:border-dark-700">{{ t('admin.promptAudit.cyberScope.loadingAccounts') }}</div>
         <div v-else class="mt-2 max-h-64 overflow-y-auto rounded-lg border border-gray-200 p-1.5 dark:border-dark-700" data-test="cyber-scope-accounts">
           <label v-for="account in filteredAccounts" :key="account.id" class="flex cursor-pointer items-center justify-between gap-2 rounded-md px-2 py-2 text-sm hover:bg-gray-50 dark:hover:bg-dark-800">
             <span class="flex min-w-0 items-center gap-2 text-gray-800 dark:text-dark-100">
-              <input type="checkbox" :checked="draft.cyber_feedback_account_ids.includes(account.id)" @change="toggleAccount(account.id)" />
+              <input type="checkbox" class="h-4 w-4 rounded border-gray-300 text-primary-600 focus:ring-primary-500 dark:border-dark-600 dark:bg-dark-800" :checked="draft.cyber_feedback_account_ids.includes(account.id)" @change="toggleAccount(account.id)" />
               <span class="min-w-0">
                 <span class="block truncate">{{ account.name }}</span>
                 <span class="block truncate text-[11px] text-gray-400">#{{ account.id }} · {{ account.platform }} / {{ account.type }}</span>

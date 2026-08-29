@@ -19,13 +19,13 @@
         </div>
         <p class="mt-2 text-xs text-gray-500 dark:text-dark-400">{{ t('admin.promptAudit.events.filterTimeRangeHint') }}</p>
         <div v-if="preset === 'custom'" class="mt-3 grid gap-3 sm:grid-cols-2" data-test="custom-range">
-          <label class="text-xs text-gray-600 dark:text-dark-200">
-            <span>{{ t('admin.promptAudit.events.startAt') }}</span>
-            <input v-model="local.start_at" type="datetime-local" class="input mt-1 w-full" :aria-label="t('admin.promptAudit.events.startAt')" @change="criteriaChanged" />
+          <label class="block">
+            <span class="input-label">{{ t('admin.promptAudit.events.startAt') }}</span>
+            <input v-model="local.start_at" type="datetime-local" class="input w-full" :aria-label="t('admin.promptAudit.events.startAt')" @change="criteriaChanged" />
           </label>
-          <label class="text-xs text-gray-600 dark:text-dark-200">
-            <span>{{ t('admin.promptAudit.events.endAt') }}</span>
-            <input v-model="local.end_at" type="datetime-local" class="input mt-1 w-full" :aria-label="t('admin.promptAudit.events.endAt')" @change="criteriaChanged" />
+          <label class="block">
+            <span class="input-label">{{ t('admin.promptAudit.events.endAt') }}</span>
+            <input v-model="local.end_at" type="datetime-local" class="input w-full" :aria-label="t('admin.promptAudit.events.endAt')" @change="criteriaChanged" />
           </label>
           <p v-if="!canPreview" class="text-xs text-red-600 dark:text-red-400 sm:col-span-2">{{ t('admin.promptAudit.events.customRangeInvalid') }}</p>
         </div>
@@ -57,13 +57,13 @@
       <details class="rounded-xl border border-gray-200 px-4 py-3 dark:border-dark-700/60" data-test="more-conditions">
         <summary class="cursor-pointer select-none text-xs font-medium text-gray-600 dark:text-dark-200">{{ t('admin.promptAudit.events.moreConditions') }}</summary>
         <div class="mt-3 grid gap-3 sm:grid-cols-2">
-          <label class="text-xs text-gray-600 dark:text-dark-200">
-            <span>{{ t('admin.promptAudit.events.endpoint') }}</span>
-            <input v-model="local.endpoint" type="text" class="input mt-1 w-full" :aria-label="t('admin.promptAudit.events.endpoint')" @input="criteriaChanged" />
+          <label class="block">
+            <span class="input-label">{{ t('admin.promptAudit.events.endpoint') }}</span>
+            <input v-model="local.endpoint" type="text" class="input w-full" :aria-label="t('admin.promptAudit.events.endpoint')" @input="criteriaChanged" />
           </label>
-          <label class="text-xs text-gray-600 dark:text-dark-200">
-            <span>{{ t('admin.promptAudit.events.keyword') }}</span>
-            <input v-model="local.keyword" type="text" class="input mt-1 w-full" :aria-label="t('admin.promptAudit.events.keyword')" @input="criteriaChanged" />
+          <label class="block">
+            <span class="input-label">{{ t('admin.promptAudit.events.keyword') }}</span>
+            <input v-model="local.keyword" type="text" class="input w-full" :aria-label="t('admin.promptAudit.events.keyword')" @input="criteriaChanged" />
           </label>
           <div>
             <label class="input-label">{{ t('admin.promptAudit.events.group') }}</label>
@@ -76,9 +76,9 @@
               @update:model-value="setSelectFilter('group_id', $event)"
             />
           </div>
-          <label class="text-xs text-gray-600 dark:text-dark-200">
-            <span>{{ t('admin.promptAudit.events.userId') }}</span>
-            <input v-model="local.user_id" type="number" class="input mt-1 w-full" :aria-label="t('admin.promptAudit.events.userId')" @input="criteriaChanged" />
+          <label class="block">
+            <span class="input-label">{{ t('admin.promptAudit.events.userId') }}</span>
+            <input v-model="local.user_id" type="number" class="input w-full" :aria-label="t('admin.promptAudit.events.userId')" @input="criteriaChanged" />
           </label>
         </div>
       </details>

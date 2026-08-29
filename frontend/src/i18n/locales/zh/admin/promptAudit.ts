@@ -150,6 +150,7 @@ export default {
         noRiskCandidates: '当前筛选没有内容高/严重风险或 CYB 命中的候选。',
         noProfiles: '当前筛选下没有用户画像。',
         pageSummary: '共 {total} 条 · 第 {page} / {pages} 页',
+        pageSize: '每页条数',
         previous: '上一页',
         next: '下一页',
       },

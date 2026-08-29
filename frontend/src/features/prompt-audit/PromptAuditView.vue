@@ -122,10 +122,22 @@
     <div v-if="draft && activeTab === 'config'" class="sticky bottom-4 z-30 w-full rounded-2xl border border-gray-200 bg-white/95 px-4 py-3 shadow-xl backdrop-blur dark:border-dark-700 dark:bg-dark-900/95">
       <div class="flex w-full flex-wrap items-center justify-between gap-3">
         <div class="flex flex-wrap items-center gap-x-5 gap-y-2">
-          <SaveToggle :label="t('admin.promptAudit.saveBar.enabled')" :model-value="draft.enabled" data-test="enabled-toggle" @update:model-value="setEnabled" />
-          <SaveToggle :label="t('admin.promptAudit.saveBar.blocking')" :model-value="draft.blocking_enabled" :disabled="!draft.enabled" data-test="blocking-toggle" @update:model-value="setBlocking" />
-          <SaveToggle :label="t('admin.promptAudit.saveBar.blockingLatestTurnOnly')" :model-value="draft.blocking_latest_turn_only" :disabled="!draft.enabled || !draft.blocking_enabled" data-test="blocking-latest-turn-only-toggle" @update:model-value="replaceDraft({ ...draft!, blocking_latest_turn_only: $event })" />
-          <SaveToggle :label="t('admin.promptAudit.saveBar.storePass')" :model-value="draft.store_pass_events" data-test="store-pass-toggle" @update:model-value="replaceDraft({ ...draft!, store_pass_events: $event })" />
+          <div class="flex items-center gap-2.5 text-sm text-gray-700 dark:text-dark-200">
+            <Toggle :model-value="draft.enabled" :aria-label="t('admin.promptAudit.saveBar.enabled')" data-test="enabled-toggle" @update:model-value="setEnabled" />
+            <span>{{ t('admin.promptAudit.saveBar.enabled') }}</span>
+          </div>
+          <div class="flex items-center gap-2.5 text-sm text-gray-700 dark:text-dark-200" :class="{ 'opacity-50': !draft.enabled }">
+            <Toggle :model-value="draft.blocking_enabled" :disabled="!draft.enabled" :aria-label="t('admin.promptAudit.saveBar.blocking')" data-test="blocking-toggle" @update:model-value="setBlocking" />
+            <span>{{ t('admin.promptAudit.saveBar.blocking') }}</span>
+          </div>
+          <div class="flex items-center gap-2.5 text-sm text-gray-700 dark:text-dark-200" :class="{ 'opacity-50': !draft.enabled || !draft.blocking_enabled }">
+            <Toggle :model-value="draft.blocking_latest_turn_only" :disabled="!draft.enabled || !draft.blocking_enabled" :aria-label="t('admin.promptAudit.saveBar.blockingLatestTurnOnly')" data-test="blocking-latest-turn-only-toggle" @update:model-value="replaceDraft({ ...draft!, blocking_latest_turn_only: $event })" />
+            <span>{{ t('admin.promptAudit.saveBar.blockingLatestTurnOnly') }}</span>
+          </div>
+          <div class="flex items-center gap-2.5 text-sm text-gray-700 dark:text-dark-200">
+            <Toggle :model-value="draft.store_pass_events" :aria-label="t('admin.promptAudit.saveBar.storePass')" data-test="store-pass-toggle" @update:model-value="replaceDraft({ ...draft!, store_pass_events: $event })" />
+            <span>{{ t('admin.promptAudit.saveBar.storePass') }}</span>
+          </div>
         </div>
         <div class="flex items-center gap-3">
           <span class="text-sm" :class="dirty ? 'text-amber-700 dark:text-amber-300' : 'text-gray-500 dark:text-dark-400'">
@@ -174,10 +186,11 @@
 </template>
 
 <script setup lang="ts">
-import { computed, defineComponent, h, onMounted, reactive, ref } from 'vue'
+import { computed, onMounted, reactive, ref } from 'vue'
 import { useI18n } from 'vue-i18n'
 import AppLayout from '@/components/layout/AppLayout.vue'
 import ConfirmDialog from '@/components/common/ConfirmDialog.vue'
+import Toggle from '@/components/common/Toggle.vue'
 import Icon from '@/components/icons/Icon.vue'
 import { useAppStore } from '@/stores/app'
 import { extractApiErrorCode, extractApiErrorMessage } from '@/utils/apiError'
@@ -239,41 +252,6 @@ const deleteRequest = reactive<{ mode: '' | 'single' | 'batch'; ids: number[] }>
 const loading = reactive({ config: false, runtime: false, groups: false, accounts: false, events: false, saving: false, detail: false, deleting: false, previewing: false })
 const loadErrors = reactive<PromptLoadErrors>({ config: '', runtime: '', groups: '', accounts: '', events: '' })
 const dirty = computed(() => draftFingerprint(draft.value) !== draftFingerprint(serverConfig.value))
-
-const SaveToggle = defineComponent({
-  inheritAttrs: false,
-  props: { label: { type: String, required: true }, modelValue: { type: Boolean, required: true }, disabled: { type: Boolean, default: false } },
-  emits: ['update:modelValue'],
-  setup(props, { emit, attrs }) {
-    return () => h('label', { class: ['flex items-center gap-2.5 text-sm', props.disabled ? 'cursor-not-allowed opacity-50' : 'cursor-pointer'] }, [
-      h('button', {
-        ...attrs,
-        type: 'button',
-        role: 'switch',
-        'aria-checked': props.modelValue,
-        'aria-label': props.label,
-        disabled: props.disabled,
-        class: [
-          'relative inline-flex h-6 w-11 shrink-0 items-center rounded-full border-2 border-transparent transition-colors duration-200 focus:outline-none focus-visible:ring-2 focus-visible:ring-primary-500 focus-visible:ring-offset-2',
-          props.modelValue ? 'bg-primary-600' : 'bg-gray-300 dark:bg-dark-600',
-          props.disabled ? 'cursor-not-allowed' : 'cursor-pointer',
-        ],
-        onClick: (event: MouseEvent) => {
-          event.preventDefault()
-          if (!props.disabled) emit('update:modelValue', !props.modelValue)
-        },
-      }, [
-        h('span', {
-          class: [
-            'pointer-events-none inline-block h-5 w-5 rounded-full bg-white shadow transition-transform duration-200 ease-in-out',
-            props.modelValue ? 'translate-x-5' : 'translate-x-0',
-          ],
-        }),
-      ]),
-      h('span', { class: 'select-none text-gray-700 dark:text-dark-200' }, props.label),
-    ])
-  },
-})
 
 function errorMessage(error: unknown, fallbackKey: string): string {
   const code = extractApiErrorCode(error)

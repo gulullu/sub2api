@@ -51,9 +51,9 @@
         </div>
       </div>
 
-      <label class="block text-sm text-gray-700 dark:text-dark-200">
-        <span>{{ t('admin.promptAudit.riskRoute.search') }}</span>
-        <input v-model="search" type="search" class="input mt-1.5 w-full" :disabled="!editable || loading" :aria-label="t('admin.promptAudit.riskRoute.search')" />
+      <label class="block">
+        <span class="input-label">{{ t('admin.promptAudit.riskRoute.search') }}</span>
+        <input v-model="search" type="search" class="input w-full" :disabled="!editable || loading" :aria-label="t('admin.promptAudit.riskRoute.search')" />
       </label>
 
       <div v-if="error" role="alert" class="mt-3 flex flex-wrap items-center justify-between gap-3 rounded-lg bg-red-50 px-3 py-2 text-sm text-red-700 dark:bg-red-950/30 dark:text-red-200">
@@ -71,7 +71,7 @@
           :class="editable ? 'cursor-pointer' : 'cursor-not-allowed opacity-60'"
         >
           <span class="flex min-w-0 flex-1 items-start gap-2">
-            <input type="checkbox" :checked="selectedIDSet.has(account.id)" :disabled="!editable" :aria-label="account.name" @change="toggle(account.id)" />
+            <input type="checkbox" class="mt-0.5 h-4 w-4 rounded border-gray-300 text-primary-600 focus:ring-primary-500 disabled:cursor-not-allowed disabled:opacity-50 dark:border-dark-600 dark:bg-dark-800" :checked="selectedIDSet.has(account.id)" :disabled="!editable" :aria-label="account.name" @change="toggle(account.id)" />
             <span class="min-w-0 flex-1">
               <span class="block truncate font-medium text-gray-800 dark:text-dark-100">{{ account.name }}</span>
               <span class="block truncate text-[11px] text-gray-500 dark:text-dark-400">#{{ account.id }} · {{ account.platform }} / {{ account.type }}</span>

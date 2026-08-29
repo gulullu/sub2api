@@ -5,17 +5,19 @@
         <h2 id="prompt-pool-title" class="text-base font-semibold text-gray-950 dark:text-white">{{ t('admin.promptAudit.pool.title') }}</h2>
         <p class="mt-1 text-sm text-gray-500 dark:text-dark-300">{{ t('admin.promptAudit.pool.description') }}</p>
       </div>
-      <button type="button" class="btn btn-primary btn-sm" data-test="add-endpoint" @click="openCreate">
-        {{ t('admin.promptAudit.pool.add') }}
-      </button>
-      <ColumnSettingsDropdown
-        :label="t('admin.promptAudit.pool.columns')"
-        :columns="endpointConfigurableColumns"
-        :is-visible="isEndpointColumnVisible"
-        button-test="endpoint-column-settings"
-        menu-test="endpoint-column-menu"
-        @toggle="toggleEndpointColumn"
-      />
+      <div class="flex flex-wrap items-center justify-end gap-2">
+        <button type="button" class="btn btn-primary" data-test="add-endpoint" @click="openCreate">
+          {{ t('admin.promptAudit.pool.add') }}
+        </button>
+        <ColumnSettingsDropdown
+          :label="t('admin.promptAudit.pool.columns')"
+          :columns="endpointConfigurableColumns"
+          :is-visible="isEndpointColumnVisible"
+          button-test="endpoint-column-settings"
+          menu-test="endpoint-column-menu"
+          @toggle="toggleEndpointColumn"
+        />
+      </div>
     </div>
 
     <div v-if="endpoints.length === 0" class="mt-5 rounded-xl border border-dashed border-gray-300 px-5 py-10 text-center text-sm text-gray-500 dark:border-dark-600 dark:bg-dark-900/20 dark:text-dark-300">
@@ -80,20 +82,11 @@
           </div>
 
           <div v-if="isEndpointColumnVisible('node')" class="endpoint-sticky-left flex min-w-0 items-center gap-3">
-            <button
-              type="button"
-              role="switch"
-              :aria-checked="endpoint.enabled"
+            <Toggle
+              :model-value="endpoint.enabled"
               :aria-label="t('admin.promptAudit.pool.toggleNode', { name: endpoint.name })"
-              class="relative inline-flex h-6 w-11 shrink-0 cursor-pointer items-center rounded-full border-2 border-transparent transition-colors duration-200 focus:outline-none focus-visible:ring-2 focus-visible:ring-primary-500 focus-visible:ring-offset-2"
-              :class="endpoint.enabled ? 'bg-primary-600' : 'bg-gray-200 dark:bg-dark-600'"
-              @click="toggleEndpoint(endpoint.id)"
-            >
-              <span
-                class="pointer-events-none inline-block h-5 w-5 rounded-full bg-white shadow transition-transform duration-200 ease-in-out"
-                :class="endpoint.enabled ? 'translate-x-5' : 'translate-x-0'"
-              />
-            </button>
+              @update:model-value="toggleEndpoint(endpoint.id)"
+            />
             <div class="min-w-0">
               <div class="flex min-w-0 items-center gap-2">
                 <p class="truncate font-semibold text-gray-950 dark:text-white">{{ endpoint.name }}</p>
@@ -146,16 +139,16 @@
 
     <BaseDialog :show="Boolean(editing)" :title="editingIndex < 0 ? t('admin.promptAudit.pool.add') : t('admin.promptAudit.pool.edit')" width="wide" @close="closeEditor">
       <form v-if="editing" class="grid gap-4 sm:grid-cols-2" @submit.prevent="saveEditor">
-        <label class="space-y-1 text-sm text-gray-700 dark:text-dark-200">
-          <span>{{ t('admin.promptAudit.pool.name') }}</span>
+        <label class="block">
+          <span class="input-label">{{ t('admin.promptAudit.pool.name') }}</span>
           <input v-model="editing.name" class="input w-full" required :aria-label="t('admin.promptAudit.pool.name')" />
         </label>
-        <label class="space-y-1 text-sm text-gray-700 dark:text-dark-200">
-          <span>{{ t('admin.promptAudit.pool.id') }}</span>
+        <label class="block">
+          <span class="input-label">{{ t('admin.promptAudit.pool.id') }}</span>
           <input v-model="editing.id" class="input w-full" required :disabled="editingIndex >= 0" :aria-label="t('admin.promptAudit.pool.id')" />
         </label>
-        <label class="space-y-1 text-sm text-gray-700 dark:text-dark-200 sm:col-span-2">
-          <span>{{ t('admin.promptAudit.pool.priority') }}</span>
+        <label class="block sm:col-span-2">
+          <span class="input-label">{{ t('admin.promptAudit.pool.priority') }}</span>
           <input
             v-model.number="editing.priority"
             data-test="endpoint-priority"
@@ -166,53 +159,55 @@
             required
             :aria-label="t('admin.promptAudit.pool.priority')"
           />
-          <span class="block text-xs text-gray-500 dark:text-dark-400">{{ t('admin.promptAudit.pool.priorityHint') }}</span>
+          <span class="input-hint block">{{ t('admin.promptAudit.pool.priorityHint') }}</span>
         </label>
-        <label class="space-y-1 text-sm text-gray-700 dark:text-dark-200 sm:col-span-2">
-          <span>{{ t('admin.promptAudit.pool.adapter') }}</span>
-          <select :value="editing.adapter" class="input w-full" :aria-label="t('admin.promptAudit.pool.adapter')" @change="changeAdapter(($event.target as HTMLSelectElement).value as PromptAuditAdapter)">
-            <option value="confidence_json">{{ t('admin.promptAudit.pool.adapters.confidence_json') }}</option>
-            <option value="qwen3guard">{{ t('admin.promptAudit.pool.adapters.qwen3guard') }}</option>
-            <option value="openai_moderation">{{ t('admin.promptAudit.pool.adapters.openai_moderation') }}</option>
-          </select>
-          <span class="block text-xs text-gray-500 dark:text-dark-400">{{ t(`admin.promptAudit.pool.adapterHints.${editing.adapter}`) }}</span>
-        </label>
-        <label class="space-y-1 text-sm text-gray-700 dark:text-dark-200 sm:col-span-2">
-          <span>{{ t('admin.promptAudit.pool.baseUrl') }}</span>
+        <div class="sm:col-span-2">
+          <label class="input-label">{{ t('admin.promptAudit.pool.adapter') }}</label>
+          <Select
+            :model-value="editing.adapter"
+            :options="adapterOptions"
+            :searchable="false"
+            :aria-label="t('admin.promptAudit.pool.adapter')"
+            data-test="endpoint-adapter"
+            @update:model-value="changeAdapter($event as PromptAuditAdapter)"
+          />
+          <span class="input-hint block">{{ t(`admin.promptAudit.pool.adapterHints.${editing.adapter}`) }}</span>
+        </div>
+        <label class="block sm:col-span-2">
+          <span class="input-label">{{ t('admin.promptAudit.pool.baseUrl') }}</span>
           <input v-model="editing.base_url" class="input w-full" required inputmode="url" :disabled="editing.credential_source === 'content_moderation'" :aria-label="t('admin.promptAudit.pool.baseUrl')" />
         </label>
-        <label class="space-y-1 text-sm text-gray-700 dark:text-dark-200 sm:col-span-2">
-          <span>{{ t('admin.promptAudit.pool.apiKey') }}</span>
+        <label class="block sm:col-span-2">
+          <span class="input-label">{{ t('admin.promptAudit.pool.apiKey') }}</span>
           <input v-model="editing.token" class="input w-full" type="password" autocomplete="new-password" :disabled="editing.credential_source === 'content_moderation'" :placeholder="editing.has_token ? (editing.token_status === 'invalid' ? t('admin.promptAudit.pool.reenterSecret') : t('admin.promptAudit.pool.keepSecret')) : ''" :aria-label="t('admin.promptAudit.pool.apiKey')" />
-          <span class="block text-xs text-gray-500 dark:text-dark-400">{{ t('admin.promptAudit.pool.secretHint') }}</span>
+          <span class="input-hint block">{{ t('admin.promptAudit.pool.secretHint') }}</span>
         </label>
-        <label v-if="editing.adapter === 'openai_moderation'" class="flex items-start gap-2 rounded-lg bg-gray-50 px-3 py-3 text-sm text-gray-700 dark:bg-dark-900/60 dark:text-dark-200 sm:col-span-2">
-          <input
-            type="checkbox"
-            class="mt-0.5"
-            :checked="editing.credential_source === 'content_moderation'"
-            data-test="reuse-content-moderation-credential"
-            @change="toggleContentModerationCredential"
-          />
-          <span>
-            <span class="block font-medium">{{ t('admin.promptAudit.pool.reuseContentModerationCredential') }}</span>
+        <div v-if="editing.adapter === 'openai_moderation'" class="flex items-center justify-between gap-4 rounded-xl border border-gray-200 bg-gray-50/70 px-4 py-3 dark:border-dark-700 dark:bg-dark-900/40 sm:col-span-2">
+          <span class="min-w-0">
+            <span class="block text-sm font-medium text-gray-800 dark:text-dark-100">{{ t('admin.promptAudit.pool.reuseContentModerationCredential') }}</span>
             <span class="mt-0.5 block text-xs leading-5 text-gray-500 dark:text-dark-400">{{ t('admin.promptAudit.pool.reuseContentModerationCredentialHint') }}</span>
           </span>
-        </label>
+          <Toggle
+            :model-value="editing.credential_source === 'content_moderation'"
+            :aria-label="t('admin.promptAudit.pool.reuseContentModerationCredential')"
+            data-test="reuse-content-moderation-credential"
+            @update:model-value="toggleContentModerationCredential"
+          />
+        </div>
         <label v-if="editing.has_token && editing.credential_source !== 'content_moderation'" class="flex items-center gap-2 text-sm text-red-600 dark:text-red-300 sm:col-span-2">
-          <input v-model="editing.clear_token" type="checkbox" :aria-label="t('admin.promptAudit.pool.clearSecret')" />
+          <input v-model="editing.clear_token" type="checkbox" class="h-4 w-4 rounded border-gray-300 text-primary-600 focus:ring-primary-500 dark:border-dark-600 dark:bg-dark-800" :aria-label="t('admin.promptAudit.pool.clearSecret')" />
           {{ t('admin.promptAudit.pool.clearSecret') }}
         </label>
-        <label class="space-y-1 text-sm text-gray-700 dark:text-dark-200 sm:col-span-2">
-          <span>{{ t('admin.promptAudit.pool.model') }}</span>
+        <label class="block sm:col-span-2">
+          <span class="input-label">{{ t('admin.promptAudit.pool.model') }}</span>
           <input v-model="editing.model" class="input w-full" :disabled="editing.credential_source === 'content_moderation'" :aria-label="t('admin.promptAudit.pool.model')" />
         </label>
-        <label class="space-y-1 text-sm text-gray-700 dark:text-dark-200">
-          <span>{{ t('admin.promptAudit.pool.timeout') }}</span>
+        <label class="block">
+          <span class="input-label">{{ t('admin.promptAudit.pool.timeout') }}</span>
           <input v-model.number="editing.timeout_ms" class="input w-full" type="number" min="100" max="40000" required :aria-label="t('admin.promptAudit.pool.timeout')" />
         </label>
-        <label class="space-y-1 text-sm text-gray-700 dark:text-dark-200">
-          <span>{{ t('admin.promptAudit.pool.inputLimit') }}</span>
+        <label class="block">
+          <span class="input-label">{{ t('admin.promptAudit.pool.inputLimit') }}</span>
           <input v-model.number="editing.input_limit" class="input w-full" type="number" min="128" max="400000" required :aria-label="t('admin.promptAudit.pool.inputLimit')" />
         </label>
         <p class="text-xs text-gray-500 dark:text-dark-400 sm:col-span-2">{{ t('admin.promptAudit.pool.limitBounds') }}</p>
@@ -224,6 +219,15 @@
         </div>
       </template>
     </BaseDialog>
+    <ConfirmDialog
+      :show="Boolean(pendingDelete)"
+      :title="t('common.delete')"
+      :message="pendingDelete ? t('admin.promptAudit.pool.deleteConfirm', { name: pendingDelete.name }) : ''"
+      :confirm-text="t('common.delete')"
+      danger
+      @confirm="confirmRemoveEndpoint"
+      @cancel="pendingDelete = null"
+    />
   </section>
 </template>
 
@@ -231,6 +235,9 @@
 import { computed, onMounted, ref } from 'vue'
 import { useI18n } from 'vue-i18n'
 import BaseDialog from '@/components/common/BaseDialog.vue'
+import ConfirmDialog from '@/components/common/ConfirmDialog.vue'
+import Select, { type SelectOption } from '@/components/common/Select.vue'
+import Toggle from '@/components/common/Toggle.vue'
 import type { PromptAuditAdapter, PromptAuditEndpointDraft, PromptProbeResult } from '../types'
 import ColumnSettingsDropdown from './ColumnSettingsDropdown.vue'
 import {
@@ -256,12 +263,18 @@ const emit = defineEmits<{
 const { t } = useI18n()
 const editing = ref<PromptAuditEndpointDraft | null>(null)
 const editingIndex = ref(-1)
+const pendingDelete = ref<PromptAuditEndpointDraft | null>(null)
 const hiddenEndpointColumns = ref<string[]>([])
 const orderedEndpoints = computed(() => orderedPromptAuditEndpoints(props.endpoints))
 const enabledEndpoints = computed(() => orderedEndpoints.value.filter((endpoint) => endpoint.enabled))
 const enabledEndpointCount = computed(() => enabledEndpoints.value.length)
 const enabledTimeoutMS = computed(() => enabledFailoverTimeoutMS(props.endpoints))
 const timeoutWarning = computed(() => enabledTimeoutMS.value > RECOMMENDED_FAILOVER_TIMEOUT_MS)
+const adapterOptions = computed<SelectOption[]>(() => [
+  { value: 'confidence_json', label: t('admin.promptAudit.pool.adapters.confidence_json') },
+  { value: 'qwen3guard', label: t('admin.promptAudit.pool.adapters.qwen3guard') },
+  { value: 'openai_moderation', label: t('admin.promptAudit.pool.adapters.openai_moderation') },
+])
 const endpointColumns = computed(() => [
   { key: 'order', label: t('admin.promptAudit.pool.failoverOrder') },
   { key: 'node', label: t('admin.promptAudit.pool.node') },
@@ -383,8 +396,13 @@ function toggleEndpoint(id: string) {
   emit('update:endpoints', props.endpoints.map((item) => item.id === id ? { ...item, enabled: !item.enabled } : cloneData(item)))
 }
 function removeEndpoint(endpoint: PromptAuditEndpointDraft) {
-  if (!window.confirm(t('admin.promptAudit.pool.deleteConfirm', { name: endpoint.name }))) return
+  pendingDelete.value = cloneData(endpoint)
+}
+function confirmRemoveEndpoint() {
+  const endpoint = pendingDelete.value
+  if (!endpoint) return
   emit('update:endpoints', props.endpoints.filter((item) => item.id !== endpoint.id).map((item) => cloneData(item)))
+  pendingDelete.value = null
 }
 function hasCredential(endpoint: PromptAuditEndpointDraft): boolean {
   return Boolean(endpoint.credential_source || endpoint.token.trim() || (endpoint.has_token && !endpoint.clear_token))
@@ -397,9 +415,8 @@ function adapterLabel(adapter: PromptAuditAdapter): string {
   if (adapter === 'openai_moderation') return 'OpenAI Moderation'
   return 'Qwen3Guard'
 }
-function toggleContentModerationCredential() {
+function toggleContentModerationCredential(enabled: boolean) {
   if (!editing.value) return
-  const enabled = editing.value.credential_source !== 'content_moderation'
   editing.value.credential_source = enabled ? 'content_moderation' : ''
   if (enabled) {
     editing.value.token = ''

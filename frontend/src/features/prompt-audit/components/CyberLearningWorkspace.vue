@@ -76,7 +76,7 @@
             />
           </div>
         </div>
-        <button type="button" class="btn btn-secondary btn-sm" :disabled="!hasListFilters || loading" data-test="cyber-reset-filters" @click="resetListFilters">{{ t('admin.promptAudit.cyber.resetFilters') }}</button>
+        <button type="button" class="btn btn-secondary" :disabled="!hasListFilters || loading" data-test="cyber-reset-filters" @click="resetListFilters">{{ t('admin.promptAudit.cyber.resetFilters') }}</button>
       </div>
 
       <div v-if="error" role="alert" class="m-4 rounded-lg bg-red-50 px-4 py-3 text-sm text-red-700 dark:bg-red-950/30 dark:text-red-300">
@@ -274,13 +274,13 @@
             <button v-if="canRegenerate" type="button" class="btn btn-secondary btn-sm mt-3" :disabled="mutating" data-test="cyber-regenerate" @click="regenerateSelected">{{ t('admin.promptAudit.cyber.generation.regenerate') }}</button>
             <p v-else class="mt-2 text-xs">{{ t('admin.promptAudit.cyber.generation.unavailableWithoutEvidence') }}</p>
           </div>
-          <textarea v-else id="cyber-rule-text" v-model="ruleText" rows="6" class="input mt-2 resize-y" :placeholder="t('admin.promptAudit.cyber.adopt.rulePlaceholder')" />
+          <textarea v-else id="cyber-rule-text" v-model="ruleText" rows="6" class="input resize-y" :placeholder="t('admin.promptAudit.cyber.adopt.rulePlaceholder')" />
           <p class="mt-2 text-xs leading-5 text-gray-500 dark:text-gray-400">{{ t('admin.promptAudit.cyber.adopt.ruleHint') }}</p>
         </section>
 
         <section class="rounded-xl bg-gray-50 p-4 dark:bg-dark-900">
           <label class="input-label" for="cyber-reject-reason">{{ t('admin.promptAudit.cyber.reject.reasonLabel') }}</label>
-          <textarea id="cyber-reject-reason" v-model="rejectReason" rows="3" class="input mt-2 resize-y" :placeholder="t('admin.promptAudit.cyber.reject.reasonPlaceholder')" />
+          <textarea id="cyber-reject-reason" v-model="rejectReason" rows="3" class="input resize-y" :placeholder="t('admin.promptAudit.cyber.reject.reasonPlaceholder')" />
         </section>
       </div>
       <template #footer>

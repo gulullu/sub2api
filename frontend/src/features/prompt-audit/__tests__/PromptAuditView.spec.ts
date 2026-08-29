@@ -197,11 +197,16 @@ describe('PromptAuditView', () => {
     expect(wrapper.get('[data-test="dialog-preview-state"]').text()).toBe('none')
   })
 
-  it('uses native labeled switches and a responsive sticky save surface', async () => {
+  it('uses shared labeled switches and a responsive sticky save surface', async () => {
     const wrapper = mountView()
     await flushPromises()
     await wrapper.get('[data-test="tab-config"]').trigger('click')
-    const switches = wrapper.findAll('[role="switch"]')
+    const switches = [
+      wrapper.get('[data-test="enabled-toggle"]'),
+      wrapper.get('[data-test="blocking-toggle"]'),
+      wrapper.get('[data-test="blocking-latest-turn-only-toggle"]'),
+      wrapper.get('[data-test="store-pass-toggle"]'),
+    ]
     expect(switches).toHaveLength(4)
     expect(switches.every((item) => Boolean(item.attributes('aria-label')))).toBe(true)
     expect(wrapper.html()).toContain('sticky bottom-4')

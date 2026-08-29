@@ -186,4 +186,47 @@ describe('GroupPolicyWorkspace', () => {
       expect.objectContaining({ group_id: 1, in_scope: false }),
     ])
   })
+
+  it('uses shared controls throughout the group policy editor and persists their changes', async () => {
+    const draft = makeDraft(false)
+    draft.prompt_templates = [
+      { id: 'builtin', name: 'Built-in', system_prompt: 'Built in', builtin: true },
+      { id: 'custom', name: 'Custom', system_prompt: 'Custom', builtin: false },
+    ]
+    draft.active_prompt_template_id = 'builtin'
+    draft.group_policies = [{
+      ...createGroupPolicyFromConfig(draft, 2),
+      enabled: true,
+      blocking_enabled: true,
+      blocking_latest_turn_only: true,
+      active_prompt_template_id: 'builtin',
+    }]
+    const wrapper = mountWorkspace(false, draft)
+
+    await wrapper.get('[data-test="prompt-audit-edit-group-2"]').trigger('click')
+
+    expect(wrapper.find('select').exists()).toBe(false)
+    const fallback = wrapper.get('[data-test="prompt-audit-group-no-route-fallback"]').getComponent(Select)
+    const template = wrapper.get('[data-test="prompt-audit-group-template"]').getComponent(Select)
+    expect(fallback.props('searchable')).toBe(false)
+    expect(template.props('options')).toEqual(expect.arrayContaining([
+      expect.objectContaining({ value: 'builtin' }),
+      expect.objectContaining({ value: 'custom' }),
+    ]))
+
+    fallback.vm.$emit('update:modelValue', 'block')
+    template.vm.$emit('update:modelValue', 'custom')
+    await wrapper.vm.$nextTick()
+
+    const updated = wrapper.emitted('update:draft')?.at(-1)?.[0] as PromptAuditDraft
+    expect(updated.group_policies).toEqual(expect.arrayContaining([
+      expect.objectContaining({ group_id: 2, no_route_fallback_mode: 'block', active_prompt_template_id: 'custom' }),
+    ]))
+
+    await wrapper.get('[data-test="prompt-audit-group-enabled"]').trigger('click')
+    const disabled = wrapper.emitted('update:draft')?.at(-1)?.[0] as PromptAuditDraft
+    expect(disabled.group_policies).toEqual(expect.arrayContaining([
+      expect.objectContaining({ group_id: 2, enabled: false, blocking_enabled: false, blocking_latest_turn_only: false }),
+    ]))
+  })
 })

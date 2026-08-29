@@ -11,25 +11,25 @@
           <legend class="text-sm font-medium text-gray-900 dark:text-white">{{ t('admin.promptAudit.policy.scope') }}</legend>
           <div class="mt-3 flex flex-wrap gap-5 text-sm text-gray-700 dark:text-dark-200">
             <label class="flex items-center gap-2">
-              <input type="radio" name="prompt-audit-scope" :checked="draft.all_groups" @change="patch({ all_groups: true, group_ids: [] })" />
+              <input type="radio" name="prompt-audit-scope" class="h-4 w-4 border-gray-300 text-primary-600 focus:ring-primary-500 dark:border-dark-600 dark:bg-dark-800" :checked="draft.all_groups" @change="patch({ all_groups: true, group_ids: [] })" />
               {{ t('admin.promptAudit.policy.allGroups') }}
             </label>
             <label class="flex items-center gap-2">
-              <input type="radio" name="prompt-audit-scope" :checked="!draft.all_groups" @change="patch({ all_groups: false })" />
+              <input type="radio" name="prompt-audit-scope" class="h-4 w-4 border-gray-300 text-primary-600 focus:ring-primary-500 dark:border-dark-600 dark:bg-dark-800" :checked="!draft.all_groups" @change="patch({ all_groups: false })" />
               {{ t('admin.promptAudit.policy.selectedGroups') }}
             </label>
           </div>
         </fieldset>
 
         <div v-if="!draft.all_groups" class="mt-4">
-          <label class="block text-sm text-gray-700 dark:text-dark-200">
-            <span>{{ t('admin.promptAudit.policy.searchGroups') }}</span>
-            <input v-model="groupSearch" type="search" class="input mt-1.5 w-full" :aria-label="t('admin.promptAudit.policy.searchGroups')" />
+          <label class="block">
+            <span class="input-label">{{ t('admin.promptAudit.policy.searchGroups') }}</span>
+            <input v-model="groupSearch" type="search" class="input w-full" :aria-label="t('admin.promptAudit.policy.searchGroups')" />
           </label>
           <div data-test="prompt-audit-group-results" class="mt-3 max-h-52 overflow-y-auto rounded-lg border border-gray-200 p-2 dark:border-dark-700">
             <label v-for="group in filteredGroups" :key="group.id" class="flex cursor-pointer items-center justify-between gap-3 rounded-md px-2 py-2 text-sm hover:bg-gray-50 dark:hover:bg-dark-800">
               <span class="flex items-center gap-2 text-gray-800 dark:text-dark-100">
-                <input type="checkbox" :checked="draft.group_ids.includes(group.id)" @change="toggleGroup(group.id)" />
+                <input type="checkbox" class="h-4 w-4 rounded border-gray-300 text-primary-600 focus:ring-primary-500 dark:border-dark-600 dark:bg-dark-800" :checked="draft.group_ids.includes(group.id)" @change="toggleGroup(group.id)" />
                 {{ group.name }}
               </span>
               <span class="text-xs text-gray-500 dark:text-dark-400">{{ group.platform }} · {{ group.status }}</span>
@@ -46,7 +46,7 @@
           <legend class="text-sm font-medium text-gray-900 dark:text-white">{{ t('admin.promptAudit.policy.scanners') }}</legend>
           <div class="mt-3 grid gap-2 sm:grid-cols-2">
             <label v-for="scanner in SCANNER_CATALOG" :key="scanner.id" class="flex items-center gap-2 rounded-md px-2 py-1.5 text-sm text-gray-700 hover:bg-gray-50 dark:text-dark-200 dark:hover:bg-dark-800">
-              <input type="checkbox" :checked="draft.scanners.includes(scanner.id)" :aria-label="scannerLabel(scanner.id)" @change="toggleScanner(scanner.id)" />
+              <input type="checkbox" class="h-4 w-4 rounded border-gray-300 text-primary-600 focus:ring-primary-500 dark:border-dark-600 dark:bg-dark-800" :checked="draft.scanners.includes(scanner.id)" :aria-label="scannerLabel(scanner.id)" @change="toggleScanner(scanner.id)" />
               <span>{{ scannerLabel(scanner.id) }}</span>
             </label>
           </div>
@@ -54,17 +54,17 @@
       </div>
 
       <div class="space-y-4 rounded-xl border border-gray-200 p-4 dark:border-dark-700/60 dark:bg-dark-900/20 sm:p-5">
-        <label class="block text-sm text-gray-700 dark:text-dark-200">
-          <span>{{ t('admin.promptAudit.policy.workerCount') }}</span>
-          <input :value="draft.worker_count" type="number" min="1" max="32" class="input mt-1.5 w-full" :aria-label="t('admin.promptAudit.policy.workerCount')" @input="patch({ worker_count: Number(($event.target as HTMLInputElement).value) })" />
+        <label class="block">
+          <span class="input-label">{{ t('admin.promptAudit.policy.workerCount') }}</span>
+          <input :value="draft.worker_count" type="number" min="1" max="32" class="input w-full" :aria-label="t('admin.promptAudit.policy.workerCount')" @input="patch({ worker_count: Number(($event.target as HTMLInputElement).value) })" />
         </label>
-        <label class="block text-sm text-gray-700 dark:text-dark-200">
-          <span>{{ t('admin.promptAudit.policy.queueCapacity') }}</span>
-          <input :value="draft.queue_capacity" type="number" min="1" max="100000" class="input mt-1.5 w-full" :aria-label="t('admin.promptAudit.policy.queueCapacity')" @input="patch({ queue_capacity: Number(($event.target as HTMLInputElement).value) })" />
+        <label class="block">
+          <span class="input-label">{{ t('admin.promptAudit.policy.queueCapacity') }}</span>
+          <input :value="draft.queue_capacity" type="number" min="1" max="100000" class="input w-full" :aria-label="t('admin.promptAudit.policy.queueCapacity')" @input="patch({ queue_capacity: Number(($event.target as HTMLInputElement).value) })" />
         </label>
         <div class="rounded-lg bg-gray-50 px-4 py-3 text-sm text-gray-600 dark:bg-dark-900/50 dark:text-dark-300">
           <p class="font-medium text-gray-800 dark:text-dark-100">{{ t('admin.promptAudit.policy.strategy') }}</p>
-          <p class="mt-1">priority · {{ t('admin.promptAudit.policy.strategyHint') }}</p>
+          <p class="mt-1">{{ t('admin.promptAudit.policy.strategyHint') }}</p>
         </div>
       </div>
     </div>
@@ -101,9 +101,9 @@
       <div class="mt-4 grid gap-3 2xl:grid-cols-[minmax(0,1fr)_320px]">
         <div class="min-w-0 rounded-xl border border-gray-200 p-4 dark:border-dark-700/60 dark:bg-dark-900/20 sm:p-5">
           <div class="grid gap-3 sm:grid-cols-2 xl:grid-cols-6">
-            <label class="block text-sm text-gray-700 dark:text-dark-200 sm:col-span-2 xl:col-span-2">
-              <span>{{ t('admin.promptAudit.policy.profiles.searchUser') }}</span>
-              <div class="mt-1.5 flex gap-2">
+            <label class="block sm:col-span-2 xl:col-span-2">
+              <span class="input-label">{{ t('admin.promptAudit.policy.profiles.searchUser') }}</span>
+              <div class="flex gap-2">
                 <input
                   :value="profileFilters.search"
                   type="search"
@@ -116,31 +116,33 @@
                 <button type="button" class="btn btn-primary btn-sm shrink-0 whitespace-nowrap" @click="applyProfileFilters">{{ t('admin.promptAudit.policy.profiles.searchAction') }}</button>
               </div>
             </label>
-            <label class="block text-sm text-gray-700 dark:text-dark-200">
-              <span>{{ t('admin.promptAudit.policy.profiles.userId') }}</span>
+            <label class="block">
+              <span class="input-label">{{ t('admin.promptAudit.policy.profiles.userId') }}</span>
               <input
                 :value="profileFilters.user_id ?? ''"
                 type="number"
                 min="1"
-                class="input mt-1.5 w-full"
+                class="input w-full"
                 :aria-label="t('admin.promptAudit.policy.profiles.userId')"
                 @change="setProfileUserId(($event.target as HTMLInputElement).value)"
               />
             </label>
-            <label class="block text-sm text-gray-700 dark:text-dark-200">
-              <span>{{ t('admin.promptAudit.policy.profiles.days') }}</span>
-              <input :value="profileFilters.days" type="number" min="1" max="180" class="input mt-1.5 w-full" :aria-label="t('admin.promptAudit.policy.profiles.days')" @change="setProfileDays(($event.target as HTMLInputElement).value)" />
+            <label class="block">
+              <span class="input-label">{{ t('admin.promptAudit.policy.profiles.days') }}</span>
+              <input :value="profileFilters.days" type="number" min="1" max="180" class="input w-full" :aria-label="t('admin.promptAudit.policy.profiles.days')" @change="setProfileDays(($event.target as HTMLInputElement).value)" />
             </label>
-            <label class="block text-sm text-gray-700 dark:text-dark-200">
-              <span>{{ t('admin.promptAudit.policy.profiles.group') }}</span>
-              <select :value="profileFilters.group_id ?? ''" class="input mt-1.5 w-full" :aria-label="t('admin.promptAudit.policy.profiles.group')" @change="setProfileGroupId(($event.target as HTMLSelectElement).value)">
-                <option value="">{{ t('admin.promptAudit.policy.profiles.allGroups') }}</option>
-                <option v-for="group in groups" :key="group.id" :value="group.id">#{{ group.id }} · {{ group.name }}</option>
-              </select>
-            </label>
-            <label class="block text-sm text-gray-700 dark:text-dark-200">
-              <span>{{ t('admin.promptAudit.policy.profiles.minSamples') }}</span>
-              <input :value="profileFilters.min_samples" type="number" min="0" max="100000" class="input mt-1.5 w-full" :aria-label="t('admin.promptAudit.policy.profiles.minSamples')" @change="setProfileMinSamples(($event.target as HTMLInputElement).value)" />
+            <div>
+              <label class="input-label">{{ t('admin.promptAudit.policy.profiles.group') }}</label>
+              <Select
+                :model-value="profileFilters.group_id ?? null"
+                :options="profileGroupOptions"
+                :aria-label="t('admin.promptAudit.policy.profiles.group')"
+                @update:model-value="setProfileGroupId"
+              />
+            </div>
+            <label class="block">
+              <span class="input-label">{{ t('admin.promptAudit.policy.profiles.minSamples') }}</span>
+              <input :value="profileFilters.min_samples" type="number" min="0" max="100000" class="input w-full" :aria-label="t('admin.promptAudit.policy.profiles.minSamples')" @change="setProfileMinSamples(($event.target as HTMLInputElement).value)" />
             </label>
           </div>
 
@@ -162,7 +164,7 @@
                 <thead class="sticky top-0 bg-gray-50 text-left text-xs font-semibold uppercase tracking-wide text-gray-500 dark:bg-dark-900 dark:text-dark-400">
                   <tr>
                     <th class="px-4 py-3 w-10">
-                      <input type="checkbox" :checked="allVisibleSelected" :indeterminate="someVisibleSelected" @change="selectVisible(($event.target as HTMLInputElement).checked)" />
+                      <input type="checkbox" class="h-4 w-4 rounded border-gray-300 text-primary-600 focus:ring-primary-500 dark:border-dark-600 dark:bg-dark-800" :checked="allVisibleSelected" :indeterminate="someVisibleSelected" @change="selectVisible(($event.target as HTMLInputElement).checked)" />
                     </th>
                     <th class="px-4 py-3">{{ t('admin.promptAudit.policy.profiles.user') }}</th>
                     <th class="px-4 py-3">{{ t('admin.promptAudit.policy.profiles.risk') }}</th>
@@ -174,7 +176,7 @@
                 <tbody class="divide-y divide-gray-100 bg-white dark:divide-dark-800 dark:bg-dark-900/10">
                   <tr v-for="profile in profilePage.items" :key="profile.user_id" :class="profile.deleted ? 'bg-amber-50/50 dark:bg-amber-950/10' : ''">
                     <td class="break-words px-4 py-3 align-top">
-                      <input type="checkbox" :checked="isExcluded(profile.user_id)" @change="toggleExcluded(profile.user_id)" />
+                      <input type="checkbox" class="h-4 w-4 rounded border-gray-300 text-primary-600 focus:ring-primary-500 dark:border-dark-600 dark:bg-dark-800" :checked="isExcluded(profile.user_id)" @change="toggleExcluded(profile.user_id)" />
                     </td>
                     <td class="break-words px-4 py-3 align-top">
                       <div class="flex flex-col gap-1">
@@ -222,12 +224,15 @@
               <div class="flex items-center gap-2">
                 <button type="button" class="btn btn-secondary btn-sm" :disabled="profilePage.page <= 1" @click="changeProfilePage(profilePage.page - 1)">{{ t('admin.promptAudit.policy.profiles.previous') }}</button>
                 <button type="button" class="btn btn-secondary btn-sm" :disabled="profilePage.page >= profilePage.pages" @click="changeProfilePage(profilePage.page + 1)">{{ t('admin.promptAudit.policy.profiles.next') }}</button>
-                <select :value="profileFilters.page_size" class="input h-8 w-24 py-0 text-sm" @change="setProfilePageSize(($event.target as HTMLSelectElement).value)">
-                  <option :value="10">10</option>
-                  <option :value="20">20</option>
-                  <option :value="50">50</option>
-                  <option :value="100">100</option>
-                </select>
+                <div class="w-24">
+                  <Select
+                    :model-value="profileFilters.page_size"
+                    :options="profilePageSizeOptions"
+                    :searchable="false"
+                    :aria-label="t('admin.promptAudit.policy.profiles.pageSize')"
+                    @update:model-value="setProfilePageSize"
+                  />
+                </div>
               </div>
             </div>
           </div>
@@ -282,6 +287,7 @@
 import { computed, onMounted, reactive, ref } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { extractApiErrorMessage } from '@/utils/apiError'
+import Select, { type SelectOption } from '@/components/common/Select.vue'
 import type { PromptAuditDraft, PromptAuditGroup, PromptAuditUserProfile, PromptAuditUserProfileFilter, PromptAuditUserProfilePage } from '../types'
 import { cloneData, SCANNER_CATALOG } from '../viewModel'
 import promptAuditAPI from '../api'
@@ -316,6 +322,11 @@ const profileCache = reactive(new Map<number, PromptAuditUserProfile>())
 let profileRequestId = 0
 const numberFormatter = computed(() => new Intl.NumberFormat(locale.value))
 const dateFormatter = computed(() => new Intl.DateTimeFormat(locale.value, { dateStyle: 'short', timeStyle: 'medium', hour12: false }))
+const profileGroupOptions = computed<SelectOption[]>(() => [
+  { value: null, label: t('admin.promptAudit.policy.profiles.allGroups') },
+  ...props.groups.map((group) => ({ value: group.id, label: `#${group.id} · ${group.name}` })),
+])
+const profilePageSizeOptions: SelectOption[] = [10, 20, 50, 100].map((value) => ({ value, label: String(value) }))
 
 const filteredGroups = computed(() => {
   const query = groupSearch.value.trim().toLowerCase()
@@ -374,7 +385,7 @@ function setProfileDays(value: string) {
 	profileFilters.days = Number.isInteger(parsed) && parsed > 0 ? Math.min(PROFILE_MAX_DAYS, parsed) : PROFILE_DEFAULT_DAYS
 }
 
-function setProfileGroupId(value: string) {
+function setProfileGroupId(value: string | number | boolean | null) {
   const parsed = Number(value)
   profileFilters.group_id = Number.isInteger(parsed) && parsed > 0 ? parsed : undefined
 }
@@ -384,7 +395,7 @@ function setProfileMinSamples(value: string) {
 	profileFilters.min_samples = Number.isInteger(parsed) && parsed >= 0 ? parsed : PROFILE_DEFAULT_MIN_SAMPLES
 }
 
-function setProfilePageSize(value: string) {
+function setProfilePageSize(value: string | number | boolean | null) {
   const parsed = Number(value)
   profileFilters.page_size = Number.isInteger(parsed) && parsed > 0 ? parsed : 20
   applyProfileFilters()

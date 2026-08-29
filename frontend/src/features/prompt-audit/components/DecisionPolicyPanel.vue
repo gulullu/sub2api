@@ -8,13 +8,13 @@
     <div class="mt-5 grid gap-4 lg:grid-cols-[minmax(0,1fr)_minmax(300px,.8fr)]">
       <div class="rounded-xl border border-gray-200 p-4 dark:border-dark-700/60 dark:bg-dark-900/20 sm:p-5">
         <div class="grid gap-4 sm:grid-cols-2">
-          <label class="block text-sm text-gray-700 dark:text-dark-200">
-            <span>{{ t('admin.promptAudit.decisionPolicy.flagThreshold') }}</span>
-            <input :value="draft.flag_threshold" class="input mt-1.5 w-full" type="number" min="0" max="0.99" step="0.01" data-test="flag-threshold" :aria-label="t('admin.promptAudit.decisionPolicy.flagThreshold')" @change="setFlagThreshold(($event.target as HTMLInputElement).value)" />
+          <label class="block">
+            <span class="input-label">{{ t('admin.promptAudit.decisionPolicy.flagThreshold') }}</span>
+            <input :value="draft.flag_threshold" class="input w-full" type="number" min="0" max="0.99" step="0.01" data-test="flag-threshold" :aria-label="t('admin.promptAudit.decisionPolicy.flagThreshold')" @change="setFlagThreshold(($event.target as HTMLInputElement).value)" />
           </label>
-          <label class="block text-sm text-gray-700 dark:text-dark-200">
-            <span>{{ t('admin.promptAudit.decisionPolicy.blockThreshold') }}</span>
-            <input :value="draft.block_threshold" class="input mt-1.5 w-full" type="number" min="0.01" max="1" step="0.01" data-test="block-threshold" :aria-label="t('admin.promptAudit.decisionPolicy.blockThreshold')" @change="setBlockThreshold(($event.target as HTMLInputElement).value)" />
+          <label class="block">
+            <span class="input-label">{{ t('admin.promptAudit.decisionPolicy.blockThreshold') }}</span>
+            <input :value="draft.block_threshold" class="input w-full" type="number" min="0.01" max="1" step="0.01" data-test="block-threshold" :aria-label="t('admin.promptAudit.decisionPolicy.blockThreshold')" @change="setBlockThreshold(($event.target as HTMLInputElement).value)" />
           </label>
         </div>
 
@@ -34,9 +34,9 @@
         </div>
 
         <div class="mt-4 rounded-lg border border-gray-200 bg-gray-50 p-3 dark:border-dark-700 dark:bg-dark-900/50">
-          <label class="block text-sm text-gray-700 dark:text-dark-200">
-            <span class="font-medium">{{ t('admin.promptAudit.decisionPolicy.maxTotalInputChars') }}</span>
-            <input :value="draft.max_total_input_chars" class="input mt-1.5 w-full" type="number" min="128" max="400000" step="1" data-test="max-total-input-chars" :aria-label="t('admin.promptAudit.decisionPolicy.maxTotalInputChars')" @change="setMaxTotalInputChars(($event.target as HTMLInputElement).value)" />
+          <label class="block">
+            <span class="input-label">{{ t('admin.promptAudit.decisionPolicy.maxTotalInputChars') }}</span>
+            <input :value="draft.max_total_input_chars" class="input w-full" type="number" min="128" max="400000" step="1" data-test="max-total-input-chars" :aria-label="t('admin.promptAudit.decisionPolicy.maxTotalInputChars')" @change="setMaxTotalInputChars(($event.target as HTMLInputElement).value)" />
           </label>
           <p class="mt-2 text-xs leading-5 text-gray-500 dark:text-dark-400">{{ t('admin.promptAudit.decisionPolicy.maxTotalInputCharsHint') }}</p>
           <p class="mt-1 text-xs font-medium leading-5" :class="!draft.enabled || !draft.blocking_enabled ? 'text-gray-600 dark:text-dark-300' : draft.risk_route_account_ids.length ? 'text-amber-700 dark:text-amber-300' : 'text-red-700 dark:text-red-300'">
@@ -46,13 +46,13 @@
       </div>
 
       <div class="space-y-4 rounded-xl border border-gray-200 p-4 dark:border-dark-700/60 dark:bg-dark-900/20 sm:p-5">
-        <label class="block text-sm text-gray-700 dark:text-dark-200">
-          <span>{{ t('admin.promptAudit.decisionPolicy.httpStatus') }}</span>
-          <input :value="draft.block_http_status" class="input mt-1.5 w-full" type="number" min="400" max="499" step="1" data-test="block-http-status" :aria-label="t('admin.promptAudit.decisionPolicy.httpStatus')" @change="setHTTPStatus(($event.target as HTMLInputElement).value)" />
+        <label class="block">
+          <span class="input-label">{{ t('admin.promptAudit.decisionPolicy.httpStatus') }}</span>
+          <input :value="draft.block_http_status" class="input w-full" type="number" min="400" max="499" step="1" data-test="block-http-status" :aria-label="t('admin.promptAudit.decisionPolicy.httpStatus')" @change="setHTTPStatus(($event.target as HTMLInputElement).value)" />
         </label>
-        <label class="block text-sm text-gray-700 dark:text-dark-200">
-          <span>{{ t('admin.promptAudit.decisionPolicy.blockMessage') }}</span>
-          <textarea :value="draft.block_message" class="input mt-1.5 min-h-28 w-full resize-y" maxlength="1000" data-test="block-message" :aria-label="t('admin.promptAudit.decisionPolicy.blockMessage')" @input="setBlockMessage(($event.target as HTMLTextAreaElement).value)" />
+        <label class="block">
+          <span class="input-label">{{ t('admin.promptAudit.decisionPolicy.blockMessage') }}</span>
+          <textarea :value="draft.block_message" class="input min-h-28 w-full resize-y" maxlength="1000" data-test="block-message" :aria-label="t('admin.promptAudit.decisionPolicy.blockMessage')" @input="setBlockMessage(($event.target as HTMLTextAreaElement).value)" />
           <span class="mt-1 block text-right text-xs tabular-nums text-gray-500 dark:text-dark-400">{{ draft.block_message.length }} / 1,000</span>
         </label>
       </div>

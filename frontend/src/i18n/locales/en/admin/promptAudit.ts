@@ -150,6 +150,7 @@ export default {
         noRiskCandidates: 'No content high/critical-risk or CYB-hit candidates matched the current filters.',
         noProfiles: 'No profiles matched the current filters.',
         pageSummary: '{total} total · page {page} / {pages}',
+        pageSize: 'Rows per page',
         previous: 'Previous',
         next: 'Next',
       },

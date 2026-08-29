@@ -79,4 +79,29 @@ describe('Prompt Audit integration surface', () => {
     expect(combined).not.toContain("t('admin.promptAudit.groups.fixedColumns')")
     expect(combined).not.toContain("t('admin.promptAudit.cyber.fixedColumns')")
   })
+
+  it('uses shared system controls across every Prompt Audit form surface', () => {
+    const sources = [
+      read('../PromptAuditView.vue'),
+      read('../components/EndpointPool.vue'),
+      read('../components/GroupPolicyWorkspace.vue'),
+      read('../components/PolicyPanel.vue'),
+      read('../components/DecisionPolicyPanel.vue'),
+      read('../components/PromptTemplatePanel.vue'),
+      read('../components/CyberFeedbackScopePanel.vue'),
+      read('../components/RiskRouteAccountSelector.vue'),
+      read('../components/EventWorkspace.vue'),
+      read('../components/FilterDeleteDialog.vue'),
+      read('../components/CyberLearningWorkspace.vue'),
+    ].join('\n')
+
+    expect(sources).not.toMatch(/<select\b/)
+    expect(sources).not.toContain('window.confirm')
+    expect(sources).not.toContain('class="block text-sm text-gray-700 dark:text-dark-200"')
+    expect(sources).not.toContain('class="text-xs text-gray-600 dark:text-dark-200"')
+    expect(sources).not.toContain('ml-2 underline')
+    expect(sources).toMatch(/import Select(?:, \{[^}]+\})? from '@\/components\/common\/Select\.vue'/)
+    expect(sources).toContain("import Toggle from '@/components/common/Toggle.vue'")
+    expect(sources).toContain("import ConfirmDialog from '@/components/common/ConfirmDialog.vue'")
+  })
 })
