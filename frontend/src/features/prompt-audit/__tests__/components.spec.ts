@@ -494,7 +494,7 @@ describe('Prompt Audit components', () => {
 
     await wrapper.get('[data-test="range-preset-30d"]').setValue()
     expect(wrapper.emitted('criteria-change')?.length).toBeGreaterThan(0)
-    await wrapper.get('[data-test="delete-risk"]').setValue('high')
+    wrapper.getComponent('[data-test="delete-risk"]').vm.$emit('update:modelValue', 'high')
     await wrapper.get('[data-test="run-delete-preview"]').trigger('click')
     const presetPreview = wrapper.emitted('preview')?.at(-1)?.[0] as PromptEventFilters
     expect(presetPreview.risk_level).toBe('high')
@@ -555,7 +555,7 @@ describe('Prompt Audit components', () => {
     })
     expect(wrapper.get<HTMLInputElement>('[data-test="range-preset-custom"]').element.checked).toBe(true)
     expect(wrapper.get<HTMLInputElement>('[data-test="custom-range"] [aria-label="admin.promptAudit.events.startAt"]').element.value).toBe('2026-07-01T00:00')
-    expect(wrapper.get<HTMLSelectElement>('[data-test="delete-decision"]').element.value).toBe('critical')
+    expect(wrapper.getComponent('[data-test="delete-decision"]').props('modelValue')).toBe('critical')
     expect(wrapper.get('[data-test="run-delete-preview"]').attributes()).not.toHaveProperty('disabled')
   })
 

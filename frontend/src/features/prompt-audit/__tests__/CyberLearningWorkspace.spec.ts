@@ -1,6 +1,7 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { flushPromises, mount } from '@vue/test-utils'
 import DataTable from '@/components/common/DataTable.vue'
+import Select from '@/components/common/Select.vue'
 import CyberLearningWorkspace from '../components/CyberLearningWorkspace.vue'
 import type { CyberFeedbackEvent, CyberFeedbackEvidence, CyberFeedbackPage } from '../types'
 
@@ -225,6 +226,37 @@ describe('CyberLearningWorkspace', () => {
     await wrapper.get('[data-test="cyber-reject"]').trigger('click')
     await flushPromises()
     expect(mocks.rejectCyberEvent).toHaveBeenCalledWith(17, '')
+  })
+
+  it('ignores an older list response after filters change again', async () => {
+    const wrapper = mount(CyberLearningWorkspace, {
+      props: {
+        groups: [{ id: 7, name: 'Enterprise', platform: 'openai', status: 'active' }],
+        accounts: [{ id: 9, name: 'Pool 9', platform: 'openai', type: 'oauth', status: 'active', groups: [{ id: 7, name: 'Enterprise' }] }],
+      },
+      global: { stubs: { BaseDialog: BaseDialogStub, ConfirmDialog: ConfirmDialogStub } },
+    })
+    await flushPromises()
+
+    let resolveOlder: ((value: CyberFeedbackPage) => void) | undefined
+    const older = new Promise<CyberFeedbackPage>((resolve) => { resolveOlder = resolve })
+    mocks.listCyberEvents.mockImplementation((_status, _page, _pageSize, filter) => {
+      if (filter?.account_id === 9) return Promise.resolve(page(event({ id: 22 })))
+      return older
+    })
+
+    const selects = wrapper.findAllComponents(Select)
+    selects[0].vm.$emit('update:modelValue', 7)
+    selects[0].vm.$emit('change', 7)
+    await wrapper.vm.$nextTick()
+    selects[1].vm.$emit('update:modelValue', 9)
+    selects[1].vm.$emit('change', 9)
+    await flushPromises()
+
+    expect(wrapper.findComponent(DataTable).props('data')[0].id).toBe(22)
+    resolveOlder?.(page(event({ id: 11 })))
+    await flushPromises()
+    expect(wrapper.findComponent(DataTable).props('data')[0].id).toBe(22)
   })
 
   it('loads review states and keeps disabled rules recoverable until a confirmed deletion', async () => {

@@ -144,6 +144,25 @@ func (r *Runner) processJob(ctx context.Context, workerID int, cfg ActiveConfig,
 	if job == nil {
 		return errors.New("prompt audit job unavailable")
 	}
+	// Re-check scope at execution time. A job may have been queued before its
+	// group was removed from Prompt Audit, and unassigned jobs from older builds
+	// may still be present. Mark those jobs done without loading the transient
+	// payload, scanning it, or creating an audit event.
+	if !cfg.IncludesGroup(job.Snapshot.GroupID) {
+		result := &NormalizedResult{Decision: EventPass, RiskLevel: RiskLow, Action: ActionAllow}
+		if _, err := r.repo.Complete(ctx, job, result, false); err != nil {
+			return err
+		}
+		if err := r.payload.Delete(ctx, job.ID); err != nil {
+			LogWarn(EventProcessFailed, mergeLogFields(jobLogFields(job), map[string]any{
+				"worker_id": workerID, "status": "payload_delete_deferred", "error_code": "payload_delete_failed",
+			}))
+		}
+		LogInfo(EventProcessed, mergeLogFields(jobLogFields(job), map[string]any{
+			"worker_id": workerID, "status": "skipped", "error_code": "group_out_of_scope",
+		}))
+		return nil
+	}
 	// Jobs retain the request group in their redacted snapshot. Resolve the
 	// policy from the active snapshot supplied by worker() so queued work uses
 	// the same group-specific scanners, limits, thresholds, endpoint pools, and

@@ -258,7 +258,7 @@ func asyncConfig() ActiveConfig {
 }
 
 func asyncRequest() Request {
-	return Request{RequestID: "request-async", Protocol: "openai_chat_completions", Body: []byte(`{"messages":[{"role":"user","content":"payload canary text"}]}`)}
+	return Request{RequestID: "request-async", GroupID: promptAuditTestGroupID(), Protocol: "openai_chat_completions", Body: []byte(`{"messages":[{"role":"user","content":"payload canary text"}]}`)}
 }
 
 func TestEnqueuerStagingPayloadPublishProtocolAndFailureCleanup(t *testing.T) {
@@ -320,7 +320,7 @@ func TestEnqueuerSkipsOffOutOfScopeAndNoText(t *testing.T) {
 			cfg.GroupIDs = []int64{9}
 			return cfg
 		}(), req: asyncRequest()},
-		{name: "no user text", cfg: asyncConfig(), req: Request{Protocol: "openai_chat_completions", Body: []byte(`{"messages":[{"role":"function","content":"not audited"}]}`)}},
+		{name: "no user text", cfg: asyncConfig(), req: Request{GroupID: promptAuditTestGroupID(), Protocol: "openai_chat_completions", Body: []byte(`{"messages":[{"role":"function","content":"not audited"}]}`)}},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -339,6 +339,7 @@ func TestEnqueuerSkipsExcludedUserBeforeStaging(t *testing.T) {
 	cfg.ExcludedUserIDs = []int64{77}
 	err := NewEnqueuer(&fakeConfigStore{cfg: cfg, active: true}, repo, payload).Enqueue(context.Background(), Request{
 		RequestID: "excluded-request",
+		GroupID:   promptAuditTestGroupID(),
 		UserID:    77,
 		Protocol:  "openai_chat_completions",
 		Body:      []byte(`{"messages":[{"role":"user","content":"payload canary text"}]}`),
@@ -396,7 +397,49 @@ func TestEnqueuerRecordsAcceptedDroppedAndSkippedMetrics(t *testing.T) {
 
 func workerJob(attempts, maxAttempts int) *Job {
 	return &Job{ID: 51, ClaimVersion: 3, Attempts: attempts, MaxAttempts: maxAttempts, ConfigVersion: 7,
-		Snapshot: PromptSnapshot{RequestID: "worker-request", PromptLength: 6, RedactedPreview: "red***"}}
+		Snapshot: PromptSnapshot{RequestID: "worker-request", GroupID: promptAuditTestGroupID(), PromptLength: 6, RedactedPreview: "red***"}}
+}
+
+func TestWorkerCompletesOutOfScopeJobWithoutLoadingOrScanning(t *testing.T) {
+	zero := int64(0)
+	removedGroup := int64(1)
+	for _, tt := range []struct {
+		name    string
+		groupID *int64
+		cfg     ActiveConfig
+	}{
+		{name: "nil unassigned", groupID: nil, cfg: asyncConfig()},
+		{name: "zero unassigned", groupID: &zero, cfg: asyncConfig()},
+		{name: "group removed after enqueue", groupID: &removedGroup, cfg: func() ActiveConfig {
+			cfg := asyncConfig()
+			cfg.AllGroups = false
+			cfg.GroupIDs = []int64{9}
+			return cfg
+		}()},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			tt.cfg.StorePassEvents = true
+			repo := &fakeJobRepository{}
+			payload := &fakePayloadStore{values: map[int64]string{51: "must not be loaded"}, getPanic: "out-of-scope payload was loaded"}
+			metrics := NewAtomicMetrics()
+			runner := NewRunner(&fakeConfigStore{cfg: tt.cfg, active: true}, repo, payload, PromptScannerFunc(func(context.Context, ActiveEndpoint, string, []string) (*NormalizedResult, error) {
+				t.Fatal("out-of-scope job reached scanner")
+				return nil, nil
+			}), metrics)
+			job := workerJob(1, 3)
+			job.Snapshot.GroupID = tt.groupID
+
+			require.NoError(t, runner.processJob(context.Background(), 0, tt.cfg, job))
+			require.Equal(t, 1, repo.completeCount)
+			require.Equal(t, EventPass, repo.completedResult.Decision)
+			require.False(t, repo.completedStore, "scope removal must never store a pass event")
+			require.Zero(t, repo.eventCount)
+			require.Zero(t, repo.refreshes)
+			require.Equal(t, []int64{51}, payload.deleted)
+			require.Empty(t, job.Snapshot.FullPrompt)
+			require.Equal(t, GuardMetricsSnapshot{}, metrics.Snapshot())
+		})
+	}
 }
 
 func TestWorkerCompletesPassWithoutEventRefreshesEveryChunkAndDeletesPayload(t *testing.T) {
@@ -857,7 +900,7 @@ func TestPromptAuditSyntheticAsyncBaseline(t *testing.T) {
 		jobID := int64(index)
 		payload.values[jobID] = text
 		job := &Job{ID: jobID, ClaimVersion: 1, Attempts: 1, MaxAttempts: 1, ConfigVersion: cfg.ConfigVersion,
-			Snapshot: PromptSnapshot{RequestID: fmt.Sprintf("baseline-%03d", index), PromptLength: len([]rune(text)), RedactedPreview: "synthetic"}}
+			Snapshot: PromptSnapshot{RequestID: fmt.Sprintf("baseline-%03d", index), GroupID: promptAuditTestGroupID(), PromptLength: len([]rune(text)), RedactedPreview: "synthetic"}}
 		err := runner.processJob(context.Background(), 0, cfg, job)
 		if index <= 98 {
 			require.NoError(t, err)

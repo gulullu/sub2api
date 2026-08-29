@@ -210,14 +210,14 @@ func TestPromptAuditGroupPoliciesRoundTripAndUngroupedBucket(t *testing.T) {
 	req.AllGroups = false
 	req.GroupIDs = nil
 	policies := []GroupPolicy{
-		{GroupID: 0, Enabled: true, BlockingEnabled: true, BlockingLatestTurnOnly: true,
+		{GroupID: 0, InScope: true, Enabled: true, BlockingEnabled: true, BlockingLatestTurnOnly: true,
 			StorePassEvents: true, Strategy: "priority", Scanners: []string{"jailbreak"},
 			MaxTotalInputChars: 2048, ActivePromptTemplateID: DefaultPromptTemplateID,
 			FlagThreshold: 0.25, BlockThreshold: 0.75, BlockHTTPStatus: 429,
 			BlockMessage: "ungrouped blocked", RiskRouteAccountIDs: []int64{22},
 			CyberFeedbackAccountIDs: []int64{33}, ExcludedUserIDs: []int64{44},
 			NoRouteFallbackMode: NoRouteFallbackAllow},
-		{GroupID: 9, Enabled: true, BlockingEnabled: false, Strategy: "priority", Scanners: []string{"pii"},
+		{GroupID: 9, InScope: true, Enabled: true, BlockingEnabled: false, Strategy: "priority", Scanners: []string{"pii"},
 			MaxTotalInputChars: DefaultMaxTotalInputChars, ActivePromptTemplateID: DefaultPromptTemplateID,
 			FlagThreshold: DefaultFlagThreshold, BlockThreshold: DefaultBlockThreshold,
 			BlockHTTPStatus: DefaultBlockHTTPStatus, BlockMessage: DefaultBlockMessage,
@@ -246,7 +246,7 @@ func TestPromptAuditGroupPoliciesRoundTripAndUngroupedBucket(t *testing.T) {
 	require.True(t, effective.IncludesUser(1))
 	require.False(t, effective.IncludesUser(44))
 	require.Equal(t, NoRouteFallbackAllow, effective.NoRouteFallbackMode)
-	require.True(t, active.IncludesGroup(nil))
+	require.False(t, active.IncludesGroup(nil), "the unassigned bucket is never eligible for prompt audit")
 
 	groupID := int64(9)
 	groupCfg := active.EffectiveForGroup(&groupID)
@@ -261,6 +261,62 @@ func TestPromptAuditGroupPoliciesRoundTripAndUngroupedBucket(t *testing.T) {
 	parsed, err := ParseStorageConfig(string(raw))
 	require.NoError(t, err)
 	require.Equal(t, next.GroupPolicies, parsed.GroupPolicies)
+}
+
+func TestPromptAuditGroupPolicyScopeDefaultsAndExplicitFalseRoundTrips(t *testing.T) {
+	var legacyPolicies []GroupPolicy
+	require.NoError(t, json.Unmarshal([]byte(`[{"group_id":7}]`), &legacyPolicies))
+	legacy := DefaultStorageConfig()
+	legacy.Enabled = true
+	legacy.GroupPolicies = legacyPolicies
+	normalizeStorageConfig(&legacy)
+	require.True(t, legacy.GroupPolicies[0].InScope, "legacy JSON without in_scope must remain included")
+
+	var explicitPolicies []GroupPolicy
+	require.NoError(t, json.Unmarshal([]byte(`[{"group_id":7,"in_scope":false,"enabled":true,"blocking_enabled":true}]`), &explicitPolicies))
+	req := promptAuditUpdateRequest(1, 1, "")
+	req.BlockingEnabled = false
+	req.AllGroups = true
+	req.GroupPolicies = &explicitPolicies
+	manager := &ConfigManager{encryptor: prefixEncryptor{}, encryptionKeyConfigured: true}
+
+	next, err := manager.buildNextStorage(DefaultStorageConfig(), req, 5)
+	require.NoError(t, err)
+	require.Len(t, next.GroupPolicies, 1)
+	require.False(t, next.GroupPolicies[0].InScope)
+	require.False(t, PublicFromStorage(next, true, nil).GroupPolicies[0].InScope)
+
+	raw, err := json.Marshal(next)
+	require.NoError(t, err)
+	parsed, err := ParseStorageConfig(string(raw))
+	require.NoError(t, err)
+	require.False(t, parsed.GroupPolicies[0].InScope, "storage JSON must preserve explicit false")
+
+	active, err := ActiveFromStorage(parsed, true, prefixEncryptor{})
+	require.NoError(t, err)
+	groupSeven := int64(7)
+	groupEight := int64(8)
+	require.False(t, active.IncludesGroup(&groupSeven), "explicit policy scope overrides all_groups")
+	require.True(t, active.IncludesGroup(&groupEight), "groups without a policy still follow all_groups")
+	require.False(t, active.RequiresBlockingActivation(), "out-of-scope blocking policy must not arm fail-closed mode")
+}
+
+func TestPromptAuditUngroupedNeverIncluded(t *testing.T) {
+	zero := int64(0)
+	realGroup := int64(9)
+	cfg := ActiveConfig{
+		RiskControlEnabled: true,
+		Enabled:            true,
+		AllGroups:          true,
+		GroupPolicies: []GroupPolicy{
+			{GroupID: 0, InScope: true, Enabled: true, BlockingEnabled: true},
+		},
+	}
+
+	require.False(t, cfg.IncludesGroup(nil))
+	require.False(t, cfg.IncludesGroup(&zero))
+	require.True(t, cfg.IncludesGroup(&realGroup))
+	require.False(t, cfg.RequiresBlockingActivation(), "unassigned blocking policy is not an auditable path")
 }
 
 func TestPromptAuditLegacyUpdatePreservesNoRouteFallbackMode(t *testing.T) {
@@ -286,6 +342,7 @@ func TestPromptAuditGroupPolicyMissingFieldsInheritLegacyValues(t *testing.T) {
 	storage.Endpoints = []StorageEndpoint{{ID: "guard", Name: "Guard", Protocol: "openai_compatible", BaseURL: "http://127.0.0.1:8080", Model: DefaultGuardModel, TimeoutMS: 1000, InputLimit: 1000, Enabled: true}}
 	normalizeStorageConfig(&storage)
 	require.NoError(t, validateStorageConfig(storage))
+	require.True(t, storage.GroupPolicies[0].InScope)
 	require.Equal(t, storage.Enabled, storage.GroupPolicies[0].Enabled)
 	require.Equal(t, storage.BlockingEnabled, storage.GroupPolicies[0].BlockingEnabled)
 	require.Equal(t, storage.Scanners, storage.GroupPolicies[0].Scanners)
@@ -595,6 +652,7 @@ func TestConfigManagerUndecryptableTokenStillFailsClosedForBlockingIntent(t *tes
 
 	service := &PromptService{config: manager, evaluator: NewGuardEvaluator(NewOpenAICompatibleScanner(), nil, nil)}
 	decision, err := service.Evaluate(context.Background(), Request{
+		GroupID:  promptAuditTestGroupID(),
 		Protocol: "openai_chat_completions",
 		Body:     []byte(`{"messages":[{"role":"user","content":"hi"}]}`),
 	})
@@ -732,7 +790,18 @@ func TestConfigManagerStaleWeakerSnapshotFailsClosedWhenBlockingExpected(t *test
 	require.Equal(t, ModeBlocking, manager.EffectiveMode())
 
 	service := &PromptService{config: manager, evaluator: NewGuardEvaluator(nil, nil, nil)}
-	decision, err := service.Evaluate(context.Background(), Request{Protocol: "openai_chat_completions", Body: []byte(`{"messages":[{"role":"user","content":"hi"}]}`)})
+	zero := int64(0)
+	for name, groupID := range map[string]*int64{"nil": nil, "zero": &zero} {
+		t.Run("ungrouped "+name+" bypasses degraded blocking", func(t *testing.T) {
+			req := Request{GroupID: groupID, Protocol: "openai_chat_completions", Body: []byte(`{"messages":[{"role":"user","content":"hi"}]}`)}
+			require.Equal(t, ModeOff, service.ModeForRequest(req))
+			decision, err := service.Evaluate(context.Background(), req)
+			require.NoError(t, err)
+			require.Equal(t, DecisionAllow, decision.Kind)
+			require.True(t, decision.AllowNextStage)
+		})
+	}
+	decision, err := service.Evaluate(context.Background(), Request{GroupID: promptAuditTestGroupID(), Protocol: "openai_chat_completions", Body: []byte(`{"messages":[{"role":"user","content":"hi"}]}`)})
 	require.Error(t, err)
 	require.Nil(t, decision)
 	var guardErr *GuardError
@@ -770,6 +839,7 @@ func TestConfigManagerStartupLoadFailureDoesNotBlockWhenBlockingNotIntended(t *t
 
 	service := &PromptService{config: manager, evaluator: NewGuardEvaluator(nil, nil, nil)}
 	decision, evalErr := service.Evaluate(context.Background(), Request{
+		GroupID:  promptAuditTestGroupID(),
 		Protocol: "openai_chat_completions",
 		Body:     []byte(`{"messages":[{"role":"user","content":"hi"}]}`),
 	})
@@ -789,6 +859,7 @@ func TestConfigManagerStartupLoadFailureFailsClosedWhenBlockingIntended(t *testi
 
 	service := &PromptService{config: manager, evaluator: NewGuardEvaluator(nil, nil, nil)}
 	decision, err := service.Evaluate(context.Background(), Request{
+		GroupID:  promptAuditTestGroupID(),
 		Protocol: "openai_chat_completions",
 		Body:     []byte(`{"messages":[{"role":"user","content":"hi"}]}`),
 	})
@@ -823,6 +894,7 @@ func TestConfigManagerUntrustedClearsOnSuccessfulDisable(t *testing.T) {
 
 	service := &PromptService{config: manager, evaluator: NewGuardEvaluator(nil, nil, nil)}
 	decision, evalErr := service.Evaluate(context.Background(), Request{
+		GroupID:  promptAuditTestGroupID(),
 		Protocol: "openai_chat_completions",
 		Body:     []byte(`{"messages":[{"role":"user","content":"hi"}]}`),
 	})

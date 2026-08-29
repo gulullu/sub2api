@@ -132,6 +132,13 @@ func (s *PromptService) ModeForRequest(req Request) Mode {
 	if s == nil || s.config == nil {
 		return ModeOff
 	}
+	// Ungrouped requests are never part of Prompt Audit. Resolve this immutable
+	// admission rule before the degraded fail-closed guard so an unavailable
+	// blocking configuration cannot turn an explicitly out-of-scope request into
+	// a service outage.
+	if req.GroupID == nil || *req.GroupID <= 0 {
+		return ModeOff
+	}
 	if s.config.BlockingActivationDegraded() {
 		return ModeBlocking
 	}
@@ -227,6 +234,9 @@ func (s *PromptService) Enqueue(_ context.Context, req Request) error {
 }
 
 func (s *PromptService) Evaluate(ctx context.Context, req Request) (*PromptDecision, error) {
+	if req.GroupID == nil || *req.GroupID <= 0 {
+		return &PromptDecision{Kind: DecisionAllow, AllowNextStage: true}, nil
+	}
 	if s == nil || s.config == nil || s.evaluator == nil {
 		return nil, &GuardError{Code: ErrorCodeUnavailable}
 	}

@@ -12,74 +12,114 @@
         <button type="button" class="btn btn-danger btn-sm" data-test="filter-delete" @click="$emit('preview-delete')">
           {{ t('admin.promptAudit.events.deleteByFilter') }}
         </button>
-        <div class="relative">
-          <button type="button" class="btn btn-secondary btn-sm" data-test="event-column-settings" :aria-expanded="eventColumnMenuOpen" @click="eventColumnMenuOpen = !eventColumnMenuOpen">
-            {{ t('admin.promptAudit.events.columns') }}
-          </button>
-          <div v-if="eventColumnMenuOpen" class="absolute right-0 z-20 mt-2 w-56 rounded-xl border border-gray-200 bg-white p-2 shadow-lg dark:border-dark-700 dark:bg-dark-800" data-test="event-column-menu">
-            <label v-for="column in eventConfigurableColumns" :key="column.key" class="flex cursor-pointer items-center gap-2 rounded-lg px-2 py-2 text-sm text-gray-700 hover:bg-gray-50 dark:text-dark-200 dark:hover:bg-dark-700">
-              <input type="checkbox" :checked="isEventColumnVisible(column.key)" @change="toggleEventColumn(column.key)" />
-              <span>{{ column.label }}</span>
-            </label>
-            <p class="px-2 pb-1 pt-2 text-[11px] text-gray-400 dark:text-dark-500">{{ t('admin.promptAudit.events.fixedColumns') }}</p>
-          </div>
-        </div>
       </div>
     </div>
 
-    <form class="m-5 grid gap-3 rounded-xl bg-gray-50 p-4 dark:bg-dark-900/50 sm:grid-cols-2 lg:grid-cols-4 xl:grid-cols-5" @submit.prevent="applyFilters">
-      <label class="text-xs text-gray-600 dark:text-dark-200">
-        <span>{{ t('admin.promptAudit.events.decision') }}</span>
-        <select v-model="localFilters.decision" class="input mt-1 w-full" :aria-label="t('admin.promptAudit.events.decision')" @change="filtersChanged">
-          <option value="">{{ t('common.all') }}</option>
-          <option value="pass">{{ t('admin.promptAudit.decisions.pass') }}</option>
-          <option value="flag">{{ t('admin.promptAudit.decisions.flag') }}</option>
-          <option value="critical">{{ t('admin.promptAudit.decisions.critical') }}</option>
-        </select>
-      </label>
-      <label class="text-xs text-gray-600 dark:text-dark-200">
-        <span>{{ t('admin.promptAudit.events.risk') }}</span>
-        <select v-model="localFilters.risk_level" class="input mt-1 w-full" :aria-label="t('admin.promptAudit.events.risk')" @change="filtersChanged">
-          <option value="">{{ t('common.all') }}</option>
-          <option value="low">{{ t('admin.promptAudit.riskLevels.low') }}</option>
-          <option value="medium">{{ t('admin.promptAudit.riskLevels.medium') }}</option>
-          <option value="high">{{ t('admin.promptAudit.riskLevels.high') }}</option>
-          <option value="critical">{{ t('admin.promptAudit.riskLevels.critical') }}</option>
-        </select>
-      </label>
-      <FilterInput v-model="localFilters.endpoint" :label="t('admin.promptAudit.events.requestEndpoint')" @change="filtersChanged" />
-      <label class="text-xs text-gray-600 dark:text-dark-200">
-        <span>{{ t('admin.promptAudit.events.guardEndpoint') }}</span>
-        <select v-model="localFilters.guard_endpoint_id" class="input mt-1 w-full" :aria-label="t('admin.promptAudit.events.guardEndpoint')" @change="filtersChanged">
-          <option value="">{{ t('common.all') }}</option>
-          <option v-for="endpoint in endpointOptions" :key="endpoint.id" :value="endpoint.id">{{ endpoint.name }} · {{ endpoint.id }}</option>
-          <option v-if="localFilters.guard_endpoint_id && !endpointOptions.some((endpoint) => endpoint.id === localFilters.guard_endpoint_id)" :value="localFilters.guard_endpoint_id">{{ localFilters.guard_endpoint_id }}</option>
-        </select>
-      </label>
-      <label class="text-xs text-gray-600 dark:text-dark-200">
-        <span>{{ t('admin.promptAudit.events.groupId') }}</span>
-        <select v-model="localFilters.group_id" class="input mt-1 w-full" :aria-label="t('admin.promptAudit.events.groupId')" @change="filtersChanged">
-          <option value="">{{ t('common.all') }}</option>
-          <option v-for="group in groupOptions" :key="group.id" :value="String(group.id)">{{ group.name }} · #{{ group.id }}</option>
-          <option v-if="localFilters.group_id && !groupOptions.some((group) => String(group.id) === localFilters.group_id)" :value="localFilters.group_id">#{{ localFilters.group_id }}</option>
-        </select>
-      </label>
-      <FilterInput v-model="localFilters.user_id" :label="t('admin.promptAudit.events.userId')" type="number" @change="filtersChanged" />
-      <FilterInput v-model="localFilters.api_key_id" :label="t('admin.promptAudit.events.apiKeyId')" type="number" @change="filtersChanged" />
-      <FilterInput v-model="localFilters.request_id" :label="t('admin.promptAudit.events.requestId')" @change="filtersChanged" />
-      <FilterInput v-model="localFilters.prompt_hash" :label="t('admin.promptAudit.events.promptHash')" @change="filtersChanged" />
-      <FilterInput v-model="localFilters.keyword" :label="t('admin.promptAudit.events.keyword')" @change="filtersChanged" />
-      <label class="text-xs text-gray-600 dark:text-dark-200">
-        <span>{{ t('admin.promptAudit.events.startAt') }}</span>
-        <input v-model="localFilters.start_at" type="datetime-local" class="input mt-1 w-full" :aria-label="t('admin.promptAudit.events.startAt')" @change="filtersChanged" />
-      </label>
-      <label class="text-xs text-gray-600 dark:text-dark-200">
-        <span>{{ t('admin.promptAudit.events.endAt') }}</span>
-        <input v-model="localFilters.end_at" type="datetime-local" class="input mt-1 w-full" :aria-label="t('admin.promptAudit.events.endAt')" @change="filtersChanged" />
-      </label>
-      <div class="flex items-end gap-2 sm:col-span-2">
-        <button type="submit" class="btn btn-primary btn-sm">{{ t('common.search') }}</button>
-        <button type="button" class="btn btn-ghost btn-sm" @click="resetFilters">{{ t('common.reset') }}</button>
+    <form class="border-b border-gray-200 p-4 dark:border-dark-700 sm:p-6" @submit.prevent="applyFilters">
+      <div class="flex flex-wrap items-end justify-between gap-4">
+        <div class="flex flex-1 flex-wrap items-end gap-4">
+          <div class="w-full sm:w-auto sm:min-w-[180px]">
+            <label class="input-label">{{ t('admin.promptAudit.events.decision') }}</label>
+            <Select
+              :model-value="localFilters.decision"
+              :options="decisionOptions"
+              :aria-label="t('admin.promptAudit.events.decision')"
+              @change="setStringFilter('decision', $event)"
+            />
+          </div>
+          <div class="w-full sm:w-auto sm:min-w-[180px]">
+            <label class="input-label">{{ t('admin.promptAudit.events.risk') }}</label>
+            <Select
+              :model-value="localFilters.risk_level"
+              :options="riskOptions"
+              :aria-label="t('admin.promptAudit.events.risk')"
+              @change="setStringFilter('risk_level', $event)"
+            />
+          </div>
+          <FilterInput v-model="localFilters.endpoint" :label="t('admin.promptAudit.events.requestEndpoint')" @change="filtersChanged" />
+          <div class="w-full sm:w-auto sm:min-w-[220px]">
+            <label class="input-label">{{ t('admin.promptAudit.events.guardEndpoint') }}</label>
+            <Select
+              :model-value="localFilters.guard_endpoint_id || ''"
+              :options="guardEndpointSelectOptions"
+              :aria-label="t('admin.promptAudit.events.guardEndpoint')"
+              searchable
+              @change="setStringFilter('guard_endpoint_id', $event)"
+            />
+          </div>
+          <div class="w-full sm:w-auto sm:min-w-[220px]">
+            <label class="input-label">{{ t('admin.promptAudit.events.groupId') }}</label>
+            <Select
+              :model-value="localFilters.group_id"
+              :options="groupSelectOptions"
+              :aria-label="t('admin.promptAudit.events.groupId')"
+              searchable
+              @change="setStringFilter('group_id', $event)"
+            />
+          </div>
+          <div class="w-full sm:w-auto sm:min-w-[240px]" data-test="event-user-filter">
+            <label class="input-label">{{ t('admin.promptAudit.events.userFilter') }}</label>
+            <Select
+              :model-value="selectedUserID"
+              :options="userSelectOptions"
+              :placeholder="t('admin.promptAudit.events.allUsers')"
+              :search-placeholder="t('admin.usage.searchUserPlaceholder')"
+              :aria-label="t('admin.promptAudit.events.userFilter')"
+              remote
+              clearable
+              :loading="usersLoading"
+              @search="searchUsers"
+              @change="setUserFilter"
+            >
+              <template #option="{ option }">
+                <span class="min-w-0 flex-1 truncate">{{ option.label }}</span>
+                <span v-if="option.deleted" class="ml-2 shrink-0 text-xs text-gray-400">{{ t('admin.usage.userDeletedBadge') }}</span>
+              </template>
+            </Select>
+          </div>
+          <div class="w-full sm:w-auto sm:min-w-[240px]" data-test="event-api-key-filter">
+            <label class="input-label">{{ t('admin.promptAudit.events.apiKeyFilter') }}</label>
+            <Select
+              :model-value="selectedAPIKeyID"
+              :options="apiKeySelectOptions"
+              :placeholder="t('admin.promptAudit.events.allApiKeys')"
+              :search-placeholder="t('admin.usage.searchApiKeyPlaceholder')"
+              :aria-label="t('admin.promptAudit.events.apiKeyFilter')"
+              remote
+              clearable
+              :loading="apiKeysLoading"
+              @search="searchAPIKeys"
+              @change="setAPIKeyFilter"
+            />
+          </div>
+          <FilterInput v-model="localFilters.request_id" :label="t('admin.promptAudit.events.requestId')" @change="filtersChanged" />
+          <FilterInput v-model="localFilters.prompt_hash" :label="t('admin.promptAudit.events.promptHash')" @change="filtersChanged" />
+          <FilterInput v-model="localFilters.keyword" :label="t('admin.promptAudit.events.keyword')" @change="filtersChanged" />
+          <label class="w-full sm:w-auto sm:min-w-[220px]">
+            <span class="input-label">{{ t('admin.promptAudit.events.startAt') }}</span>
+            <input v-model="localFilters.start_at" type="datetime-local" class="input w-full" :aria-label="t('admin.promptAudit.events.startAt')" @change="filtersChanged" />
+          </label>
+          <label class="w-full sm:w-auto sm:min-w-[220px]">
+            <span class="input-label">{{ t('admin.promptAudit.events.endAt') }}</span>
+            <input v-model="localFilters.end_at" type="datetime-local" class="input w-full" :aria-label="t('admin.promptAudit.events.endAt')" @change="filtersChanged" />
+          </label>
+        </div>
+        <div class="flex w-full flex-wrap items-center justify-end gap-3 sm:w-auto">
+          <button type="submit" class="btn btn-primary">{{ t('common.search') }}</button>
+          <button type="button" class="btn btn-secondary" data-test="event-reset-filters" @click="resetFilters">{{ t('common.reset') }}</button>
+          <div class="relative">
+            <button type="button" class="btn btn-secondary" data-test="event-column-settings" :aria-expanded="eventColumnMenuOpen" @click="eventColumnMenuOpen = !eventColumnMenuOpen">
+              {{ t('admin.promptAudit.events.columns') }}
+            </button>
+            <div v-if="eventColumnMenuOpen" class="absolute right-0 z-20 mt-2 w-56 rounded-xl border border-gray-200 bg-white p-2 shadow-lg dark:border-dark-700 dark:bg-dark-800" data-test="event-column-menu">
+              <label v-for="column in eventConfigurableColumns" :key="column.key" class="flex cursor-pointer items-center gap-2 rounded-lg px-2 py-2 text-sm text-gray-700 hover:bg-gray-50 dark:text-dark-200 dark:hover:bg-dark-700">
+                <input type="checkbox" :checked="isEventColumnVisible(column.key)" @change="toggleEventColumn(column.key)" />
+                <span>{{ column.label }}</span>
+              </label>
+              <p class="px-2 pb-1 pt-2 text-[11px] text-gray-400 dark:text-dark-500">{{ t('admin.promptAudit.events.fixedColumns') }}</p>
+            </div>
+          </div>
+        </div>
       </div>
     </form>
     <div v-if="error" role="alert" class="mx-5 mb-5 rounded-lg bg-red-50 px-4 py-3 text-sm text-red-700 dark:bg-red-950/30 dark:text-red-300">{{ error }}</div>
@@ -152,10 +192,13 @@
 </template>
 
 <script setup lang="ts">
-import { computed, defineComponent, h, onMounted, reactive, ref, watch } from 'vue'
+import { computed, defineComponent, h, onMounted, onUnmounted, reactive, ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
+import { adminAPI } from '@/api/admin'
+import type { SimpleApiKey, SimpleUser } from '@/api/admin/usage'
 import DataTable from '@/components/common/DataTable.vue'
 import Pagination from '@/components/common/Pagination.vue'
+import Select, { type SelectOption } from '@/components/common/Select.vue'
 import type { Column } from '@/components/common/types'
 import type { PromptAuditEndpointDraft, PromptAuditEvent, PromptAuditGroup, PromptEventFilters } from '../types'
 import { cloneData, emptyEventFilters, LOCALIZED_SCANNER_IDS } from '../viewModel'
@@ -181,7 +224,19 @@ const { t, locale } = useI18n()
 const localFilters = reactive<PromptEventFilters>(cloneData(props.filters))
 const eventColumnMenuOpen = ref(false)
 const hiddenEventColumns = ref<string[]>([])
-watch(() => props.filters, (value) => Object.assign(localFilters, cloneData(value)), { deep: true })
+const userResults = ref<SimpleUser[]>([])
+const apiKeyResults = ref<SimpleApiKey[]>([])
+const pinnedUser = ref<SimpleUser | null>(null)
+const pinnedAPIKey = ref<SimpleApiKey | null>(null)
+const usersLoading = ref(false)
+const apiKeysLoading = ref(false)
+let userSearchSequence = 0
+let apiKeySearchSequence = 0
+watch(() => props.filters, (value) => {
+  Object.assign(localFilters, cloneData(value))
+  if (pinnedUser.value?.id !== parsePositiveID(value.user_id)) pinnedUser.value = null
+  if (pinnedAPIKey.value?.id !== parsePositiveID(value.api_key_id)) pinnedAPIKey.value = null
+}, { deep: true })
 const groupOptions = computed<PromptAuditGroup[]>(() => {
   const options = (props.groups ?? []).slice().sort((left, right) => left.id - right.id)
   // Group ID 0 is the server-side sentinel for events/users with no assigned
@@ -192,6 +247,51 @@ const groupOptions = computed<PromptAuditGroup[]>(() => {
   return options
 })
 const endpointOptions = computed(() => (props.endpoints ?? []).slice().sort((left, right) => left.priority - right.priority || left.id.localeCompare(right.id)))
+const decisionOptions = computed<SelectOption[]>(() => [
+  { value: '', label: t('common.all') },
+  { value: 'pass', label: t('admin.promptAudit.decisions.pass') },
+  { value: 'flag', label: t('admin.promptAudit.decisions.flag') },
+  { value: 'critical', label: t('admin.promptAudit.decisions.critical') },
+])
+const riskOptions = computed<SelectOption[]>(() => [
+  { value: '', label: t('common.all') },
+  { value: 'low', label: t('admin.promptAudit.riskLevels.low') },
+  { value: 'medium', label: t('admin.promptAudit.riskLevels.medium') },
+  { value: 'high', label: t('admin.promptAudit.riskLevels.high') },
+  { value: 'critical', label: t('admin.promptAudit.riskLevels.critical') },
+])
+const guardEndpointSelectOptions = computed<SelectOption[]>(() => {
+  const options: SelectOption[] = [
+    { value: '', label: t('common.all') },
+    ...endpointOptions.value.map((endpoint) => ({ value: endpoint.id, label: `${endpoint.name} · ${endpoint.id}` })),
+  ]
+  const selected = localFilters.guard_endpoint_id || ''
+  if (selected && !endpointOptions.value.some((endpoint) => endpoint.id === selected)) {
+    options.push({ value: selected, label: selected })
+  }
+  return options
+})
+const groupSelectOptions = computed<SelectOption[]>(() => {
+  const options: SelectOption[] = [
+    { value: '', label: t('common.all') },
+    ...groupOptions.value.map((group) => ({ value: String(group.id), label: `${group.name} · #${group.id}` })),
+  ]
+  const selected = localFilters.group_id
+  if (selected && !groupOptions.value.some((group) => String(group.id) === selected)) {
+    options.push({ value: selected, label: `#${selected}` })
+  }
+  return options
+})
+const selectedUserID = computed(() => parsePositiveID(localFilters.user_id))
+const selectedAPIKeyID = computed(() => parsePositiveID(localFilters.api_key_id))
+const userSelectOptions = computed<SelectOption[]>(() => withSelectedFallback(
+  withPinnedOption(userResults.value.map(userOption), pinnedUser.value ? userOption(pinnedUser.value) : null),
+  selectedUserID.value,
+))
+const apiKeySelectOptions = computed<SelectOption[]>(() => withSelectedFallback(
+  withPinnedOption(apiKeyResults.value.map(apiKeyOption), pinnedAPIKey.value ? apiKeyOption(pinnedAPIKey.value) : null),
+  selectedAPIKeyID.value,
+))
 const eventColumns = computed<Column[]>(() => [
   { key: 'created_at', label: t('admin.promptAudit.events.time'), class: 'min-w-36' },
   { key: 'email', label: t('admin.promptAudit.events.email'), class: 'w-60 max-w-60' },
@@ -221,10 +321,10 @@ const FilterInput = defineComponent({
   props: { modelValue: { type: String, required: true }, label: { type: String, required: true }, type: { type: String, default: 'text' } },
   emits: ['update:modelValue', 'change'],
   setup(componentProps, { emit: componentEmit }) {
-    return () => h('label', { class: 'text-xs text-gray-600 dark:text-dark-200' }, [
-      h('span', componentProps.label),
+    return () => h('label', { class: 'w-full sm:w-auto sm:min-w-[220px]' }, [
+      h('span', { class: 'input-label' }, componentProps.label),
       h('input', {
-        value: componentProps.modelValue, type: componentProps.type, class: 'input mt-1 w-full', 'aria-label': componentProps.label,
+        value: componentProps.modelValue, type: componentProps.type, class: 'input w-full', 'aria-label': componentProps.label,
         onInput: (event: Event) => componentEmit('update:modelValue', (event.target as HTMLInputElement).value),
         onChange: () => componentEmit('change'),
       }),
@@ -235,12 +335,121 @@ const FilterInput = defineComponent({
 function filtersChanged() {
   emit('filters-change', cloneData(localFilters))
 }
+type SelectValue = string | number | boolean | null
+type StringFilterKey = 'decision' | 'risk_level' | 'guard_endpoint_id' | 'group_id'
+
+function setStringFilter(key: StringFilterKey, value: SelectValue) {
+  localFilters[key] = value == null ? '' : String(value)
+  filtersChanged()
+}
+
+function parsePositiveID(value: string | undefined): number | null {
+  if (!value || !/^\d+$/.test(value)) return null
+  const id = Number(value)
+  return Number.isSafeInteger(id) && id > 0 ? id : null
+}
+
+function withSelectedFallback(options: SelectOption[], selectedID: number | null): SelectOption[] {
+  if (selectedID == null || options.some((option) => option.value === selectedID)) return options
+  return [...options, { value: selectedID, label: `#${selectedID}` }]
+}
+
+function withPinnedOption(options: SelectOption[], pinned: SelectOption | null): SelectOption[] {
+  if (!pinned || options.some((option) => option.value === pinned.value)) return options
+  return [pinned, ...options]
+}
+
+function userOption(user: SimpleUser): SelectOption {
+  return { value: user.id, label: `${user.email} · #${user.id}`, deleted: user.deleted }
+}
+
+function apiKeyOption(key: SimpleApiKey): SelectOption {
+  return {
+    value: key.id,
+    label: `${key.name.trim() || t('admin.promptAudit.events.unnamedApiKey')} · #${key.id}`,
+    userID: key.user_id,
+  }
+}
+
+async function searchUsers(query: string) {
+  const keyword = query.trim()
+  const sequence = ++userSearchSequence
+  if (!keyword) {
+    userResults.value = []
+    usersLoading.value = false
+    return
+  }
+  usersLoading.value = true
+  try {
+    const users = await adminAPI.usage.searchUsers(keyword)
+    if (sequence === userSearchSequence) {
+      userResults.value = users.slice().sort((left, right) => Number(left.deleted) - Number(right.deleted))
+    }
+  } catch {
+    if (sequence === userSearchSequence) userResults.value = []
+  } finally {
+    if (sequence === userSearchSequence) usersLoading.value = false
+  }
+}
+
+async function loadAPIKeys(query: string, userID: number | null = selectedUserID.value) {
+  const sequence = ++apiKeySearchSequence
+  apiKeysLoading.value = true
+  try {
+    const keys = await adminAPI.usage.searchApiKeys(userID ?? undefined, query.trim())
+    if (sequence === apiKeySearchSequence) apiKeyResults.value = keys
+  } catch {
+    if (sequence === apiKeySearchSequence) apiKeyResults.value = []
+  } finally {
+    if (sequence === apiKeySearchSequence) apiKeysLoading.value = false
+  }
+}
+
+function searchAPIKeys(query: string) {
+  void loadAPIKeys(query)
+}
+
+function setUserFilter(value: SelectValue) {
+  const nextID = typeof value === 'number' && Number.isSafeInteger(value) && value > 0 ? value : null
+  const changed = nextID !== selectedUserID.value
+  localFilters.user_id = nextID == null ? '' : String(nextID)
+  pinnedUser.value = nextID == null
+    ? null
+    : userResults.value.find((user) => user.id === nextID) ?? (pinnedUser.value?.id === nextID ? pinnedUser.value : null)
+  if (changed) {
+    apiKeySearchSequence += 1
+    apiKeysLoading.value = false
+    apiKeyResults.value = []
+    pinnedAPIKey.value = null
+    localFilters.api_key_id = ''
+    if (nextID != null) void loadAPIKeys('', nextID)
+  }
+  filtersChanged()
+}
+
+function setAPIKeyFilter(value: SelectValue) {
+  const id = typeof value === 'number' && Number.isSafeInteger(value) && value > 0 ? value : null
+  localFilters.api_key_id = id == null ? '' : String(id)
+  pinnedAPIKey.value = id == null
+    ? null
+    : apiKeyResults.value.find((key) => key.id === id) ?? (pinnedAPIKey.value?.id === id ? pinnedAPIKey.value : null)
+  filtersChanged()
+}
+
 function applyFilters() {
   const value = cloneData(localFilters)
   emit('filters-change', value)
   emit('search', value)
 }
 function resetFilters() {
+  userSearchSequence += 1
+  apiKeySearchSequence += 1
+  usersLoading.value = false
+  apiKeysLoading.value = false
+  userResults.value = []
+  apiKeyResults.value = []
+  pinnedUser.value = null
+  pinnedAPIKey.value = null
   Object.assign(localFilters, emptyEventFilters())
   applyFilters()
 }
@@ -306,5 +515,10 @@ onMounted(() => {
       hiddenEventColumns.value = parsed.filter((item): item is string => typeof item === 'string' && eventConfigurableColumns.value.some((column) => column.key === item))
     }
   } catch { hiddenEventColumns.value = [] }
+})
+
+onUnmounted(() => {
+  userSearchSequence += 1
+  apiKeySearchSequence += 1
 })
 </script>

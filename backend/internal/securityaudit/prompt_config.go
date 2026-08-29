@@ -91,6 +91,7 @@ type StorageEndpoint struct {
 // still allowing an explicit empty list or false value to override it.
 type GroupPolicy struct {
 	GroupID                 int64    `json:"group_id"`
+	InScope                 bool     `json:"in_scope"`
 	Enabled                 bool     `json:"enabled"`
 	BlockingEnabled         bool     `json:"blocking_enabled"`
 	BlockingLatestTurnOnly  bool     `json:"blocking_latest_turn_only"`
@@ -140,6 +141,8 @@ func (p GroupPolicy) hasField(name string) bool {
 	// non-zero values and non-nil slices as explicitly supplied; zero-valued
 	// booleans/numbers inherit the top-level value for compatibility.
 	switch name {
+	case "in_scope":
+		return p.InScope
 	case "enabled":
 		return p.Enabled
 	case "blocking_enabled":
@@ -190,6 +193,17 @@ func (p GroupPolicy) clone() GroupPolicy {
 		p.present = present
 	}
 	return p
+}
+
+// includesGroup reports the normalized scope intent while remaining safe for
+// older in-memory callers that construct GroupPolicy literals directly.  A
+// missing in_scope field is the backwards-compatible "included" default;
+// JSON-decoded explicit false values are distinguished by the presence map.
+func (p GroupPolicy) includesGroup() bool {
+	if !p.hasField("in_scope") {
+		return true
+	}
+	return p.InScope
 }
 
 type storageConfig struct {
@@ -537,6 +551,9 @@ func normalizeGroupPolicies(policies []GroupPolicy, global storageConfig) []Grou
 	result := make([]GroupPolicy, 0, len(policies))
 	for _, source := range policies {
 		policy := source.clone()
+		if !policy.hasField("in_scope") {
+			policy.InScope = true
+		}
 		policy.Strategy = strings.TrimSpace(policy.Strategy)
 		if !policy.hasField("strategy") {
 			policy.Strategy = strings.TrimSpace(global.Strategy)
@@ -947,8 +964,13 @@ func (cfg ActiveConfig) RequiresBlockingActivation() bool {
 	}
 	covered := make(map[int64]struct{}, len(cfg.GroupPolicies))
 	for _, policy := range cfg.GroupPolicies {
+		// Group 0 is the historical unassigned bucket. It is never auditable,
+		// even if a stale persisted policy still exists for compatibility.
+		if policy.GroupID <= 0 {
+			continue
+		}
 		covered[policy.GroupID] = struct{}{}
-		if policy.Enabled && policy.BlockingEnabled {
+		if policy.includesGroup() && policy.Enabled && policy.BlockingEnabled {
 			return true
 		}
 	}
@@ -969,14 +991,17 @@ func (cfg ActiveConfig) RequiresBlockingActivation() bool {
 }
 
 func (cfg ActiveConfig) IncludesGroup(groupID *int64) bool {
+	// Ungrouped requests are deliberately outside Prompt Audit. Group 0 is the
+	// persisted/UI representation of the same bucket and must not be admitted by
+	// all_groups or by a legacy explicit policy.
+	if groupID == nil || *groupID <= 0 {
+		return false
+	}
+	if policy, ok := cfg.GroupPolicyFor(groupID); ok {
+		return policy.includesGroup()
+	}
 	if cfg.AllGroups {
 		return true
-	}
-	if _, ok := cfg.GroupPolicyFor(groupID); ok {
-		return true
-	}
-	if groupID == nil {
-		return false
 	}
 	i := sort.Search(len(cfg.GroupIDs), func(i int) bool { return cfg.GroupIDs[i] >= *groupID })
 	return i < len(cfg.GroupIDs) && cfg.GroupIDs[i] == *groupID

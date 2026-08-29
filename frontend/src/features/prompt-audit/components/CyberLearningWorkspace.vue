@@ -55,24 +55,32 @@
         </div>
       </div>
 
-      <div class="flex flex-wrap items-end gap-3 border-b border-gray-200 bg-white px-5 py-4 dark:border-dark-700 dark:bg-dark-900">
-        <label class="min-w-[14rem] flex-1 text-xs text-gray-600 dark:text-dark-200">
-          <span>{{ t('admin.promptAudit.cyber.groupFilter') }}</span>
-          <select v-model="groupFilter" class="input mt-1 w-full" :aria-label="t('admin.promptAudit.cyber.groupFilter')" data-test="cyber-group-filter" @change="applyListFilters">
-            <option value="">{{ t('admin.promptAudit.cyber.allGroups') }}</option>
-            <option v-for="group in groupOptions" :key="group.id" :value="group.id">{{ group.name }} · #{{ group.id }}</option>
-            <option v-if="groupFilter !== '' && !groupOptions.some((group) => group.id === groupFilter)" :value="groupFilter">#{{ groupFilter }}</option>
-          </select>
-        </label>
-        <label class="min-w-[14rem] flex-1 text-xs text-gray-600 dark:text-dark-200">
-          <span>{{ t('admin.promptAudit.cyber.accountFilter') }}</span>
-          <select v-model="accountFilter" class="input mt-1 w-full" :aria-label="t('admin.promptAudit.cyber.accountFilter')" data-test="cyber-account-filter" @change="applyListFilters">
-            <option value="">{{ t('admin.promptAudit.cyber.allAccounts') }}</option>
-            <option v-for="account in accountOptions" :key="account.id" :value="account.id">{{ account.name || `#${account.id}` }} · #{{ account.id }}</option>
-            <option v-if="accountFilter !== '' && !accountOptions.some((account) => account.id === accountFilter)" :value="accountFilter">#{{ accountFilter }}</option>
-          </select>
-        </label>
-        <button type="button" class="btn btn-ghost btn-sm" :disabled="!hasListFilters || loading" data-test="cyber-reset-filters" @click="resetListFilters">{{ t('admin.promptAudit.cyber.resetFilters') }}</button>
+      <div class="flex flex-wrap items-end justify-between gap-4 border-b border-gray-200 bg-white px-5 py-4 dark:border-dark-700 dark:bg-dark-900">
+        <div class="flex flex-1 flex-wrap items-end gap-4">
+          <div class="w-full sm:w-auto sm:min-w-[220px]">
+            <label class="input-label">{{ t('admin.promptAudit.cyber.groupFilter') }}</label>
+            <Select
+              v-model="groupFilter"
+              :options="groupFilterOptions"
+              searchable
+              :aria-label="t('admin.promptAudit.cyber.groupFilter')"
+              data-test="cyber-group-filter"
+              @change="applyListFilters"
+            />
+          </div>
+          <div class="w-full sm:w-auto sm:min-w-[220px]">
+            <label class="input-label">{{ t('admin.promptAudit.cyber.accountFilter') }}</label>
+            <Select
+              v-model="accountFilter"
+              :options="accountFilterOptions"
+              searchable
+              :aria-label="t('admin.promptAudit.cyber.accountFilter')"
+              data-test="cyber-account-filter"
+              @change="applyListFilters"
+            />
+          </div>
+        </div>
+        <button type="button" class="btn btn-secondary btn-sm" :disabled="!hasListFilters || loading" data-test="cyber-reset-filters" @click="resetListFilters">{{ t('admin.promptAudit.cyber.resetFilters') }}</button>
       </div>
 
       <div v-if="error" role="alert" class="m-4 rounded-lg bg-red-50 px-4 py-3 text-sm text-red-700 dark:bg-red-950/30 dark:text-red-300">
@@ -307,11 +315,12 @@
 </template>
 
 <script setup lang="ts">
-import { computed, onMounted, reactive, ref } from 'vue'
+import { computed, onMounted, onUnmounted, reactive, ref } from 'vue'
 import { useI18n } from 'vue-i18n'
 import BaseDialog from '@/components/common/BaseDialog.vue'
 import ConfirmDialog from '@/components/common/ConfirmDialog.vue'
 import DataTable from '@/components/common/DataTable.vue'
+import Select, { type SelectOption } from '@/components/common/Select.vue'
 import type { Column } from '@/components/common/types'
 import { useAppStore } from '@/stores/app'
 import { extractApiErrorCode, extractApiErrorMessage } from '@/utils/apiError'
@@ -351,6 +360,14 @@ const groupOptions = computed<PromptAuditGroup[]>(() => {
   return options
 })
 const accountOptions = computed(() => props.accounts.slice().sort((left, right) => left.id - right.id || left.name.localeCompare(right.name)))
+const groupFilterOptions = computed<SelectOption[]>(() => [
+  { value: '', label: t('admin.promptAudit.cyber.allGroups') },
+  ...groupOptions.value.map((group) => ({ value: group.id, label: `${group.name} · #${group.id}` })),
+])
+const accountFilterOptions = computed<SelectOption[]>(() => [
+  { value: '', label: t('admin.promptAudit.cyber.allAccounts') },
+  ...accountOptions.value.map((account) => ({ value: account.id, label: `${account.name || `#${account.id}`} · #${account.id}` })),
+])
 const cyberColumns = computed<Column[]>(() => [
   { key: 'event', label: t('admin.promptAudit.cyber.columns.event'), class: 'min-w-36' },
   { key: 'request', label: t('admin.promptAudit.cyber.columns.request'), class: 'w-[27rem] max-w-[27rem]' },
@@ -382,6 +399,7 @@ const restoreConfirmMessage = computed(() => pendingRuleRestore.value && isRecov
   : t('admin.promptAudit.cyber.rules.restoreConfirmMessage', { id: pendingRuleRestore.value?.id || '' }))
 let deepLinkAttempted = false
 let detailRequestSequence = 0
+let listRequestSequence = 0
 
 function operationError(errorValue: unknown, fallbackKey: string): string {
   const code = extractApiErrorCode(errorValue)
@@ -394,6 +412,7 @@ function operationError(errorValue: unknown, fallbackKey: string): string {
 }
 
 async function loadPage() {
+  const requestSequence = ++listRequestSequence
   loading.value = true
   error.value = ''
   try {
@@ -403,12 +422,16 @@ async function loadPage() {
     const result = Object.keys(filter).length
       ? await promptAuditAPI.listCyberEvents(status.value, page.page, page.page_size, filter)
       : await promptAuditAPI.listCyberEvents(status.value, page.page, page.page_size)
-    Object.assign(page, result)
-    await resolveDeepLink()
+    if (requestSequence === listRequestSequence) {
+      Object.assign(page, result)
+      await resolveDeepLink()
+    }
   } catch (errorValue) {
-    error.value = operationError(errorValue, 'admin.promptAudit.cyber.errors.load')
+    if (requestSequence === listRequestSequence) {
+      error.value = operationError(errorValue, 'admin.promptAudit.cyber.errors.load')
+    }
   } finally {
-    loading.value = false
+    if (requestSequence === listRequestSequence) loading.value = false
   }
 }
 
@@ -781,5 +804,10 @@ onMounted(() => {
     }
   } catch { hiddenCyberColumns.value = [] }
   void loadPage()
+})
+
+onUnmounted(() => {
+  listRequestSequence += 1
+  detailRequestSequence += 1
 })
 </script>

@@ -32,25 +32,26 @@
       </fieldset>
 
       <div class="grid gap-3 sm:grid-cols-2">
-        <label class="text-xs text-gray-600 dark:text-dark-200">
-          <span>{{ t('admin.promptAudit.events.decision') }}</span>
-          <select v-model="local.decision" class="input mt-1 w-full" :aria-label="t('admin.promptAudit.events.decision')" data-test="delete-decision" @change="criteriaChanged">
-            <option value="">{{ t('common.all') }}</option>
-            <option value="pass">{{ t('admin.promptAudit.decisions.pass') }}</option>
-            <option value="flag">{{ t('admin.promptAudit.decisions.flag') }}</option>
-            <option value="critical">{{ t('admin.promptAudit.decisions.critical') }}</option>
-          </select>
-        </label>
-        <label class="text-xs text-gray-600 dark:text-dark-200">
-          <span>{{ t('admin.promptAudit.events.risk') }}</span>
-          <select v-model="local.risk_level" class="input mt-1 w-full" :aria-label="t('admin.promptAudit.events.risk')" data-test="delete-risk" @change="criteriaChanged">
-            <option value="">{{ t('common.all') }}</option>
-            <option value="low">{{ t('admin.promptAudit.riskLevels.low') }}</option>
-            <option value="medium">{{ t('admin.promptAudit.riskLevels.medium') }}</option>
-            <option value="high">{{ t('admin.promptAudit.riskLevels.high') }}</option>
-            <option value="critical">{{ t('admin.promptAudit.riskLevels.critical') }}</option>
-          </select>
-        </label>
+        <div>
+          <label class="input-label">{{ t('admin.promptAudit.events.decision') }}</label>
+          <Select
+            :model-value="local.decision"
+            :options="decisionOptions"
+            :aria-label="t('admin.promptAudit.events.decision')"
+            data-test="delete-decision"
+            @update:model-value="setSelectFilter('decision', $event)"
+          />
+        </div>
+        <div>
+          <label class="input-label">{{ t('admin.promptAudit.events.risk') }}</label>
+          <Select
+            :model-value="local.risk_level"
+            :options="riskOptions"
+            :aria-label="t('admin.promptAudit.events.risk')"
+            data-test="delete-risk"
+            @update:model-value="setSelectFilter('risk_level', $event)"
+          />
+        </div>
       </div>
 
       <details class="rounded-xl border border-gray-200 px-4 py-3 dark:border-dark-700/60" data-test="more-conditions">
@@ -64,15 +65,17 @@
             <span>{{ t('admin.promptAudit.events.keyword') }}</span>
             <input v-model="local.keyword" type="text" class="input mt-1 w-full" :aria-label="t('admin.promptAudit.events.keyword')" @input="criteriaChanged" />
           </label>
-          <label class="text-xs text-gray-600 dark:text-dark-200">
-            <span>{{ t('admin.promptAudit.events.group') }}</span>
-            <select v-model="local.group_id" class="input mt-1 w-full" :aria-label="t('admin.promptAudit.events.group')" data-test="delete-group" @change="criteriaChanged">
-              <option value="">{{ t('common.all') }}</option>
-              <option value="0">{{ t('admin.promptAudit.groups.unassigned') }} · 0</option>
-              <option v-for="group in groupOptions" :key="group.id" :value="String(group.id)">{{ group.name }} · #{{ group.id }}</option>
-              <option v-if="local.group_id && local.group_id !== '0' && !groupOptions.some((group) => String(group.id) === local.group_id)" :value="local.group_id">#{{ local.group_id }}</option>
-            </select>
-          </label>
+          <div>
+            <label class="input-label">{{ t('admin.promptAudit.events.group') }}</label>
+            <Select
+              :model-value="local.group_id"
+              :options="groupFilterOptions"
+              searchable
+              :aria-label="t('admin.promptAudit.events.group')"
+              data-test="delete-group"
+              @update:model-value="setSelectFilter('group_id', $event)"
+            />
+          </div>
           <label class="text-xs text-gray-600 dark:text-dark-200">
             <span>{{ t('admin.promptAudit.events.userId') }}</span>
             <input v-model="local.user_id" type="number" class="input mt-1 w-full" :aria-label="t('admin.promptAudit.events.userId')" @input="criteriaChanged" />
@@ -125,6 +128,7 @@
 import { computed, reactive, ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 import BaseDialog from '@/components/common/BaseDialog.vue'
+import Select, { type SelectOption } from '@/components/common/Select.vue'
 import type { PromptAuditGroup, PromptDeletePreview, PromptEventFilters } from '../types'
 import {
   DELETE_RANGE_PRESETS,
@@ -154,6 +158,30 @@ const { t, locale } = useI18n()
 const preset = ref<DeleteRangePreset>('7d')
 const local = reactive<PromptEventFilters>(emptyEventFilters())
 const groupOptions = computed(() => (props.groups ?? []).slice().sort((left, right) => left.id - right.id))
+const decisionOptions = computed<SelectOption[]>(() => [
+  { value: '', label: t('common.all') },
+  { value: 'pass', label: t('admin.promptAudit.decisions.pass') },
+  { value: 'flag', label: t('admin.promptAudit.decisions.flag') },
+  { value: 'critical', label: t('admin.promptAudit.decisions.critical') },
+])
+const riskOptions = computed<SelectOption[]>(() => [
+  { value: '', label: t('common.all') },
+  { value: 'low', label: t('admin.promptAudit.riskLevels.low') },
+  { value: 'medium', label: t('admin.promptAudit.riskLevels.medium') },
+  { value: 'high', label: t('admin.promptAudit.riskLevels.high') },
+  { value: 'critical', label: t('admin.promptAudit.riskLevels.critical') },
+])
+const groupFilterOptions = computed<SelectOption[]>(() => {
+  const options: SelectOption[] = [
+    { value: '', label: t('common.all') },
+    { value: '0', label: `${t('admin.promptAudit.groups.unassigned')} · 0` },
+    ...groupOptions.value.map((group) => ({ value: String(group.id), label: `${group.name} · #${group.id}` })),
+  ]
+  if (local.group_id && local.group_id !== '0' && !groupOptions.value.some((group) => String(group.id) === local.group_id)) {
+    options.push({ value: local.group_id, label: `#${local.group_id}` })
+  }
+  return options
+})
 
 watch(
   () => props.show,
@@ -186,6 +214,10 @@ const confirmDisabledReason = computed(() => {
 
 function criteriaChanged() {
   emit('criteria-change')
+}
+function setSelectFilter(key: 'decision' | 'risk_level' | 'group_id', value: string | number | boolean | null) {
+  local[key] = typeof value === 'string' || typeof value === 'number' ? String(value) : ''
+  criteriaChanged()
 }
 function requestPreview() {
   if (!canPreview.value) return

@@ -159,7 +159,7 @@ export default {
       description: '按分组维护判定阈值、高风险硬池、额外 CYB 上游和不审核用户，避免多个审计范围混在一起。',
       summary: '显示 {count} 个分组',
       workerCount: 'Worker 数量', queueCapacity: '队列容量', allGroups: '默认纳入全部分组', strategy: '节点策略',
-      search: '搜索分组', searchPlaceholder: '分组名称 / ID / 平台', platform: '平台', allPlatforms: '全部平台', status: '分组状态', allStatuses: '全部状态', active: '启用', inactive: '停用', unassigned: '未分配账号',
+      search: '搜索分组', searchPlaceholder: '选择或搜索分组', platform: '平台', allPlatforms: '全部平台', status: '分组状态', allStatuses: '全部状态', active: '启用', inactive: '停用', unassigned: '未分配账号',
       name: '分组', columns: '列设置', fixedColumns: '名称和操作列始终显示。', missingGroups: '已保存策略引用了不存在的分组：{ids}', defaultBadge: '默认', unknownGroup: '未知分组 #{id}', unknownPlatform: '未知', scope: '审计范围', inScope: '已纳入', outOfScope: '未纳入', toggleScope: '切换 {name} 的审计范围', enabled: '启用', disabled: '停用', blocking: '同步阻断', mode: '模式', threshold: '阈值（标记 / 阻断）', fallback: '无分流兜底', accountCount: '分组账号', riskCount: '高风险硬池', extraCount: '额外上游', updated: '更新时间', editTitle: '编辑分组策略 · {name}', copy: '复制策略', copied: '已复制', empty: '没有匹配当前筛选的分组。',
       editorTabsLabel: '分组策略区域',
       tabs: { policy: '判定策略', risk: '高风险分流', cyber: '额外 CYB 上游', profiles: '用户画像' },
@@ -174,7 +174,7 @@ export default {
       confirm: '理解风险并开启',
     },
     events: {
-      title: '审计事件', description: '按身份、入口、风险、Hash 和时间复核事件，详情中可查看完整提示词。', decision: '判定', risk: '风险等级', endpoint: '入口', requestEndpoint: '请求入口', guardEndpoint: '审计节点', guardNode: '审计节点', groupId: '分组 ID', userId: '用户 ID', apiKeyId: 'API Key ID', keyword: '关键词', columns: '列设置', fixedColumns: '时间和操作列始终显示。',
+      title: '审计事件', description: '按身份、入口、风险、Hash 和时间复核事件，详情中可查看完整提示词。', decision: '判定', risk: '风险等级', endpoint: '入口', requestEndpoint: '请求入口', guardEndpoint: '审计节点', guardNode: '审计节点', groupId: '分组 ID', userId: '用户 ID', apiKeyId: 'API Key ID', userFilter: '用户（邮箱 / ID）', apiKeyFilter: 'API Key（名称 / ID）', allUsers: '全部用户', allApiKeys: '全部 API Key', unnamedApiKey: '未命名 API Key', keyword: '关键词', columns: '列设置', fixedColumns: '时间和操作列始终显示。',
       startAt: '开始时间', endAt: '结束时间', deleteSelected: '删除选中项（{count}）', deleteByFilter: '按筛选删除',
       filterDeleteDialogTitle: '按筛选删除审计事件', filterDeleteDialogDesc: '选择删除的时间范围与风险条件后即可执行删除；删除不可恢复。如需提前查看匹配数量，可先获取删除预览。',
       filterTimeRange: '删除时间范围', filterTimeRangeHint: '将删除所选截止时间之前产生的事件；预览后新产生的事件不受影响。',

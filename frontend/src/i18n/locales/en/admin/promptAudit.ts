@@ -159,7 +159,7 @@ export default {
       description: 'Keep decision thresholds, hard-routing accounts, CYB feedback accounts, and do-not-audit users within each group boundary.',
       summary: '{count} groups shown',
       workerCount: 'Worker count', queueCapacity: 'Queue capacity', allGroups: 'Include all groups by default', strategy: 'Node strategy',
-      search: 'Search groups', searchPlaceholder: 'Group name / ID / platform', platform: 'Platform', allPlatforms: 'All platforms', status: 'Group status', allStatuses: 'All statuses', active: 'Active', inactive: 'Inactive', unassigned: 'Unassigned',
+      search: 'Search groups', searchPlaceholder: 'Select or search groups', platform: 'Platform', allPlatforms: 'All platforms', status: 'Group status', allStatuses: 'All statuses', active: 'Active', inactive: 'Inactive', unassigned: 'Unassigned',
       name: 'Group', columns: 'Columns', fixedColumns: 'Name and actions are always visible.', missingGroups: 'Saved policies reference missing groups: {ids}', defaultBadge: 'Default', unknownGroup: 'Unknown group #{id}', unknownPlatform: 'Unknown', scope: 'Audit scope', inScope: 'In scope', outOfScope: 'Out of scope', toggleScope: 'Toggle audit scope for {name}', enabled: 'Enabled', disabled: 'Disabled', blocking: 'Blocking', mode: 'Mode', threshold: 'Threshold (flag / block)', fallback: 'No-route fallback', accountCount: 'Group accounts', riskCount: 'Hard pool', extraCount: 'Extra upstream', updated: 'Updated', editTitle: 'Edit group policy · {name}', copy: 'Copy policy', copied: 'Copied', empty: 'No groups match the current filters.',
       editorTabsLabel: 'Group policy sections',
       tabs: { policy: 'Decision policy', risk: 'High-risk routing', cyber: 'Extra CYB upstream', profiles: 'User profiles' },
@@ -174,7 +174,7 @@ export default {
       confirm: 'I understand; enable it',
     },
     events: {
-      title: 'Audit events', description: 'Review events by identity, route, risk, hash, and time; the detail view shows the full prompt.', decision: 'Decision', risk: 'Risk level', endpoint: 'Endpoint', requestEndpoint: 'Request endpoint', guardEndpoint: 'Audit node', guardNode: 'Audit node', groupId: 'Group ID', userId: 'User ID', apiKeyId: 'API Key ID', keyword: 'Keyword', columns: 'Columns', fixedColumns: 'Time and actions are always visible.',
+      title: 'Audit events', description: 'Review events by identity, route, risk, hash, and time; the detail view shows the full prompt.', decision: 'Decision', risk: 'Risk level', endpoint: 'Endpoint', requestEndpoint: 'Request endpoint', guardEndpoint: 'Audit node', guardNode: 'Audit node', groupId: 'Group ID', userId: 'User ID', apiKeyId: 'API Key ID', userFilter: 'User (email / ID)', apiKeyFilter: 'API Key (name / ID)', allUsers: 'All users', allApiKeys: 'All API Keys', unnamedApiKey: 'Unnamed API Key', keyword: 'Keyword', columns: 'Columns', fixedColumns: 'Time and actions are always visible.',
       startAt: 'Start time', endAt: 'End time', deleteSelected: 'Delete selected ({count})', deleteByFilter: 'Delete by filter',
       filterDeleteDialogTitle: 'Delete audit events by filter', filterDeleteDialogDesc: 'Choose the time range and risk criteria, then delete directly. Deletion is permanent. Generate a preview first if you want to see the match count.',
       filterTimeRange: 'Deletion time range', filterTimeRangeHint: 'Deletes events created before the selected cutoff. Events created after the preview are not affected.',

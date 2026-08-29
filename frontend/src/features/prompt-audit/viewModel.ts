@@ -134,16 +134,22 @@ function normalizedInputLimit(value: unknown, fallback: number): number {
  * clean draft dirty; it only gets persisted after the user changes a field.
  */
 export function createGroupPolicyFromConfig(
-  config: Pick<PromptAuditConfig, 'enabled' | 'blocking_enabled' | 'blocking_latest_turn_only' | 'store_pass_events' | 'strategy' | 'scanners' | 'max_total_input_chars' | 'active_prompt_template_id' | 'flag_threshold' | 'block_threshold' | 'block_http_status' | 'block_message' | 'risk_route_account_ids' | 'cyber_feedback_account_ids' | 'excluded_user_ids'> & { no_route_fallback_mode?: PromptAuditNoRouteFallbackMode },
+  config: Pick<PromptAuditConfig, 'enabled' | 'blocking_enabled' | 'blocking_latest_turn_only' | 'store_pass_events' | 'strategy' | 'scanners' | 'all_groups' | 'group_ids' | 'max_total_input_chars' | 'active_prompt_template_id' | 'flag_threshold' | 'block_threshold' | 'block_http_status' | 'block_message' | 'risk_route_account_ids' | 'cyber_feedback_account_ids' | 'excluded_user_ids'> & { no_route_fallback_mode?: PromptAuditNoRouteFallbackMode },
   groupID: number | null,
   source?: Partial<PromptAuditGroupPolicy> | null,
 ): PromptAuditGroupPolicy {
   const input = source ?? {}
+  const resolvedGroupID = normalizedGroupID(input.group_id) ?? groupID
+  const inheritedScope = resolvedGroupID !== null && (config.all_groups || config.group_ids.includes(resolvedGroupID))
   const flagThreshold = normalizedThreshold(input.flag_threshold, Number(config.flag_threshold ?? DEFAULT_FLAG_THRESHOLD), 0, 1)
   const blockThreshold = normalizedThreshold(input.block_threshold, Number(config.block_threshold ?? DEFAULT_BLOCK_THRESHOLD), 0, 1)
   const safeBlockThreshold = Math.max(flagThreshold + 0.01, blockThreshold)
   return {
-    group_id: normalizedGroupID(input.group_id) ?? groupID,
+    group_id: resolvedGroupID,
+    // Policies saved before the explicit scope flag were themselves treated
+    // as in-scope. Synthetic editor policies instead inherit the actual
+    // all_groups/group_ids selection without changing it merely by opening.
+    in_scope: typeof input.in_scope === 'boolean' ? input.in_scope : source != null ? true : inheritedScope,
     enabled: typeof input.enabled === 'boolean' ? input.enabled : Boolean(config.enabled),
     blocking_enabled: typeof input.blocking_enabled === 'boolean' ? input.blocking_enabled : Boolean(config.blocking_enabled),
     blocking_latest_turn_only: typeof input.blocking_latest_turn_only === 'boolean' ? input.blocking_latest_turn_only : Boolean(config.blocking_latest_turn_only),
@@ -176,14 +182,13 @@ export function normalizeGroupPolicies(
   const byGroup = new Map<string, PromptAuditGroupPolicy>()
   policies.forEach((policy) => {
     const groupID = normalizedGroupID(policy?.group_id)
+    // Unassigned credentials are intentionally never a local Prompt Audit
+    // scope. Dropping a legacy bucket here also clears it on the next save.
+    if (groupID === null) return
     const normalized = createGroupPolicyFromConfig(config, groupID, policy)
-    byGroup.set(groupID === null ? 'default' : String(groupID), normalized)
+    byGroup.set(String(groupID), normalized)
   })
-  return [...byGroup.values()].sort((left, right) => {
-    if (left.group_id === null) return -1
-    if (right.group_id === null) return 1
-    return left.group_id - right.group_id
-  })
+  return [...byGroup.values()].sort((left, right) => Number(left.group_id) - Number(right.group_id))
 }
 
 function normalizedEndpointPriority(priority: number | null | undefined, fallback: number): number {
@@ -330,11 +335,9 @@ export function buildUpdateRequest(draft: PromptAuditDraft): PromptAuditUpdateRe
   // returned the field, retain an explicit empty array as a valid clear-all
   // operation; editing any group also creates the field on the draft.
   if (Array.isArray(draft.group_policies)) {
-    request.group_policies = draft.group_policies.map((policy) => ({
+    request.group_policies = draft.group_policies.filter((policy) => policy.group_id !== null).map((policy) => ({
       ...createGroupPolicyFromConfig(draft, policy.group_id, policy),
-      // The backend uses group_id=0 for the explicit unassigned/default
-      // bucket. The UI keeps null internally to make that boundary obvious.
-      group_id: policy.group_id ?? 0,
+      group_id: policy.group_id,
     }))
   }
   return request

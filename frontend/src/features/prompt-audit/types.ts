@@ -25,12 +25,14 @@ export interface PromptAuditAccount {
 }
 
 /**
- * A policy boundary for one audit group. `group_id: null` is the explicit
- * unassigned/default bucket. The API keeps the legacy global fields as a
- * fallback, so this remains optional on the enclosing config for old servers.
+ * A policy boundary for one real audit group. Older servers may return the
+ * former unassigned bucket as group_id 0/null; the draft normalizer drops it
+ * because unassigned credentials are never part of local Prompt Audit scope.
  */
 export interface PromptAuditGroupPolicy {
   group_id: number | null
+  /** Whether this policy's group is currently part of the local audit scope. */
+  in_scope: boolean
   enabled: boolean
   blocking_enabled: boolean
   blocking_latest_turn_only: boolean

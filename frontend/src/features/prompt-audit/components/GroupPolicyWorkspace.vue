@@ -54,44 +54,55 @@
       </div>
     </div>
 
-    <div class="mt-4 flex flex-wrap items-end gap-3">
-      <label class="min-w-[14rem] flex-1 text-sm text-gray-700 dark:text-dark-200">
-        <span>{{ t('admin.promptAudit.groups.search') }}</span>
-        <input
-          v-model="search"
-          type="search"
-          class="input mt-1.5 w-full"
-          :placeholder="t('admin.promptAudit.groups.searchPlaceholder')"
-          :aria-label="t('admin.promptAudit.groups.search')"
-          data-test="prompt-audit-group-search"
-        />
-      </label>
-      <label class="w-full sm:w-44 text-sm text-gray-700 dark:text-dark-200">
-        <span>{{ t('admin.promptAudit.groups.platform') }}</span>
-        <select v-model="platformFilter" class="input mt-1.5 w-full" :aria-label="t('admin.promptAudit.groups.platform')" data-test="prompt-audit-group-platform-filter">
-          <option value="">{{ t('admin.promptAudit.groups.allPlatforms') }}</option>
-          <option v-for="platform in platforms" :key="platform" :value="platform">{{ platform }}</option>
-        </select>
-      </label>
-      <label class="w-full sm:w-44 text-sm text-gray-700 dark:text-dark-200">
-        <span>{{ t('admin.promptAudit.groups.status') }}</span>
-        <select v-model="statusFilter" class="input mt-1.5 w-full" :aria-label="t('admin.promptAudit.groups.status')" data-test="prompt-audit-group-status-filter">
-          <option value="">{{ t('admin.promptAudit.groups.allStatuses') }}</option>
-          <option value="active">{{ t('admin.promptAudit.groups.active') }}</option>
-          <option value="inactive">{{ t('admin.promptAudit.groups.inactive') }}</option>
-          <option value="unassigned">{{ t('admin.promptAudit.groups.unassigned') }}</option>
-        </select>
-      </label>
-      <div class="relative">
-        <button type="button" class="btn btn-secondary btn-sm" data-test="prompt-audit-group-column-settings" :aria-expanded="columnMenuOpen" @click="columnMenuOpen = !columnMenuOpen">
-          {{ t('admin.promptAudit.groups.columns') }}
+    <div class="mt-4 flex flex-wrap items-end justify-between gap-4">
+      <div class="flex flex-1 flex-wrap items-end gap-4">
+        <div class="w-full sm:w-auto sm:min-w-[240px]">
+          <label class="input-label">{{ t('admin.promptAudit.groups.search') }}</label>
+          <Select
+            v-model="groupFilter"
+            :options="groupOptions"
+            :placeholder="t('admin.promptAudit.groups.searchPlaceholder')"
+            :search-placeholder="t('admin.promptAudit.groups.searchPlaceholder')"
+            :aria-label="t('admin.promptAudit.groups.search')"
+            searchable
+            clearable
+            data-test="prompt-audit-group-search"
+          />
+        </div>
+        <div class="w-full sm:w-auto sm:min-w-[200px]">
+          <label class="input-label">{{ t('admin.promptAudit.groups.platform') }}</label>
+          <Select
+            v-model="platformFilter"
+            :options="platformOptions"
+            :aria-label="t('admin.promptAudit.groups.platform')"
+            data-test="prompt-audit-group-platform-filter"
+          />
+        </div>
+        <div class="w-full sm:w-auto sm:min-w-[200px]">
+          <label class="input-label">{{ t('admin.promptAudit.groups.status') }}</label>
+          <Select
+            v-model="statusFilter"
+            :options="statusOptions"
+            :aria-label="t('admin.promptAudit.groups.status')"
+            data-test="prompt-audit-group-status-filter"
+          />
+        </div>
+      </div>
+      <div class="flex w-full flex-wrap items-center justify-end gap-3 sm:w-auto">
+        <button type="button" class="btn btn-secondary" data-test="prompt-audit-group-filter-reset" @click="resetGroupFilters">
+          {{ t('common.reset') }}
         </button>
-        <div v-if="columnMenuOpen" class="absolute right-0 z-20 mt-2 w-56 rounded-xl border border-gray-200 bg-white p-2 shadow-lg dark:border-dark-700 dark:bg-dark-800" data-test="prompt-audit-group-column-menu">
-          <label v-for="column in configurableColumns" :key="column.key" class="flex cursor-pointer items-center gap-2 rounded-lg px-2 py-2 text-sm text-gray-700 hover:bg-gray-50 dark:text-dark-200 dark:hover:bg-dark-700">
-            <input type="checkbox" :checked="isColumnVisible(column.key)" @change="toggleColumn(column.key)" />
-            <span>{{ column.label }}</span>
-          </label>
-          <p class="px-2 pb-1 pt-2 text-[11px] text-gray-400 dark:text-dark-500">{{ t('admin.promptAudit.groups.fixedColumns') }}</p>
+        <div class="relative">
+          <button type="button" class="btn btn-secondary" data-test="prompt-audit-group-column-settings" :aria-expanded="columnMenuOpen" @click="columnMenuOpen = !columnMenuOpen">
+            {{ t('admin.promptAudit.groups.columns') }}
+          </button>
+          <div v-if="columnMenuOpen" class="absolute right-0 z-20 mt-2 w-56 rounded-xl border border-gray-200 bg-white p-2 shadow-lg dark:border-dark-700 dark:bg-dark-800" data-test="prompt-audit-group-column-menu">
+            <label v-for="column in configurableColumns" :key="column.key" class="flex cursor-pointer items-center gap-2 rounded-lg px-2 py-2 text-sm text-gray-700 hover:bg-gray-50 dark:text-dark-200 dark:hover:bg-dark-700">
+              <input type="checkbox" :checked="isColumnVisible(column.key)" @change="toggleColumn(column.key)" />
+              <span>{{ column.label }}</span>
+            </label>
+            <p class="px-2 pb-1 pt-2 text-[11px] text-gray-400 dark:text-dark-500">{{ t('admin.promptAudit.groups.fixedColumns') }}</p>
+          </div>
         </div>
       </div>
     </div>
@@ -108,9 +119,9 @@
         :clickable-rows="true"
         :sticky-first-column="true"
         :sticky-actions-column="true"
-        :sort-storage-key="'prompt-audit-groups-sort'"
-        default-sort-key="name"
-        :default-sort-order="'asc'"
+        :sort-storage-key="'prompt-audit-groups-sort-v2'"
+        default-sort-key="scope"
+        :default-sort-order="'desc'"
         data-test="prompt-audit-groups-table"
         @row-click="openEditor"
       >
@@ -118,9 +129,8 @@
           <div class="min-w-0">
             <div class="flex items-center gap-2">
               <span class="truncate font-semibold text-gray-900 dark:text-white">{{ row.name }}</span>
-              <span v-if="row.group_id === null" class="badge badge-gray">{{ t('admin.promptAudit.groups.defaultBadge') }}</span>
             </div>
-            <p class="mt-0.5 text-xs text-gray-500 dark:text-dark-400">{{ row.group_id === null ? '—' : `#${row.group_id}` }}</p>
+            <p class="mt-0.5 text-xs text-gray-500 dark:text-dark-400">#{{ row.group_id }}</p>
           </div>
         </template>
         <template #cell-platform="{ row }">
@@ -128,7 +138,6 @@
         </template>
         <template #cell-scope="{ row }">
           <button
-            v-if="row.group_id !== null"
             type="button"
             class="badge cursor-pointer border-0"
             :class="row.in_scope ? 'badge-success' : 'badge-gray'"
@@ -137,7 +146,6 @@
           >
             {{ row.in_scope ? t('admin.promptAudit.groups.inScope') : t('admin.promptAudit.groups.outOfScope') }}
           </button>
-          <span v-else class="badge badge-gray">{{ t('admin.promptAudit.groups.unassigned') }}</span>
         </template>
         <template #cell-status="{ row }">
           <div class="flex flex-wrap items-center gap-1.5">
@@ -433,6 +441,7 @@ import { computed, defineComponent, h, onMounted, ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 import BaseDialog from '@/components/common/BaseDialog.vue'
 import DataTable from '@/components/common/DataTable.vue'
+import Select, { type SelectOption } from '@/components/common/Select.vue'
 import type { Column } from '@/components/common/types'
 import promptAuditAPI from '../api'
 import type {
@@ -467,23 +476,29 @@ type GroupRow = {
   name: string
   platform: string
   group_status: string
+  scope: number
   in_scope: boolean
+  status: number
   enabled: boolean
   blocking_enabled: boolean
   mode: string
   threshold: string
   fallback: string
   account_count: number
+  accounts: number
   risk_count: number
+  risk: number
   extra_count: number
+  extra: number
   excluded_count: number
   updated_at: string
+  updated: string
   policy: PromptAuditGroupPolicy
 }
 
-const search = ref('')
-const platformFilter = ref('')
-const statusFilter = ref('')
+const groupFilter = ref<number | null>(null)
+const platformFilter = ref<string | null>(null)
+const statusFilter = ref<string | null>(null)
 const columnMenuOpen = ref(false)
 const accountColumnMenuOpen = ref(false)
 const profileColumnMenuOpen = ref(false)
@@ -550,9 +565,11 @@ const profileConfigurableColumns = computed(() => allProfileColumns.value.filter
 const visibleProfileColumns = computed(() => allProfileColumns.value.filter((column) => !hiddenProfileColumns.value.includes(column.key) || column.key === 'user'))
 
 function groupKey(groupID: number | null): string { return groupID === null ? 'default' : String(groupID) }
+function storedPolicyFor(groupID: number | null): PromptAuditGroupPolicy | undefined {
+  return (props.draft.group_policies ?? []).find((policy) => groupKey(normalizeGroupID(policy.group_id)) === groupKey(groupID))
+}
 function policyFor(groupID: number | null): PromptAuditGroupPolicy {
-  const existing = (props.draft.group_policies ?? []).find((policy) => groupKey(normalizeGroupID(policy.group_id)) === groupKey(groupID))
-  return createGroupPolicyFromConfig(props.draft, groupID, existing)
+  return createGroupPolicyFromConfig(props.draft, groupID, storedPolicyFor(groupID))
 }
 function normalizeGroupID(value: unknown): number | null {
   const parsed = Number(value)
@@ -580,50 +597,66 @@ function policyFallbackLabel(policy: PromptAuditGroupPolicy): string {
 }
 
 const rows = computed<GroupRow[]>(() => {
-  const knownIDs = new Set(props.groups.map((group) => group.id))
-  const ids = new Set<number | null>([null, ...props.groups.map((group) => group.id)])
+  const ids = new Set(props.groups.map((group) => group.id))
   for (const policy of props.draft.group_policies ?? []) {
-    const id = normalizeGroupID(policy.group_id)
-    if (id === null || !knownIDs.has(id)) ids.add(id)
+    const groupID = normalizeGroupID(policy.group_id)
+    if (groupID !== null) ids.add(groupID)
   }
   return [...ids].map((groupID) => {
     const group = groupInfo(groupID)
+    const storedPolicy = storedPolicyFor(groupID)
     const policy = policyFor(groupID)
-    const hasPolicy = (props.draft.group_policies ?? []).some((item) => groupKey(normalizeGroupID(item.group_id)) === groupKey(groupID))
     const groupAccounts = accountsForGroup(groupID)
+    const inScope = storedPolicy ? policy.in_scope : props.draft.all_groups || props.draft.group_ids.includes(groupID)
+    const updated = policy.updated_at || props.draft.updated_at || ''
     return {
       row_key: groupKey(groupID),
       group_id: groupID,
-      name: group?.name?.trim() || (groupID === null ? t('admin.promptAudit.groups.unassigned') : t('admin.promptAudit.groups.unknownGroup', { id: groupID })),
-      platform: group?.platform || (groupID === null ? '—' : t('admin.promptAudit.groups.unknownPlatform')),
-      group_status: group?.status || (groupID === null ? 'unassigned' : 'unknown'),
-      in_scope: props.draft.all_groups || (hasPolicy || (groupID !== null && props.draft.group_ids.includes(groupID))),
+      name: group?.name.trim() || t('admin.promptAudit.groups.unknownGroup', { id: groupID }),
+      platform: group?.platform || t('admin.promptAudit.groups.unknownPlatform'),
+      group_status: group?.status || 'unknown',
+      scope: inScope ? 1 : 0,
+      in_scope: inScope,
+      status: policy.enabled ? (policy.blocking_enabled ? 2 : 1) : 0,
       enabled: policy.enabled,
       blocking_enabled: policy.enabled && policy.blocking_enabled,
       mode: policyModeLabel(policy),
       threshold: policyThresholdLabel(policy),
       fallback: policyFallbackLabel(policy),
       account_count: groupAccounts.length,
+      accounts: groupAccounts.length,
       risk_count: policy.risk_route_account_ids.length,
+      risk: policy.risk_route_account_ids.length,
       extra_count: policy.cyber_feedback_account_ids.length,
+      extra: policy.cyber_feedback_account_ids.length,
       excluded_count: policy.excluded_user_ids.length,
-      updated_at: policy.updated_at || props.draft.updated_at || '',
+      updated_at: updated,
+      updated,
       policy,
     }
   })
 })
 
 const platforms = computed(() => Array.from(new Set(rows.value.map((row) => row.platform).filter((value) => value && value !== '—'))).sort())
+const groupOptions = computed<SelectOption[]>(() => rows.value
+  .map((row) => ({ value: row.group_id, label: row.name }))
+  .sort((left, right) => left.label.localeCompare(right.label, locale.value, { numeric: true, sensitivity: 'base' })))
+const platformOptions = computed<SelectOption[]>(() => [
+  { value: null, label: t('admin.promptAudit.groups.allPlatforms') },
+  ...platforms.value.map((platform) => ({ value: platform, label: platform })),
+])
+const statusOptions = computed<SelectOption[]>(() => [
+  { value: null, label: t('admin.promptAudit.groups.allStatuses') },
+  { value: 'active', label: t('admin.promptAudit.groups.active') },
+  { value: 'inactive', label: t('admin.promptAudit.groups.inactive') },
+])
 const filteredRows = computed(() => {
-  const query = search.value.trim().toLowerCase()
   return rows.value.filter((row) => {
-    if (query && !`${row.name} ${row.group_id ?? ''} ${row.platform}`.toLowerCase().includes(query)) return false
+    if (groupFilter.value !== null && row.group_id !== groupFilter.value) return false
     if (platformFilter.value && row.platform !== platformFilter.value) return false
-    if (statusFilter.value === 'unassigned' && row.group_id !== null) return false
-    if (statusFilter.value === 'active' && (row.group_id === null || row.group_status !== 'active')) return false
-    if (statusFilter.value === 'inactive' && (row.group_id === null || row.group_status !== 'inactive')) return false
+    if (statusFilter.value && row.group_status !== statusFilter.value) return false
     return true
-  })
+  }).sort((left, right) => left.name.localeCompare(right.name, locale.value, { numeric: true, sensitivity: 'base' }) || left.group_id! - right.group_id!)
 })
 const missingPolicyGroupIDs = computed(() => (props.draft.group_policies ?? []).map((policy) => normalizeGroupID(policy.group_id)).filter((id): id is number => id !== null && !props.groups.some((group) => group.id === id)))
 
@@ -712,11 +745,30 @@ function patchDraft(value: Partial<PromptAuditDraft>) { emit('update:draft', { .
 function toggleAllGroups(value: boolean) {
   patchDraft({ all_groups: value, group_ids: value ? [] : [...props.draft.group_ids] })
 }
+function resetGroupFilters() {
+  groupFilter.value = null
+  platformFilter.value = null
+  statusFilter.value = null
+}
 function toggleGroupScope(groupID: number) {
+  const currentPolicy = storedPolicyFor(groupID)
+  if (currentPolicy) {
+    const nextPolicies = (props.draft.group_policies ?? []).map((policy) => {
+      if (groupKey(normalizeGroupID(policy.group_id)) !== groupKey(groupID)) return cloneData(policy)
+      return { ...createGroupPolicyFromConfig(props.draft, groupID, policy), in_scope: !policyFor(groupID).in_scope }
+    })
+    patchDraft({ group_policies: nextPolicies })
+    return
+  }
+  if (props.draft.all_groups) {
+    const policy = { ...createGroupPolicyFromConfig(props.draft, groupID), in_scope: false }
+    patchDraft({ group_policies: [...(props.draft.group_policies ?? []).map((item) => cloneData(item)), policy] })
+    return
+  }
   const ids = new Set(props.draft.group_ids)
   if (ids.has(groupID)) ids.delete(groupID)
   else ids.add(groupID)
-  patchDraft({ all_groups: false, group_ids: [...ids].sort((left, right) => left - right) })
+  patchDraft({ group_ids: [...ids].sort((left, right) => left - right) })
 }
 function openEditor(row: GroupRow) {
   selectedPolicy.value = cloneData(row.policy)

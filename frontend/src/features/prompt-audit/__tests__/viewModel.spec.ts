@@ -4,6 +4,7 @@ import {
   DEFAULT_AUDIT_SYSTEM_PROMPT,
   buildUpdateRequest,
   configToDraft,
+  createGroupPolicyFromConfig,
   createDefaultEndpoint,
   DEFAULT_BLOCK_MESSAGE,
   DEFAULT_PROMPT_TEMPLATE_ID,
@@ -61,6 +62,24 @@ describe('Prompt Audit view model', () => {
       flag_threshold: 0.4, block_threshold: 0.7, block_http_status: 403, block_message: DEFAULT_BLOCK_MESSAGE,
       max_total_input_chars: 40000,
     })
+  })
+
+  it('drops the legacy unassigned policy and defaults old real-group policies into scope', () => {
+    const base = { ...config(), all_groups: false, group_ids: [7] }
+    const unassigned = { ...createGroupPolicyFromConfig(base, null), in_scope: true }
+    const { in_scope: _legacyScope, ...legacyReal } = createGroupPolicyFromConfig(base, 7)
+    const draft = configToDraft({
+      ...base,
+      group_policies: [unassigned, legacyReal as unknown as typeof unassigned],
+    })
+
+    expect(draft.group_policies).toEqual([
+      expect.objectContaining({ group_id: 7, in_scope: true }),
+    ])
+    draft.group_policies?.unshift(unassigned)
+    expect(buildUpdateRequest(draft).group_policies).toEqual([
+      expect.objectContaining({ group_id: 7, in_scope: true }),
+    ])
   })
 
   it('normalizes legacy endpoints and creates confidence nodes with DeepSeek limits', () => {

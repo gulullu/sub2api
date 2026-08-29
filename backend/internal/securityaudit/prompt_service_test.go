@@ -15,6 +15,11 @@ type staticSettingRepository struct {
 	values map[string]string
 }
 
+func promptAuditTestGroupID() *int64 {
+	groupID := int64(1)
+	return &groupID
+}
+
 func (r staticSettingRepository) Get(context.Context, string) (*service.Setting, error) {
 	return nil, service.ErrSettingNotFound
 }
@@ -85,7 +90,7 @@ func TestPromptServiceBlockingLatestTurnOnlyUsesNarrowSnapshot(t *testing.T) {
 		}},
 		evaluator: evaluator,
 	}
-	decision, err := service.Evaluate(context.Background(), Request{Protocol: "openai_chat_completions", Body: []byte(`{"messages":[{"role":"system","content":"system instruction"},{"role":"user","content":"older user input"},{"role":"assistant","content":"previous output"},{"role":"user","content":"latest user input"}]}`)})
+	decision, err := service.Evaluate(context.Background(), Request{GroupID: promptAuditTestGroupID(), Protocol: "openai_chat_completions", Body: []byte(`{"messages":[{"role":"system","content":"system instruction"},{"role":"user","content":"older user input"},{"role":"assistant","content":"previous output"},{"role":"user","content":"latest user input"}]}`)})
 	require.NoError(t, err)
 	require.Equal(t, DecisionAllow, decision.Kind)
 	require.Equal(t, []string{"latest user input", "previous output"}, seen)
@@ -102,7 +107,7 @@ func TestPromptServiceExcludedUserSkipsBlockingAudit(t *testing.T) {
 			return nil, nil
 		}), nil, NewAtomicMetrics(), 2, 2),
 	}
-	decision, err := service.Evaluate(context.Background(), Request{UserID: 77, Protocol: "openai_chat_completions", Body: []byte(`{"messages":[{"role":"user","content":"hi"}]}`)})
+	decision, err := service.Evaluate(context.Background(), Request{GroupID: promptAuditTestGroupID(), UserID: 77, Protocol: "openai_chat_completions", Body: []byte(`{"messages":[{"role":"user","content":"hi"}]}`)})
 	require.NoError(t, err)
 	require.Equal(t, DecisionAllow, decision.Kind)
 }
@@ -119,7 +124,7 @@ func TestPromptServiceExcludedUserSkipsAsyncEnqueue(t *testing.T) {
 		enqueuer:   NewEnqueuer(config, repo, payload, NewAtomicMetrics()),
 		background: context.Background(),
 	}
-	require.NoError(t, service.Enqueue(context.Background(), Request{RequestID: "req-1", UserID: 77, Protocol: "openai_chat_completions", Body: []byte(`{"messages":[{"role":"user","content":"hi"}]}`)}))
+	require.NoError(t, service.Enqueue(context.Background(), Request{RequestID: "req-1", GroupID: promptAuditTestGroupID(), UserID: 77, Protocol: "openai_chat_completions", Body: []byte(`{"messages":[{"role":"user","content":"hi"}]}`)}))
 	require.Zero(t, repo.recordBlockingCalls)
 	require.Empty(t, payload.values)
 }
@@ -152,7 +157,7 @@ func TestPromptServiceUnavailableAuditFallsBackToHardRiskRoute(t *testing.T) {
 	}), repo, metrics, 2, 2)
 	evaluator.clock = fixedClock{now: now}
 	service := &PromptService{config: &fakeConfigStore{active: true, cfg: cfg}, evaluator: evaluator, metrics: metrics, clock: fixedClock{now: now}}
-	request := Request{RequestID: "fallback-request", Protocol: "openai_chat_completions", Body: []byte(`{"messages":[{"role":"user","content":"review me"}]}`)}
+	request := Request{RequestID: "fallback-request", GroupID: promptAuditTestGroupID(), Protocol: "openai_chat_completions", Body: []byte(`{"messages":[{"role":"user","content":"review me"}]}`)}
 
 	decision, err := service.Evaluate(context.Background(), request)
 
@@ -193,7 +198,7 @@ func TestPromptServiceUnavailableAuditFallbackRequiresLiveContextAndRiskPool(t *
 		Scanners:  AllScannerIDs,
 		Endpoints: []ActiveEndpoint{{ID: "guard-1", Priority: 1, Enabled: true, TimeoutMS: 1000, InputLimit: 4096}},
 	}
-	request := Request{Protocol: "openai_chat_completions", Body: []byte(`{"messages":[{"role":"user","content":"review me"}]}`)}
+	request := Request{GroupID: promptAuditTestGroupID(), Protocol: "openai_chat_completions", Body: []byte(`{"messages":[{"role":"user","content":"review me"}]}`)}
 
 	t.Run("no configured risk pool keeps 503 semantics", func(t *testing.T) {
 		evaluator := newGuardEvaluator(PromptScannerFunc(func(context.Context, ActiveEndpoint, string, []string) (*NormalizedResult, error) {
@@ -327,7 +332,7 @@ func TestPromptServiceGroupPolicyCannotBypassGlobalMasterSwitch(t *testing.T) {
 }
 
 func TestPromptServiceUnavailableRiskRouteCoversNoEndpointAndGlobalBulkhead(t *testing.T) {
-	request := Request{Protocol: "openai_chat_completions", Body: []byte(`{"messages":[{"role":"user","content":"review me"}]}`)}
+	request := Request{GroupID: promptAuditTestGroupID(), Protocol: "openai_chat_completions", Body: []byte(`{"messages":[{"role":"user","content":"review me"}]}`)}
 	baseConfig := ActiveConfig{
 		RiskControlEnabled: true, Enabled: true, BlockingEnabled: true, AllGroups: true, ConfigVersion: 9,
 		Scanners: AllScannerIDs, RiskRouteAccountIDs: []int64{31},
