@@ -61,7 +61,7 @@ export default {
       adapter: '响应适配器',
       adapters: { confidence_json: 'JSON 置信度（DeepSeek / OpenAI 兼容）', qwen3guard: 'Qwen3Guard Safety / Categories', openai_moderation: 'OpenAI Moderation（实验后备）' },
       adapterHints: { confidence_json: '发送当前启用的系统审核提示词，并读取 confidence 与 reason JSON。', qwen3guard: '沿用原有 Qwen3Guard Safety 与 Categories 文本格式。', openai_moderation: '实验后备，新增时默认停用。调用 /v1/moderations；官方 flagged 决定 Unsafe，分数只作证据，并按已启用风险类别决定阻断。不支持系统提示词或 CYB 补充学习规则，审核范围比现有 CYB 策略更宽，能力不等价于现有节点。' },
-      toggleNode: '切换节点 {name}', duplicate: '复制节点', copyName: '{name} 副本', copy: '复制安全配置', copied: '已复制', columns: '列设置', fixedColumns: '节点和操作列始终显示。', deleteConfirm: '从草稿中删除节点“{name}”？保存配置后生效。',
+      toggleNode: '切换节点 {name}', duplicate: '复制节点', copyName: '{name} 副本', columns: '列设置', fixedColumns: '节点和操作列始终显示。', deleteConfirm: '从草稿中删除节点“{name}”？保存配置后生效。',
     },
     templates: {
       title: '审核提示词模板', description: '选择 JSON 置信度节点使用的系统提示词。内置模板只读，可复制后自定义。',
@@ -160,7 +160,7 @@ export default {
       summary: '显示 {count} 个分组',
       workerCount: 'Worker 数量', queueCapacity: '队列容量', allGroups: '默认纳入全部分组', strategy: '节点策略',
       search: '搜索分组', searchPlaceholder: '选择或搜索分组', platform: '平台', allPlatforms: '全部平台', status: '分组状态', allStatuses: '全部状态', active: '启用', inactive: '停用', unassigned: '未分配账号',
-      name: '分组', columns: '列设置', fixedColumns: '名称和操作列始终显示。', missingGroups: '已保存策略引用了不存在的分组：{ids}', defaultBadge: '默认', unknownGroup: '未知分组 #{id}', unknownPlatform: '未知', scope: '审计范围', inScope: '已纳入', outOfScope: '未纳入', toggleScope: '切换 {name} 的审计范围', enabled: '启用', disabled: '停用', blocking: '同步阻断', mode: '模式', threshold: '阈值（标记 / 阻断）', fallback: '无分流兜底', accountCount: '分组账号', riskCount: '高风险硬池', extraCount: '额外上游', updated: '更新时间', editTitle: '编辑分组策略 · {name}', copy: '复制策略', copied: '已复制', empty: '没有匹配当前筛选的分组。',
+      name: '分组', columns: '列设置', fixedColumns: '名称和操作列始终显示。', missingGroups: '已保存策略引用了不存在的分组：{ids}', defaultBadge: '默认', unknownGroup: '未知分组 #{id}', unknownPlatform: '未知', scope: '审计范围', inScope: '已纳入', outOfScope: '未纳入', toggleScope: '切换 {name} 的审计范围', enabled: '启用', disabled: '停用', blocking: '同步阻断', mode: '模式', threshold: '阈值（标记 / 阻断）', fallback: '无分流兜底', accountCount: '分组账号', riskCount: '高风险硬池', extraCount: '额外上游', updated: '更新时间', editTitle: '编辑分组策略 · {name}', empty: '没有匹配当前筛选的分组。',
       editorTabsLabel: '分组策略区域',
       tabs: { policy: '判定策略', risk: '高风险分流', cyber: '额外 CYB 上游', profiles: '用户画像' },
       latestTurnOnly: '仅审核最新输入和之前输出', storePass: '保存安全事件', flagThreshold: '标记阈值', blockThreshold: '阻断阈值', blockStatus: '阻断 HTTP 状态码', maxInput: '单请求最大审计字符数', blockMessage: '阻断提示文案', noRouteFallback: '无可分流账号时', fallbackAllow: '继续放行请求', fallbackBlock: '拒绝请求', template: '审核提示词模板', scanners: '输入风险分类',

@@ -40,18 +40,14 @@
         </div>
         <div class="flex flex-wrap items-center justify-end gap-2">
           <span class="text-xs text-gray-500 dark:text-gray-400">{{ t('admin.promptAudit.cyber.total', { count: page.total }) }}</span>
-          <div class="relative">
-            <button type="button" class="btn btn-secondary btn-sm" data-test="cyber-column-settings" :aria-expanded="cyberColumnMenuOpen" @click="cyberColumnMenuOpen = !cyberColumnMenuOpen">
-              {{ t('admin.promptAudit.cyber.columnSettings') }}
-            </button>
-            <div v-if="cyberColumnMenuOpen" class="absolute right-0 z-20 mt-2 w-56 rounded-xl border border-gray-200 bg-white p-2 shadow-lg dark:border-dark-700 dark:bg-dark-800" data-test="cyber-column-menu">
-              <label v-for="column in cyberConfigurableColumns" :key="column.key" class="flex cursor-pointer items-center gap-2 rounded-lg px-2 py-2 text-sm text-gray-700 hover:bg-gray-50 dark:text-dark-200 dark:hover:bg-dark-700">
-                <input type="checkbox" :checked="isCyberColumnVisible(column.key)" @change="toggleCyberColumn(column.key)" />
-                <span>{{ column.label }}</span>
-              </label>
-              <p class="px-2 pb-1 pt-2 text-[11px] text-gray-400 dark:text-dark-500">{{ t('admin.promptAudit.cyber.fixedColumns') }}</p>
-            </div>
-          </div>
+          <ColumnSettingsDropdown
+            :label="t('admin.promptAudit.cyber.columnSettings')"
+            :columns="cyberConfigurableColumns"
+            :is-visible="isCyberColumnVisible"
+            button-test="cyber-column-settings"
+            menu-test="cyber-column-menu"
+            @toggle="toggleCyberColumn"
+          />
         </div>
       </div>
 
@@ -326,6 +322,7 @@ import { useAppStore } from '@/stores/app'
 import { extractApiErrorCode, extractApiErrorMessage } from '@/utils/apiError'
 import promptAuditAPI from '../api'
 import type { CyberFeedbackDetail, CyberFeedbackEvent, CyberFeedbackEvidence, CyberFeedbackListFilter, CyberFeedbackPage, CyberFeedbackStatus, CyberPolicyRule, PromptAuditAccount, PromptAuditGroup } from '../types'
+import ColumnSettingsDropdown from './ColumnSettingsDropdown.vue'
 
 const { t, locale } = useI18n()
 const appStore = useAppStore()
@@ -350,7 +347,6 @@ const rejectReason = ref('')
 const page = reactive<CyberFeedbackPage>({ items: [], total: 0, page: 1, page_size: 20, active_rules: [], config_version: 0 })
 const pageCount = computed(() => Math.max(1, Math.ceil(page.total / page.page_size)))
 const canRegenerate = computed(() => evidence.value?.available === true && evidence.value.full_prompt.length > 0)
-const cyberColumnMenuOpen = ref(false)
 const hiddenCyberColumns = ref<string[]>([])
 const groupOptions = computed<PromptAuditGroup[]>(() => {
   const options = props.groups.slice().sort((left, right) => left.id - right.id)

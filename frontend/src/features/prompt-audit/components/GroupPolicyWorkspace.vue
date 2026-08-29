@@ -92,18 +92,14 @@
         <button type="button" class="btn btn-secondary" data-test="prompt-audit-group-filter-reset" @click="resetGroupFilters">
           {{ t('common.reset') }}
         </button>
-        <div class="relative">
-          <button type="button" class="btn btn-secondary" data-test="prompt-audit-group-column-settings" :aria-expanded="columnMenuOpen" @click="columnMenuOpen = !columnMenuOpen">
-            {{ t('admin.promptAudit.groups.columns') }}
-          </button>
-          <div v-if="columnMenuOpen" class="absolute right-0 z-20 mt-2 w-56 rounded-xl border border-gray-200 bg-white p-2 shadow-lg dark:border-dark-700 dark:bg-dark-800" data-test="prompt-audit-group-column-menu">
-            <label v-for="column in configurableColumns" :key="column.key" class="flex cursor-pointer items-center gap-2 rounded-lg px-2 py-2 text-sm text-gray-700 hover:bg-gray-50 dark:text-dark-200 dark:hover:bg-dark-700">
-              <input type="checkbox" :checked="isColumnVisible(column.key)" @change="toggleColumn(column.key)" />
-              <span>{{ column.label }}</span>
-            </label>
-            <p class="px-2 pb-1 pt-2 text-[11px] text-gray-400 dark:text-dark-500">{{ t('admin.promptAudit.groups.fixedColumns') }}</p>
-          </div>
-        </div>
+        <ColumnSettingsDropdown
+          :label="t('admin.promptAudit.groups.columns')"
+          :columns="configurableColumns"
+          :is-visible="isColumnVisible"
+          button-test="prompt-audit-group-column-settings"
+          menu-test="prompt-audit-group-column-menu"
+          @toggle="toggleColumn"
+        />
       </div>
     </div>
 
@@ -177,7 +173,6 @@
         <template #cell-actions="{ row }">
           <div class="flex flex-wrap items-center justify-end gap-1">
             <button type="button" class="btn btn-primary btn-sm" :data-test="`prompt-audit-edit-group-${row.row_key}`" @click.stop="openEditor(row)">{{ t('common.edit') }}</button>
-            <button type="button" class="btn btn-ghost btn-sm" :data-test="`prompt-audit-copy-policy-${row.row_key}`" @click.stop="copyPolicy(row)">{{ copiedPolicyKey === row.row_key ? t('admin.promptAudit.groups.copied') : t('admin.promptAudit.groups.copy') }}</button>
           </div>
         </template>
         <template #empty>
@@ -286,16 +281,14 @@
               <input v-model="accountSearch" type="search" class="input mt-1.5 w-full" :placeholder="t('admin.promptAudit.groups.accountSearchPlaceholder')" data-test="prompt-audit-group-risk-search" />
             </label>
             <span class="badge badge-warning">{{ t('admin.promptAudit.groups.selectedCount', { count: selectedPolicy.risk_route_account_ids.length }) }}</span>
-            <div class="relative">
-              <button type="button" class="btn btn-secondary btn-sm" data-test="prompt-audit-account-column-settings" :aria-expanded="accountColumnMenuOpen" @click="accountColumnMenuOpen = !accountColumnMenuOpen">{{ t('admin.promptAudit.groups.columns') }}</button>
-              <div v-if="accountColumnMenuOpen" class="absolute right-0 z-20 mt-2 w-56 rounded-xl border border-gray-200 bg-white p-2 shadow-lg dark:border-dark-700 dark:bg-dark-800" data-test="prompt-audit-account-column-menu">
-                <label v-for="column in accountConfigurableColumns" :key="column.key" class="flex cursor-pointer items-center gap-2 rounded-lg px-2 py-2 text-sm text-gray-700 hover:bg-gray-50 dark:text-dark-200 dark:hover:bg-dark-700">
-                  <input type="checkbox" :checked="isAccountColumnVisible(column.key)" @change="toggleAccountColumn(column.key)" />
-                  <span>{{ column.label }}</span>
-                </label>
-                <p class="px-2 pb-1 pt-2 text-[11px] text-gray-400 dark:text-dark-500">{{ t('admin.promptAudit.groups.accountFixedColumns') }}</p>
-              </div>
-            </div>
+            <ColumnSettingsDropdown
+              :label="t('admin.promptAudit.groups.columns')"
+              :columns="accountConfigurableColumns"
+              :is-visible="isAccountColumnVisible"
+              button-test="prompt-audit-account-column-settings"
+              menu-test="prompt-audit-account-column-menu"
+              @toggle="toggleAccountColumn"
+            />
           </div>
           <div v-if="accountsError" role="alert" class="rounded-lg bg-red-50 px-3 py-2 text-sm text-red-700 dark:bg-red-950/30 dark:text-red-200">
             {{ accountsError }} <button type="button" class="ml-2 underline" @click="$emit('retry-accounts')">{{ t('admin.promptAudit.actions.retry') }}</button>
@@ -332,16 +325,14 @@
               <input v-model="accountSearch" type="search" class="input mt-1.5 w-full" :placeholder="t('admin.promptAudit.groups.accountSearchPlaceholder')" data-test="prompt-audit-group-cyber-search" />
             </label>
             <span class="badge badge-primary">{{ t('admin.promptAudit.groups.selectedCount', { count: selectedPolicy.cyber_feedback_account_ids.length }) }}</span>
-            <div class="relative">
-              <button type="button" class="btn btn-secondary btn-sm" data-test="prompt-audit-account-column-settings-cyber" :aria-expanded="accountColumnMenuOpen" @click="accountColumnMenuOpen = !accountColumnMenuOpen">{{ t('admin.promptAudit.groups.columns') }}</button>
-              <div v-if="accountColumnMenuOpen" class="absolute right-0 z-20 mt-2 w-56 rounded-xl border border-gray-200 bg-white p-2 shadow-lg dark:border-dark-700 dark:bg-dark-800" data-test="prompt-audit-account-column-menu-cyber">
-                <label v-for="column in accountConfigurableColumns" :key="column.key" class="flex cursor-pointer items-center gap-2 rounded-lg px-2 py-2 text-sm text-gray-700 hover:bg-gray-50 dark:text-dark-200 dark:hover:bg-dark-700">
-                  <input type="checkbox" :checked="isAccountColumnVisible(column.key)" @change="toggleAccountColumn(column.key)" />
-                  <span>{{ column.label }}</span>
-                </label>
-                <p class="px-2 pb-1 pt-2 text-[11px] text-gray-400 dark:text-dark-500">{{ t('admin.promptAudit.groups.accountFixedColumns') }}</p>
-              </div>
-            </div>
+            <ColumnSettingsDropdown
+              :label="t('admin.promptAudit.groups.columns')"
+              :columns="accountConfigurableColumns"
+              :is-visible="isAccountColumnVisible"
+              button-test="prompt-audit-account-column-settings-cyber"
+              menu-test="prompt-audit-account-column-menu-cyber"
+              @toggle="toggleAccountColumn"
+            />
           </div>
           <div v-if="accountsError" role="alert" class="rounded-lg bg-red-50 px-3 py-2 text-sm text-red-700 dark:bg-red-950/30 dark:text-red-200">{{ accountsError }} <button type="button" class="ml-2 underline" @click="$emit('retry-accounts')">{{ t('admin.promptAudit.actions.retry') }}</button></div>
           <div v-else-if="accountsLoading" class="rounded-lg border border-dashed border-gray-200 px-4 py-10 text-center text-sm text-gray-500 dark:border-dark-700 dark:text-dark-300" aria-busy="true">{{ t('admin.promptAudit.groups.loadingAccounts') }}</div>
@@ -376,16 +367,14 @@
               <input v-model="profileSearch" type="search" class="input mt-1.5 w-full" :placeholder="t('admin.promptAudit.groups.profileSearchPlaceholder')" data-test="prompt-audit-group-profile-search" @keyup.enter="applyProfileFilters" />
             </label>
             <label class="w-32 text-sm text-gray-700 dark:text-dark-200"><span>{{ t('admin.promptAudit.groups.profileDays') }}</span><input v-model.number="profileDays" type="number" min="1" max="180" class="input mt-1.5 w-full" @change="applyProfileFilters" /></label>
-            <div class="relative">
-              <button type="button" class="btn btn-secondary btn-sm" data-test="prompt-audit-profile-column-settings" :aria-expanded="profileColumnMenuOpen" @click="profileColumnMenuOpen = !profileColumnMenuOpen">{{ t('admin.promptAudit.groups.profileColumns') }}</button>
-              <div v-if="profileColumnMenuOpen" class="absolute right-0 z-20 mt-2 w-56 rounded-xl border border-gray-200 bg-white p-2 shadow-lg dark:border-dark-700 dark:bg-dark-800" data-test="prompt-audit-profile-column-menu">
-                <label v-for="column in profileConfigurableColumns" :key="column.key" class="flex cursor-pointer items-center gap-2 rounded-lg px-2 py-2 text-sm text-gray-700 hover:bg-gray-50 dark:text-dark-200 dark:hover:bg-dark-700">
-                  <input type="checkbox" :checked="isProfileColumnVisible(column.key)" @change="toggleProfileColumn(column.key)" />
-                  <span>{{ column.label }}</span>
-                </label>
-                <p class="px-2 pb-1 pt-2 text-[11px] text-gray-400 dark:text-dark-500">{{ t('admin.promptAudit.groups.profileFixedColumns') }}</p>
-              </div>
-            </div>
+            <ColumnSettingsDropdown
+              :label="t('admin.promptAudit.groups.profileColumns')"
+              :columns="profileConfigurableColumns"
+              :is-visible="isProfileColumnVisible"
+              button-test="prompt-audit-profile-column-settings"
+              menu-test="prompt-audit-profile-column-menu"
+              @toggle="toggleProfileColumn"
+            />
             <button type="button" class="btn btn-secondary btn-sm" :disabled="profilesLoading" @click="applyProfileFilters">{{ profilesLoading ? t('common.loading') : t('admin.promptAudit.groups.profileRefresh') }}</button>
             <button type="button" class="btn btn-secondary btn-sm" :disabled="profilesLoading || !profilePage.items.length" @click="selectProfilePage(true)">{{ t('admin.promptAudit.groups.selectPage') }}</button>
             <button type="button" class="btn btn-ghost btn-sm" :disabled="profilesLoading || !profilePage.items.length" @click="selectProfilePage(false)">{{ t('admin.promptAudit.groups.clearPage') }}</button>
@@ -444,6 +433,7 @@ import DataTable from '@/components/common/DataTable.vue'
 import Select, { type SelectOption } from '@/components/common/Select.vue'
 import type { Column } from '@/components/common/types'
 import promptAuditAPI from '../api'
+import ColumnSettingsDropdown from './ColumnSettingsDropdown.vue'
 import type {
   PromptAuditAccount,
   PromptAuditDraft,
@@ -499,10 +489,6 @@ type GroupRow = {
 const groupFilter = ref<number | null>(null)
 const platformFilter = ref<string | null>(null)
 const statusFilter = ref<string | null>(null)
-const columnMenuOpen = ref(false)
-const accountColumnMenuOpen = ref(false)
-const profileColumnMenuOpen = ref(false)
-const copiedPolicyKey = ref('')
 const hiddenColumns = ref<string[]>([])
 const hiddenAccountColumns = ref<string[]>([])
 const hiddenProfileColumns = ref<string[]>([])
@@ -820,14 +806,6 @@ function removeAccount(kind: 'risk' | 'cyber', id: number) {
 }
 function accountGroups(account: PromptAuditAccount): string {
   return account.groups.length ? account.groups.map((group) => group.name || `#${group.id}`).join(', ') : t('admin.promptAudit.groups.unassigned')
-}
-function copyPolicy(row: GroupRow) {
-  const safe = { ...cloneData(row.policy), risk_route_account_ids: [...row.policy.risk_route_account_ids], cyber_feedback_account_ids: [...row.policy.cyber_feedback_account_ids], excluded_user_ids: [...row.policy.excluded_user_ids] }
-  delete (safe as Partial<PromptAuditGroupPolicy>).updated_at
-  const text = JSON.stringify(safe, null, 2)
-  copiedPolicyKey.value = row.row_key
-  void navigator.clipboard?.writeText(text)
-  window.setTimeout(() => { if (copiedPolicyKey.value === row.row_key) copiedPolicyKey.value = '' }, 1600)
 }
 function formatDate(value?: string): string {
   if (!value) return '—'

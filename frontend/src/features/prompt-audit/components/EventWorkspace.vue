@@ -107,18 +107,14 @@
         <div class="flex w-full flex-wrap items-center justify-end gap-3 sm:w-auto">
           <button type="submit" class="btn btn-primary">{{ t('common.search') }}</button>
           <button type="button" class="btn btn-secondary" data-test="event-reset-filters" @click="resetFilters">{{ t('common.reset') }}</button>
-          <div class="relative">
-            <button type="button" class="btn btn-secondary" data-test="event-column-settings" :aria-expanded="eventColumnMenuOpen" @click="eventColumnMenuOpen = !eventColumnMenuOpen">
-              {{ t('admin.promptAudit.events.columns') }}
-            </button>
-            <div v-if="eventColumnMenuOpen" class="absolute right-0 z-20 mt-2 w-56 rounded-xl border border-gray-200 bg-white p-2 shadow-lg dark:border-dark-700 dark:bg-dark-800" data-test="event-column-menu">
-              <label v-for="column in eventConfigurableColumns" :key="column.key" class="flex cursor-pointer items-center gap-2 rounded-lg px-2 py-2 text-sm text-gray-700 hover:bg-gray-50 dark:text-dark-200 dark:hover:bg-dark-700">
-                <input type="checkbox" :checked="isEventColumnVisible(column.key)" @change="toggleEventColumn(column.key)" />
-                <span>{{ column.label }}</span>
-              </label>
-              <p class="px-2 pb-1 pt-2 text-[11px] text-gray-400 dark:text-dark-500">{{ t('admin.promptAudit.events.fixedColumns') }}</p>
-            </div>
-          </div>
+          <ColumnSettingsDropdown
+            :label="t('admin.promptAudit.events.columns')"
+            :columns="eventConfigurableColumns"
+            :is-visible="isEventColumnVisible"
+            button-test="event-column-settings"
+            menu-test="event-column-menu"
+            @toggle="toggleEventColumn"
+          />
         </div>
       </div>
     </form>
@@ -202,6 +198,7 @@ import Select, { type SelectOption } from '@/components/common/Select.vue'
 import type { Column } from '@/components/common/types'
 import type { PromptAuditEndpointDraft, PromptAuditEvent, PromptAuditGroup, PromptEventFilters } from '../types'
 import { cloneData, emptyEventFilters, LOCALIZED_SCANNER_IDS } from '../viewModel'
+import ColumnSettingsDropdown from './ColumnSettingsDropdown.vue'
 
 const props = defineProps<{
   events: PromptAuditEvent[]; total: number; page: number; pageSize: number
@@ -222,7 +219,6 @@ const emit = defineEmits<{
 }>()
 const { t, locale } = useI18n()
 const localFilters = reactive<PromptEventFilters>(cloneData(props.filters))
-const eventColumnMenuOpen = ref(false)
 const hiddenEventColumns = ref<string[]>([])
 const userResults = ref<SimpleUser[]>([])
 const apiKeyResults = ref<SimpleApiKey[]>([])

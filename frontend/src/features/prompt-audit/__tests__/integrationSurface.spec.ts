@@ -61,4 +61,22 @@ describe('Prompt Audit integration surface', () => {
     expect(events).toContain('sm:min-w-[240px]')
     expect(events).not.toContain('sm:grid-cols-2')
   })
+
+  it('uses the shared Usage-style column settings control for all seven lists', () => {
+    const endpoint = read('../components/EndpointPool.vue')
+    const events = read('../components/EventWorkspace.vue')
+    const groups = read('../components/GroupPolicyWorkspace.vue')
+    const cyber = read('../components/CyberLearningWorkspace.vue')
+    const combined = [endpoint, events, groups, cyber].join('\n')
+
+    expect(combined.match(/<ColumnSettingsDropdown/g)).toHaveLength(7)
+    expect(endpoint).toContain('button-test="endpoint-column-settings"')
+    expect(events).toContain('button-test="event-column-settings"')
+    expect(groups.match(/<ColumnSettingsDropdown/g)).toHaveLength(4)
+    expect(cyber).toContain('button-test="cyber-column-settings"')
+    expect(combined).not.toContain("t('admin.promptAudit.pool.fixedColumns')")
+    expect(combined).not.toContain("t('admin.promptAudit.events.fixedColumns')")
+    expect(combined).not.toContain("t('admin.promptAudit.groups.fixedColumns')")
+    expect(combined).not.toContain("t('admin.promptAudit.cyber.fixedColumns')")
+  })
 })

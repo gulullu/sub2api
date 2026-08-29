@@ -113,6 +113,8 @@ describe('GroupPolicyWorkspace', () => {
     expect(options.find((option) => option.value === 99)?.label).toContain('admin.promptAudit.groups.unknownGroup')
     expect(wrapper.findComponent(DataTable).props('data')).toHaveLength(4)
     expect(wrapper.findComponent(DataTable).props('data').some((row: { group_id: number | null }) => row.group_id === null)).toBe(false)
+    expect(wrapper.find('[data-test^="prompt-audit-copy-policy-"]').exists()).toBe(false)
+    expect(wrapper.find('[data-test^="prompt-audit-edit-group-"]').exists()).toBe(true)
 
     groupSelect.vm.$emit('update:modelValue', 2)
     await wrapper.vm.$nextTick()

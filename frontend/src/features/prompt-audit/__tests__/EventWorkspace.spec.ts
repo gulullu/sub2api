@@ -109,6 +109,12 @@ describe('EventWorkspace filters', () => {
     const columnSettings = wrapper.get('[data-test="event-column-settings"]')
     expect(columnSettings.classes()).toContain('btn-secondary')
     expect(columnSettings.classes()).not.toContain('btn-sm')
+    expect(columnSettings.classes()).toEqual(expect.arrayContaining(['px-2', 'md:px-3']))
+    expect(columnSettings.find('svg[aria-hidden="true"]').exists()).toBe(true)
+    await columnSettings.trigger('click')
+    const columnMenu = wrapper.get('[data-test="event-column-menu"]')
+    expect(columnMenu.classes()).toEqual(expect.arrayContaining(['z-50', 'mt-1', 'w-48', 'rounded-lg', 'py-1']))
+    expect(columnMenu.find('input[type="checkbox"]').exists()).toBe(false)
     wrapper.unmount()
   })
 

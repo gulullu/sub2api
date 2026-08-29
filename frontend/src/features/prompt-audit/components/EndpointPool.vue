@@ -8,18 +8,14 @@
       <button type="button" class="btn btn-primary btn-sm" data-test="add-endpoint" @click="openCreate">
         {{ t('admin.promptAudit.pool.add') }}
       </button>
-      <div class="relative">
-        <button type="button" class="btn btn-secondary btn-sm" data-test="endpoint-column-settings" :aria-expanded="columnMenuOpen" @click="columnMenuOpen = !columnMenuOpen">
-          {{ t('admin.promptAudit.pool.columns') }}
-        </button>
-        <div v-if="columnMenuOpen" class="absolute right-0 z-20 mt-2 w-56 rounded-xl border border-gray-200 bg-white p-2 shadow-lg dark:border-dark-700 dark:bg-dark-800" data-test="endpoint-column-menu">
-          <label v-for="column in endpointConfigurableColumns" :key="column.key" class="flex cursor-pointer items-center gap-2 rounded-lg px-2 py-2 text-sm text-gray-700 hover:bg-gray-50 dark:text-dark-200 dark:hover:bg-dark-700">
-            <input type="checkbox" :checked="isEndpointColumnVisible(column.key)" @change="toggleEndpointColumn(column.key)" />
-            <span>{{ column.label }}</span>
-          </label>
-          <p class="px-2 pb-1 pt-2 text-[11px] text-gray-400 dark:text-dark-500">{{ t('admin.promptAudit.pool.fixedColumns') }}</p>
-        </div>
-      </div>
+      <ColumnSettingsDropdown
+        :label="t('admin.promptAudit.pool.columns')"
+        :columns="endpointConfigurableColumns"
+        :is-visible="isEndpointColumnVisible"
+        button-test="endpoint-column-settings"
+        menu-test="endpoint-column-menu"
+        @toggle="toggleEndpointColumn"
+      />
     </div>
 
     <div v-if="endpoints.length === 0" class="mt-5 rounded-xl border border-dashed border-gray-300 px-5 py-10 text-center text-sm text-gray-500 dark:border-dark-600 dark:bg-dark-900/20 dark:text-dark-300">
@@ -141,7 +137,6 @@
               {{ probingIds.includes(endpoint.id) ? t('admin.promptAudit.pool.probing') : t('admin.promptAudit.pool.probe') }}
             </button>
             <button type="button" class="btn btn-ghost btn-sm" :data-test="`duplicate-endpoint-${endpoint.id}`" @click="duplicateEndpoint(endpoint)">{{ t('admin.promptAudit.pool.duplicate') }}</button>
-            <button type="button" class="btn btn-ghost btn-sm" :data-test="`copy-endpoint-${endpoint.id}`" @click="copyEndpointConfig(endpoint)">{{ copiedEndpointID === endpoint.id ? t('admin.promptAudit.pool.copied') : t('admin.promptAudit.pool.copy') }}</button>
             <button type="button" class="btn btn-ghost btn-sm" @click="openEdit(endpoint)">{{ t('common.edit') }}</button>
             <button type="button" class="btn btn-ghost btn-sm text-red-600 hover:bg-red-50 dark:text-red-300 dark:hover:bg-red-950/30" @click="removeEndpoint(endpoint)">{{ t('common.delete') }}</button>
           </div>
@@ -237,6 +232,7 @@ import { computed, onMounted, ref } from 'vue'
 import { useI18n } from 'vue-i18n'
 import BaseDialog from '@/components/common/BaseDialog.vue'
 import type { PromptAuditAdapter, PromptAuditEndpointDraft, PromptProbeResult } from '../types'
+import ColumnSettingsDropdown from './ColumnSettingsDropdown.vue'
 import {
   cloneData,
   createDefaultEndpoint,
@@ -260,9 +256,7 @@ const emit = defineEmits<{
 const { t } = useI18n()
 const editing = ref<PromptAuditEndpointDraft | null>(null)
 const editingIndex = ref(-1)
-const columnMenuOpen = ref(false)
 const hiddenEndpointColumns = ref<string[]>([])
-const copiedEndpointID = ref('')
 const orderedEndpoints = computed(() => orderedPromptAuditEndpoints(props.endpoints))
 const enabledEndpoints = computed(() => orderedEndpoints.value.filter((endpoint) => endpoint.enabled))
 const enabledEndpointCount = computed(() => enabledEndpoints.value.length)
@@ -348,26 +342,6 @@ function duplicateEndpoint(endpoint: PromptAuditEndpointDraft) {
   emit('update:endpoints', [...props.endpoints.map((item) => cloneData(item)), duplicate])
 }
 
-function copyEndpointConfig(endpoint: PromptAuditEndpointDraft) {
-  // Deliberately construct an allow-list. `token`, `has_token`, and all
-  // credential state are excluded so copy can never put a secret on the
-  // clipboard, even when this draft was populated by an editor.
-  const safe = {
-    id: endpoint.id,
-    name: endpoint.name,
-    protocol: endpoint.protocol,
-    adapter: endpoint.adapter,
-    base_url: endpoint.base_url,
-    model: endpoint.model,
-    priority: endpoint.priority,
-    timeout_ms: endpoint.timeout_ms,
-    input_limit: endpoint.input_limit,
-    enabled: endpoint.enabled,
-  }
-  copiedEndpointID.value = endpoint.id
-  void navigator.clipboard?.writeText(JSON.stringify(safe, null, 2))
-  window.setTimeout(() => { if (copiedEndpointID.value === endpoint.id) copiedEndpointID.value = '' }, 1600)
-}
 function openEdit(endpoint: PromptAuditEndpointDraft) {
   editingIndex.value = props.endpoints.findIndex((item) => item.id === endpoint.id)
   editing.value = cloneData(endpoint)

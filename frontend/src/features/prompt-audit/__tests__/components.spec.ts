@@ -103,6 +103,29 @@ describe('Prompt Audit components', () => {
     expect(token.attributes('placeholder')).toContain('admin.promptAudit.pool.reenterSecret')
   })
 
+  it('keeps node duplication without exposing a JSON clipboard action', async () => {
+    const wrapper = mount(EndpointPool, {
+      props: { endpoints: [endpoint()], probeResults: {}, probingIds: [] },
+      global: { stubs: { BaseDialog: DialogStub } },
+    })
+
+    expect(wrapper.find('[data-test="copy-endpoint-guard-1"]').exists()).toBe(false)
+    const duplicate = wrapper.get('[data-test="duplicate-endpoint-guard-1"]')
+    expect(duplicate.text()).toBe('admin.promptAudit.pool.duplicate')
+
+    await duplicate.trigger('click')
+    const updated = wrapper.emitted('update:endpoints')?.at(-1)?.[0] as PromptAuditEndpointDraft[]
+    expect(updated).toHaveLength(2)
+    expect(updated[1]).toMatchObject({
+      id: 'guard-1-copy',
+      name: 'admin.promptAudit.pool.copyName',
+      enabled: false,
+      token: '',
+      has_token: false,
+      token_status: 'missing',
+    })
+  })
+
   it('supports group search, stale configured groups, nine scanners, and bounded worker inputs', async () => {
     const draft: PromptAuditDraft = {
       enabled: true, blocking_enabled: false, blocking_latest_turn_only: false, store_pass_events: false, effective_mode: 'async_audit', strategy: 'priority',
