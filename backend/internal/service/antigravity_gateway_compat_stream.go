@@ -107,14 +107,15 @@ type antigravityCompatScanEvent struct {
 }
 
 type antigravityCompatStreamSession struct {
-	processor      *antigravity.StreamingProcessor
-	adapter        antigravityCompatStreamAdapter
-	writer         *antigravityClientWriter
-	usage          *ClaudeUsage
-	pendingEvents  []apicompat.AnthropicStreamEvent
-	firstTokenMs   *int
-	startTime      time.Time
-	meaningfulData bool
+	processor         *antigravity.StreamingProcessor
+	adapter           antigravityCompatStreamAdapter
+	writer            *antigravityClientWriter
+	usage             *ClaudeUsage
+	pendingEvents     []apicompat.AnthropicStreamEvent
+	firstTokenMs      *int
+	startTime         time.Time
+	meaningfulData    bool
+	upstreamCompleted bool
 }
 
 func newAntigravityCompatStreamSession(
@@ -133,6 +134,9 @@ func newAntigravityCompatStreamSession(
 }
 
 func (s *antigravityCompatStreamSession) consume(line string) {
+	if geminiSSELineHasTerminal(line) {
+		s.upstreamCompleted = true
+	}
 	claudeEvents := s.processor.ProcessLine(strings.TrimRight(line, "\r\n"))
 	if len(claudeEvents) == 0 {
 		return
@@ -160,9 +164,10 @@ func (s *antigravityCompatStreamSession) collectResult(clientDisconnect bool) *a
 
 func (s *antigravityCompatStreamSession) result(clientDisconnect bool) *antigravityStreamResult {
 	return &antigravityStreamResult{
-		usage:            s.usage,
-		firstTokenMs:     s.firstTokenMs,
-		clientDisconnect: clientDisconnect,
+		usage:             s.usage,
+		firstTokenMs:      s.firstTokenMs,
+		clientDisconnect:  clientDisconnect,
+		upstreamCompleted: s.upstreamCompleted,
 	}
 }
 

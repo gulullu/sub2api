@@ -109,6 +109,7 @@ func (s *AntigravityGatewayService) ForwardUpstream(ctx context.Context, c *gin.
 	var usage *ClaudeUsage
 	var firstTokenMs *int
 	var clientDisconnect bool
+	upstreamCompleted := false
 
 	if claudeReq.Stream {
 		// 流式响应：透传
@@ -122,12 +123,14 @@ func (s *AntigravityGatewayService) ForwardUpstream(ctx context.Context, c *gin.
 		usage = streamRes.usage
 		firstTokenMs = streamRes.firstTokenMs
 		clientDisconnect = streamRes.clientDisconnect
+		upstreamCompleted = streamRes.upstreamCompleted
 	} else {
 		// 非流式响应：直接透传
 		respBody, err := io.ReadAll(resp.Body)
 		if err != nil {
 			return nil, fmt.Errorf("read upstream response: %w", err)
 		}
+		upstreamCompleted = anthropicNonStreamingResponseCompleted(respBody)
 
 		// 提取 usage
 		upstreamResponseModelObserverFromContext(c).ObserveAnthropic(respBody)
@@ -150,6 +153,7 @@ func (s *AntigravityGatewayService) ForwardUpstream(ctx context.Context, c *gin.
 		Duration:                      duration,
 		FirstTokenMs:                  firstTokenMs,
 		ClientDisconnect:              clientDisconnect,
+		UpstreamCompleted:             upstreamCompleted,
 		Usage: ClaudeUsage{
 			InputTokens:              usage.InputTokens,
 			OutputTokens:             usage.OutputTokens,

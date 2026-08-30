@@ -27,21 +27,24 @@ import (
 
 // openaiStreamingResult streaming response result
 type openaiStreamingResult struct {
-	usage            *OpenAIUsage
-	firstTokenMs     *int
-	responseID       string
-	imageCount       int
-	imageOutputSizes []string
-	searchCount      int
+	usage             *OpenAIUsage
+	firstTokenMs      *int
+	responseID        string
+	imageCount        int
+	imageOutputSizes  []string
+	searchCount       int
+	clientDisconnect  bool
+	upstreamCompleted bool
 }
 
 type openaiNonStreamingResult struct {
 	*OpenAIUsage
-	usage            *OpenAIUsage
-	responseID       string
-	imageCount       int
-	imageOutputSizes []string
-	searchCount      int
+	usage             *OpenAIUsage
+	responseID        string
+	imageCount        int
+	imageOutputSizes  []string
+	searchCount       int
+	upstreamCompleted bool
 }
 
 func (s *OpenAIGatewayService) handleStreamingResponse(ctx context.Context, resp *http.Response, c *gin.Context, account *Account, startTime time.Time, originalModel, mappedModel string) (*openaiStreamingResult, error) {
@@ -353,12 +356,14 @@ func (s *OpenAIGatewayService) handleStreamingResponseWithReasoning(ctx context.
 	streamSearchSeen := make(map[string]struct{})
 	resultWithUsage := func() *openaiStreamingResult {
 		return &openaiStreamingResult{
-			usage:            usage,
-			firstTokenMs:     reportedFirstTokenMs,
-			responseID:       responseID,
-			imageCount:       imageCounter.Count(),
-			imageOutputSizes: imageCounter.Sizes(),
-			searchCount:      searchCounter,
+			usage:             usage,
+			firstTokenMs:      reportedFirstTokenMs,
+			responseID:        responseID,
+			imageCount:        imageCounter.Count(),
+			imageOutputSizes:  imageCounter.Sizes(),
+			searchCount:       searchCounter,
+			clientDisconnect:  clientDisconnected,
+			upstreamCompleted: terminalEventType == "response.completed" || terminalEventType == "response.done",
 		}
 	}
 	flushPending := func(disconnectMessage string) {
@@ -1654,13 +1659,39 @@ func (s *OpenAIGatewayService) handleNonStreamingResponse(ctx context.Context, r
 	}
 
 	return &openaiNonStreamingResult{
-		OpenAIUsage:      usage,
-		usage:            usage,
-		responseID:       extractOpenAIResponseIDFromJSONBytes(body),
-		imageCount:       countOpenAIResponseImageOutputsFromJSONBytes(body),
-		imageOutputSizes: collectOpenAIResponseImageOutputSizesFromJSONBytes(body),
-		searchCount:      countGrokNativeSearchCallsFromJSONBytes(body),
+		OpenAIUsage:       usage,
+		usage:             usage,
+		responseID:        extractOpenAIResponseIDFromJSONBytes(body),
+		imageCount:        countOpenAIResponseImageOutputsFromJSONBytes(body),
+		imageOutputSizes:  collectOpenAIResponseImageOutputSizesFromJSONBytes(body),
+		searchCount:       countGrokNativeSearchCallsFromJSONBytes(body),
+		upstreamCompleted: openAINonStreamingResponseCompleted(body),
 	}, nil
+}
+
+// openAINonStreamingResponseCompleted is deliberately conservative. HTTP 200
+// only proves that an envelope arrived; Responses may still finish as failed,
+// incomplete, or cancelled. Chat Completions has no status field, so a real
+// completion object with at least one choice is the corresponding proof.
+func openAINonStreamingResponseCompleted(body []byte) bool {
+	if !gjson.ValidBytes(body) {
+		return false
+	}
+	if errorValue := gjson.GetBytes(body, "error"); errorValue.Exists() && errorValue.Type != gjson.Null {
+		return false
+	}
+	objectType := strings.TrimSpace(gjson.GetBytes(body, "object").String())
+	if status := strings.TrimSpace(gjson.GetBytes(body, "status").String()); status != "" {
+		return objectType == "response" && status == "completed"
+	}
+	if objectType == "chat.completion" {
+		for _, choice := range gjson.GetBytes(body, "choices").Array() {
+			if strings.TrimSpace(choice.Get("finish_reason").String()) != "" {
+				return true
+			}
+		}
+	}
+	return false
 }
 
 func isEventStreamResponse(header http.Header) bool {
@@ -1758,12 +1789,13 @@ func (s *OpenAIGatewayService) handleSSEToJSON(resp *http.Response, c *gin.Conte
 	}
 
 	return &openaiNonStreamingResult{
-		OpenAIUsage:      usage,
-		usage:            usage,
-		responseID:       extractOpenAIResponseIDFromJSONBytes(body),
-		imageCount:       countOpenAIImageOutputsFromSSEBody(bodyText),
-		imageOutputSizes: collectOpenAIImageOutputSizesFromSSEBody(bodyText),
-		searchCount:      countGrokNativeSearchCallsFromSSEBody(bodyText),
+		OpenAIUsage:       usage,
+		usage:             usage,
+		responseID:        extractOpenAIResponseIDFromJSONBytes(body),
+		imageCount:        countOpenAIImageOutputsFromSSEBody(bodyText),
+		imageOutputSizes:  collectOpenAIImageOutputSizesFromSSEBody(bodyText),
+		searchCount:       countGrokNativeSearchCallsFromSSEBody(bodyText),
+		upstreamCompleted: terminalOK && (terminalType == "response.completed" || terminalType == "response.done"),
 	}, nil
 }
 

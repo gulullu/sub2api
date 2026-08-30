@@ -139,6 +139,10 @@ func (s *GatewayService) forwardBedrock(
 	var usage *ClaudeUsage
 	var firstTokenMs *int
 	var clientDisconnect bool
+	// Bedrock non-streaming currently does not expose a validated Anthropic
+	// success envelope to this layer. Keep governance fail-closed rather than
+	// treating a bare HTTP 200/read as a healthy model response.
+	upstreamCompleted := false
 	if reqStream {
 		streamResult, err := s.handleBedrockStreamingResponse(ctx, resp, c, account, startTime, reqModel)
 		if err != nil {
@@ -147,6 +151,7 @@ func (s *GatewayService) forwardBedrock(
 		usage = streamResult.usage
 		firstTokenMs = streamResult.firstTokenMs
 		clientDisconnect = streamResult.clientDisconnect
+		upstreamCompleted = streamResult.upstreamCompleted
 	} else {
 		usage, err = s.handleBedrockNonStreamingResponse(ctx, resp, c, account)
 		if err != nil {
@@ -158,14 +163,15 @@ func (s *GatewayService) forwardBedrock(
 	}
 
 	return &ForwardResult{
-		RequestID:        resp.Header.Get("x-amzn-requestid"),
-		Usage:            *usage,
-		Model:            reqModel,
-		UpstreamModel:    mappedModel,
-		Stream:           reqStream,
-		Duration:         time.Since(startTime),
-		FirstTokenMs:     firstTokenMs,
-		ClientDisconnect: clientDisconnect,
+		RequestID:         resp.Header.Get("x-amzn-requestid"),
+		Usage:             *usage,
+		Model:             reqModel,
+		UpstreamModel:     mappedModel,
+		Stream:            reqStream,
+		Duration:          time.Since(startTime),
+		FirstTokenMs:      firstTokenMs,
+		ClientDisconnect:  clientDisconnect,
+		UpstreamCompleted: upstreamCompleted,
 	}, nil
 }
 

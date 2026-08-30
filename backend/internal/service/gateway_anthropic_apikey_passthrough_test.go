@@ -1119,6 +1119,7 @@ func TestGatewayService_AnthropicAPIKeyPassthrough_StreamingStillCollectsUsageAf
 	require.NoError(t, err)
 	require.NotNil(t, result)
 	require.NotNil(t, result.usage)
+	require.True(t, result.upstreamCompleted)
 	require.Equal(t, 11, result.usage.InputTokens)
 	require.Equal(t, 5, result.usage.OutputTokens)
 }
@@ -1154,6 +1155,56 @@ func TestGatewayService_AnthropicAPIKeyPassthrough_MissingTerminalEventReturnsEr
 	require.Error(t, err)
 	require.Contains(t, err.Error(), "missing terminal event")
 	require.NotNil(t, result)
+	require.False(t, result.upstreamCompleted)
+}
+
+func TestGatewayService_AnthropicAPIKeyPassthrough_ErrorEventCannotBeHiddenByDone(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	rec := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(rec)
+	c.Request = httptest.NewRequest(http.MethodPost, "/v1/messages", nil)
+	resp := &http.Response{
+		StatusCode: http.StatusOK,
+		Header:     http.Header{"Content-Type": []string{"text/event-stream"}},
+		Body: io.NopCloser(strings.NewReader(strings.Join([]string{
+			`event: error`,
+			`data: {"type":"error","error":{"type":"api_error","message":"failed"}}`,
+			``,
+			`data: [DONE]`,
+			``,
+		}, "\n"))),
+	}
+	result, err := (&GatewayService{cfg: &config.Config{}}).handleStreamingResponseAnthropicAPIKeyPassthrough(
+		context.Background(), resp, c, &Account{ID: 1}, time.Now(), "claude",
+	)
+	require.Error(t, err)
+	require.NotNil(t, result)
+	require.False(t, result.upstreamCompleted)
+}
+
+func TestGatewayService_AnthropicAPIKeyPassthrough_ClientDisconnectNeverMarksCompleted(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	rec := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(rec)
+	c.Request = httptest.NewRequest(http.MethodPost, "/v1/messages", nil)
+	c.Writer = &failWriteResponseWriter{ResponseWriter: c.Writer}
+	resp := &http.Response{
+		StatusCode: http.StatusOK,
+		Header:     http.Header{"Content-Type": []string{"text/event-stream"}},
+		Body: io.NopCloser(strings.NewReader(strings.Join([]string{
+			`data: {"type":"message_start","message":{"usage":{"input_tokens":1}}}`,
+			``,
+			`data: {"type":"message_stop"}`,
+			``,
+		}, "\n"))),
+	}
+	result, err := (&GatewayService{cfg: &config.Config{}}).handleStreamingResponseAnthropicAPIKeyPassthrough(
+		context.Background(), resp, c, &Account{ID: 1}, time.Now(), "claude",
+	)
+	require.NoError(t, err)
+	require.NotNil(t, result)
+	require.True(t, result.clientDisconnect)
+	require.False(t, result.upstreamCompleted)
 }
 
 func TestGatewayService_AnthropicAPIKeyPassthrough_ForwardDirect_NonStreamingSuccess(t *testing.T) {
@@ -1183,11 +1234,65 @@ func TestGatewayService_AnthropicAPIKeyPassthrough_ForwardDirect_NonStreamingSuc
 	result, err := svc.forwardAnthropicAPIKeyPassthrough(context.Background(), c, newAnthropicAPIKeyAccountForTest(), body, "claude-3-5-sonnet-latest", "claude-3-5-sonnet-latest", false, time.Now())
 	require.NoError(t, err)
 	require.NotNil(t, result)
+	require.True(t, result.UpstreamCompleted)
 	require.Equal(t, 12, result.Usage.InputTokens)
 	require.Equal(t, 7, result.Usage.OutputTokens)
 	require.Equal(t, 5, result.Usage.CacheCreationInputTokens)
 	require.Equal(t, 4, result.Usage.CacheReadInputTokens)
 	require.Equal(t, upstreamJSON, rec.Body.String())
+}
+
+func TestGatewayService_AnthropicAPIKeyPassthrough_ForwardDirect_StreamingSuccess(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	rec := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(rec)
+	c.Request = httptest.NewRequest(http.MethodPost, "/v1/messages", nil)
+
+	upstream := &anthropicHTTPUpstreamRecorder{resp: &http.Response{
+		StatusCode: http.StatusOK,
+		Header:     http.Header{"Content-Type": []string{"text/event-stream"}},
+		Body: io.NopCloser(strings.NewReader(strings.Join([]string{
+			`data: {"type":"message_start","message":{"type":"message","usage":{"input_tokens":1}}}`,
+			``,
+			`data: {"type":"message_stop"}`,
+			``,
+		}, "\n"))),
+	}}
+	svc := &GatewayService{cfg: &config.Config{}, httpUpstream: upstream, rateLimitService: &RateLimitService{}}
+
+	result, err := svc.forwardAnthropicAPIKeyPassthrough(
+		context.Background(), c, newAnthropicAPIKeyAccountForTest(),
+		[]byte(`{"model":"claude","stream":true,"messages":[{"role":"user","content":"ping"}]}`),
+		"claude", "claude", true, time.Now(),
+	)
+	require.NoError(t, err)
+	require.NotNil(t, result)
+	require.True(t, result.UpstreamCompleted)
+	require.False(t, result.ClientDisconnect)
+}
+
+func TestGatewayService_AnthropicAPIKeyPassthrough_NonStreamingRequiresMessageEnvelope(t *testing.T) {
+	for _, body := range []string{
+		`{}`,
+		`{"type":"error","error":{"type":"api_error","message":"failed"}}`,
+		`{"type":"message","error":{"type":"api_error","message":"failed"}}`,
+	} {
+		t.Run(body, func(t *testing.T) {
+			gin.SetMode(gin.TestMode)
+			c, _ := gin.CreateTestContext(httptest.NewRecorder())
+			c.Request = httptest.NewRequest(http.MethodPost, "/v1/messages", nil)
+			upstream := &anthropicHTTPUpstreamRecorder{resp: &http.Response{
+				StatusCode: http.StatusOK, Header: http.Header{"Content-Type": []string{"application/json"}},
+				Body: io.NopCloser(strings.NewReader(body)),
+			}}
+			result, err := (&GatewayService{cfg: &config.Config{}, httpUpstream: upstream, rateLimitService: &RateLimitService{}}).
+				forwardAnthropicAPIKeyPassthrough(context.Background(), c, newAnthropicAPIKeyAccountForTest(),
+					[]byte(`{"model":"claude","messages":[{"role":"user","content":"ping"}]}`), "claude", "claude", false, time.Now())
+			require.NoError(t, err)
+			require.NotNil(t, result)
+			require.False(t, result.UpstreamCompleted)
+		})
+	}
 }
 
 func TestGatewayService_AnthropicAPIKeyPassthrough_ForwardDirect_InvalidTokenType(t *testing.T) {
@@ -1211,6 +1316,7 @@ func TestGatewayService_AnthropicAPIKeyPassthrough_ForwardDirect_InvalidTokenTyp
 	require.Nil(t, result)
 	require.Error(t, err)
 	require.Contains(t, err.Error(), "requires apikey token")
+	require.False(t, GatewayUpstreamDispatchAttempted(c), "token validation happens before transport dispatch")
 }
 
 func TestGatewayService_AnthropicAPIKeyPassthrough_ForwardDirect_UpstreamRequestError(t *testing.T) {
@@ -1235,8 +1341,53 @@ func TestGatewayService_AnthropicAPIKeyPassthrough_ForwardDirect_UpstreamRequest
 	result, err := svc.forwardAnthropicAPIKeyPassthrough(context.Background(), c, account, []byte(`{"model":"x"}`), "x", "x", false, time.Now())
 	require.Nil(t, result)
 	require.Error(t, err)
+	require.True(t, GatewayUpstreamDispatchAttempted(c), "transport errors occur after a real dispatch attempt")
 	require.Contains(t, err.Error(), "upstream request failed")
 	require.Equal(t, http.StatusBadGateway, rec.Code)
+}
+
+func TestGatewayService_AnthropicAPIKeyGenericForward_DispatchMarkerIsExact(t *testing.T) {
+	newParsed := func(t *testing.T) *ParsedRequest {
+		t.Helper()
+		parsed, err := ParseGatewayRequest(NewRequestBodyRef([]byte(
+			`{"model":"claude-3-5-sonnet-latest","max_tokens":8,"messages":[{"role":"user","content":"ping"}]}`,
+		)), "")
+		require.NoError(t, err)
+		return parsed
+	}
+	newGenericAccount := func() *Account {
+		account := newAnthropicAPIKeyAccountForTest()
+		account.Extra = nil
+		return account
+	}
+
+	t.Run("token failure is pre-dispatch", func(t *testing.T) {
+		gin.SetMode(gin.TestMode)
+		c, _ := gin.CreateTestContext(httptest.NewRecorder())
+		c.Request = httptest.NewRequest(http.MethodPost, "/v1/messages", nil)
+		account := newGenericAccount()
+		account.Credentials = map[string]any{}
+
+		result, err := (&GatewayService{}).Forward(context.Background(), c, account, newParsed(t))
+		require.Error(t, err)
+		require.Nil(t, result)
+		require.False(t, GatewayUpstreamDispatchAttempted(c))
+	})
+
+	t.Run("transport failure is attempted", func(t *testing.T) {
+		gin.SetMode(gin.TestMode)
+		c, _ := gin.CreateTestContext(httptest.NewRecorder())
+		c.Request = httptest.NewRequest(http.MethodPost, "/v1/messages", nil)
+		svc := &GatewayService{
+			cfg:          &config.Config{},
+			httpUpstream: &anthropicHTTPUpstreamRecorder{err: errors.New("dial failed")},
+		}
+
+		result, err := svc.Forward(context.Background(), c, newGenericAccount(), newParsed(t))
+		require.Error(t, err)
+		require.Nil(t, result)
+		require.True(t, GatewayUpstreamDispatchAttempted(c))
+	})
 }
 
 func TestGatewayService_AnthropicAPIKeyPassthrough_ForwardDirect_EmptyResponseBody(t *testing.T) {

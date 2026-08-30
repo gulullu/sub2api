@@ -261,6 +261,11 @@ type OpenAIForwardResult struct {
 	ReasoningEffort *string
 	Stream          bool
 	OpenAIWSMode    bool
+	// UpstreamCompleted proves that the real upstream reached a successful
+	// protocol terminal (or that a complete non-stream response was parsed).
+	// A bare HTTP 200, EOF, downstream synthetic finalization, or a failed /
+	// incomplete / cancelled terminal must leave this false.
+	UpstreamCompleted bool
 	// UpstreamTerminalEvent is the normalized terminal event observed on an
 	// upstream Responses WebSocket turn. Empty preserves legacy/non-WS success.
 	UpstreamTerminalEvent string

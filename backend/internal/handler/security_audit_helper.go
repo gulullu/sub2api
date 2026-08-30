@@ -13,6 +13,7 @@ import (
 )
 
 const securityAuditCompletedContextKey = "sub2api.security_audit.completed"
+const securityAuditCyberReplayCheckedContextKey = "sub2api.security_audit.cyber_replay_checked"
 const securityAuditWSTurnContextKey = "sub2api.security_audit.ws_turn"
 const securityAuditWSDedupeContextKey = "sub2api.security_audit.ws_dedupe"
 const securityAuditCyberTurnEvidenceContextKey = "sub2api.security_audit.cyber_turn_evidence"
@@ -76,6 +77,9 @@ func (h *OpenAIGatewayHandler) checkSecurityAuditStage(c *gin.Context, reqLog *z
 
 func (h *OpenAIGatewayHandler) checkOpenAIOAuthCyberReplay(c *gin.Context, apiKey *service.APIKey, subject middleware2.AuthSubject, protocol, model string, body []byte, stage string) *securityaudit.Decision {
 	if h == nil || h.cyberFeedbackService == nil || c == nil || c.Request == nil {
+		return nil
+	}
+	if checked, exists := c.Get(securityAuditCyberReplayCheckedContextKey); exists && checked == true {
 		return nil
 	}
 	request := buildSecurityAuditRequest(c, apiKey, subject, protocol, model, body, stage)
@@ -237,6 +241,10 @@ func buildSecurityAuditRequest(c *gin.Context, apiKey *service.APIKey, subject m
 		APIKeyID: legacy.APIKeyID, APIKeyName: legacy.APIKeyName, GroupID: cloneSecurityAuditGroupID(legacy.GroupID),
 		GroupName: legacy.GroupName, Provider: legacy.Provider, Endpoint: legacy.Endpoint,
 		Protocol: legacy.Protocol, Model: legacy.Model, Body: body, Stage: strings.TrimSpace(stage),
+		ClientIsClaudeCode: c != nil && c.Request != nil && service.IsClaudeCodeClient(c.Request.Context()),
+	}
+	if c != nil && c.Request != nil && c.Request.URL != nil {
+		request.RawEndpointPath = c.Request.URL.Path
 	}
 	if apiKey != nil && len(apiKey.Key) > 8 {
 		request.APIKeyPrefix = keyPrefix(apiKey.Key, 8)

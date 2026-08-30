@@ -131,14 +131,22 @@ func TestPromptAuditAdminRoutesRejectUnauthenticatedAndNonAdminRequests(t *testi
 		{name: "unauthenticated", wantStatus: http.StatusUnauthorized},
 		{name: "non-admin", auth: "Bearer user-token", wantStatus: http.StatusForbidden},
 	} {
-		for _, path := range []string{
-			"/api/v1/admin/prompt-audit/config",
-			"/api/v1/admin/prompt-audit/user-profiles",
-			"/api/v1/admin/prompt-audit/cyber/events/5/evidence",
+		for _, route := range []struct{ method, path string }{
+			{http.MethodGet, "/api/v1/admin/prompt-audit/config"},
+			{http.MethodGet, "/api/v1/admin/prompt-audit/user-profiles"},
+			{http.MethodGet, "/api/v1/admin/prompt-audit/cyber/events/5/evidence"},
+			{http.MethodGet, "/api/v1/admin/prompt-audit/probe-governance/groups"},
+			{http.MethodPut, "/api/v1/admin/prompt-audit/probe-governance/groups/7"},
+			{http.MethodGet, "/api/v1/admin/prompt-audit/probe-governance/groups/7/events"},
+			{http.MethodGet, "/api/v1/admin/prompt-audit/probe-governance/events/9"},
+			{http.MethodPost, "/api/v1/admin/prompt-audit/probe-governance/events/9/clear"},
+			{http.MethodGet, "/api/v1/admin/prompt-audit/probe-governance/groups/7/exemptions"},
+			{http.MethodPost, "/api/v1/admin/prompt-audit/probe-governance/groups/7/exemptions"},
+			{http.MethodDelete, "/api/v1/admin/prompt-audit/probe-governance/groups/7/exemptions/3"},
 		} {
-			t.Run(tc.name+path, func(t *testing.T) {
+			t.Run(tc.name+route.path+route.method, func(t *testing.T) {
 				recorder := httptest.NewRecorder()
-				request := httptest.NewRequest(http.MethodGet, path, nil)
+				request := httptest.NewRequest(route.method, route.path, nil)
 				if tc.auth != "" {
 					request.Header.Set("Authorization", tc.auth)
 				}

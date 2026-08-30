@@ -102,6 +102,10 @@ func (h *OpenAIGatewayHandler) ChatCompletions(c *gin.Context) {
 
 	setOpsRequestContext(c, reqModel, reqStream)
 	setOpsEndpointContext(c, "", int16(service.RequestTypeFromLegacy(reqStream, false)))
+	if h.checkProbeGovernance(c, apiKey, subject, service.ContentModerationProtocolOpenAIChat, reqModel, body) {
+		return
+	}
+	defer finalizeProbeGovernance(c, h.securityAuditCoordinator)
 	requestPlatform := openAICompatibleRequestPlatform(c.Request.Context(), apiKey)
 	if classification, reject := preflightModelAvailabilityFromGin(
 		c, h.gatewayService, apiKey.GroupID, reqModel, clientRequestedModel(c, reqModel), requestPlatform,
@@ -412,6 +416,7 @@ func (h *OpenAIGatewayHandler) ChatCompletions(c *gin.Context) {
 			zap.Int64("account_id", account.ID),
 			zap.Int("switch_count", switchCount),
 		)
+		markProbeOpenAIUpstreamSuccess(c, result)
 		return
 	}
 }

@@ -23,10 +23,20 @@ import type {
   CyberFeedbackPage,
   CyberFeedbackStatus,
   CyberPolicyRule,
+  ProbeGovernanceEventDetail,
+  ProbeGovernanceEventFilters,
+  ProbeGovernanceEventPage,
+  ProbeGovernanceExemption,
+  ProbeGovernanceExemptionCreate,
+  ProbeGovernanceExemptionPage,
+  ProbeGovernancePolicy,
+  ProbeGovernancePolicyPage,
+  ProbeGovernancePolicyUpdate,
 } from './types'
 import { eventFilterPayload, eventQueryParams } from './viewModel'
 
 const basePath = '/admin/prompt-audit'
+const probeGovernancePath = `${basePath}/probe-governance`
 const accountPageSize = 1000
 
 type CyberPolicyRuleWire = CyberPolicyRule & { text_source?: string }
@@ -313,6 +323,75 @@ export async function listRiskRouteAccounts(): Promise<PromptAuditAccount[]> {
   return [...accounts.values()].sort((left, right) => left.id - right.id)
 }
 
+export async function listProbeGovernancePolicies(params: {
+  page: number
+  page_size: number
+  keyword?: string
+  status?: string
+}): Promise<ProbeGovernancePolicyPage> {
+  const { data } = await apiClient.get<ProbeGovernancePolicyPage>(`${probeGovernancePath}/groups`, { params })
+  return data
+}
+
+export async function updateProbeGovernancePolicy(
+  groupID: number,
+  payload: ProbeGovernancePolicyUpdate,
+): Promise<ProbeGovernancePolicy> {
+  const { data } = await apiClient.put<ProbeGovernancePolicy>(`${probeGovernancePath}/groups/${groupID}`, payload)
+  return data
+}
+
+export async function listProbeGovernanceEvents(
+  groupID: number,
+  filters: ProbeGovernanceEventFilters,
+  page: number,
+  pageSize: number,
+): Promise<ProbeGovernanceEventPage> {
+  const { data } = await apiClient.get<ProbeGovernanceEventPage>(`${probeGovernancePath}/groups/${groupID}/events`, {
+    params: {
+      page,
+      page_size: pageSize,
+      ...Object.fromEntries(Object.entries(filters).filter(([, value]) => value !== '' && value != null)),
+    },
+  })
+  return data
+}
+
+export async function getProbeGovernanceEvent(id: number): Promise<ProbeGovernanceEventDetail> {
+  const { data } = await apiClient.get<ProbeGovernanceEventDetail>(`${probeGovernancePath}/events/${id}`)
+  return data
+}
+
+export async function clearProbeGovernanceEvent(id: number, reason: string): Promise<{ cleared: boolean }> {
+  const { data } = await apiClient.post<{ cleared: boolean }>(`${probeGovernancePath}/events/${id}/clear`, { reason })
+  return data
+}
+
+export async function listProbeGovernanceExemptions(
+  groupID: number,
+  page: number,
+  pageSize: number,
+  keyword = '',
+): Promise<ProbeGovernanceExemptionPage> {
+  const { data } = await apiClient.get<ProbeGovernanceExemptionPage>(`${probeGovernancePath}/groups/${groupID}/exemptions`, {
+    params: { page, page_size: pageSize, ...(keyword.trim() ? { keyword: keyword.trim() } : {}) },
+  })
+  return data
+}
+
+export async function createProbeGovernanceExemption(
+  groupID: number,
+  payload: ProbeGovernanceExemptionCreate,
+): Promise<ProbeGovernanceExemption> {
+  const { data } = await apiClient.post<ProbeGovernanceExemption>(`${probeGovernancePath}/groups/${groupID}/exemptions`, payload)
+  return data
+}
+
+export async function deleteProbeGovernanceExemption(groupID: number, exemptionID: number): Promise<{ deleted: boolean }> {
+  const { data } = await apiClient.delete<{ deleted: boolean }>(`${probeGovernancePath}/groups/${groupID}/exemptions/${exemptionID}`)
+  return data
+}
+
 export const promptAuditAPI = {
   getConfig,
   updateConfig,
@@ -336,6 +415,14 @@ export const promptAuditAPI = {
   deleteEventsByFilter,
   listGroups,
   listRiskRouteAccounts,
+  listProbeGovernancePolicies,
+  updateProbeGovernancePolicy,
+  listProbeGovernanceEvents,
+  getProbeGovernanceEvent,
+  clearProbeGovernanceEvent,
+  listProbeGovernanceExemptions,
+  createProbeGovernanceExemption,
+  deleteProbeGovernanceExemption,
 }
 
 export default promptAuditAPI

@@ -115,6 +115,10 @@ func (h *GatewayHandler) Responses(c *gin.Context) {
 			"This group is restricted to Claude Code clients (/v1/messages only)")
 		return
 	}
+	if h.checkProbeGovernance(c, apiKey, subject, service.ContentModerationProtocolOpenAIResponses, reqModel, body) {
+		return
+	}
+	defer finalizeProbeGovernance(c, h.securityAuditCoordinator)
 	if scope, scopeErr := h.gatewayService.ResolveModelAvailabilityScope(c.Request.Context(), apiKey.GroupID, reqModel); scopeErr == nil {
 		if classification, reject := preflightModelAvailabilityFromGin(
 			c, h.gatewayService, scope.GroupID, scope.RoutingModel, clientRequestedModel(c, reqModel), scope.Platform,
@@ -363,6 +367,7 @@ func (h *GatewayHandler) Responses(c *gin.Context) {
 				)
 			}
 		})
+		markProbeGatewayUpstreamSuccess(c, result)
 		return
 	}
 }

@@ -47,6 +47,7 @@ const EventsStub = defineComponent({
 })
 const DetailStub = defineComponent({ props: ['show', 'event', 'loading'], emits: ['close'], template: '<div data-test="detail" />' })
 const CyberStub = defineComponent({ props: ['initialEventId'], template: '<div data-test="cyber-workspace">{{ initialEventId }}</div>' })
+const ProbeGovernanceStub = defineComponent({ props: ['draft', 'groups'], emits: ['view-audit-event'], template: '<div data-test="probe-governance" />' })
 const ConfirmStub = defineComponent({ props: ['show', 'title', 'message'], emits: ['confirm', 'cancel'], template: '<div v-if="show" data-test="confirm"><button data-test="confirm-action" @click="$emit(\'confirm\')">confirm</button></div>' })
 const FilterDeleteStub = defineComponent({
   props: ['show', 'initialFilters', 'preview', 'previewing', 'deleting'],
@@ -56,7 +57,7 @@ const FilterDeleteStub = defineComponent({
 
 function mountView() {
   return mount(PromptAuditView, {
-    global: { stubs: { AppLayout: AppLayoutStub, RuntimeOverview: RuntimeStub, EndpointPool: EndpointStub, RiskRouteAccountSelector: RiskRouteStub, PolicyPanel: PolicyStub, EventWorkspace: EventsStub, EventDetailDialog: DetailStub, CyberLearningWorkspace: CyberStub, FilterDeleteDialog: FilterDeleteStub, ConfirmDialog: ConfirmStub } },
+    global: { stubs: { AppLayout: AppLayoutStub, RuntimeOverview: RuntimeStub, EndpointPool: EndpointStub, RiskRouteAccountSelector: RiskRouteStub, PolicyPanel: PolicyStub, EventWorkspace: EventsStub, EventDetailDialog: DetailStub, CyberLearningWorkspace: CyberStub, ProbeGovernanceWorkspace: ProbeGovernanceStub, FilterDeleteDialog: FilterDeleteStub, ConfirmDialog: ConfirmStub } },
   })
 }
 
@@ -171,6 +172,17 @@ describe('PromptAuditView', () => {
     const endpointProps = wrapper.getComponent(EndpointStub).props('endpoints') as Array<{ token: string }>
     expect(endpointProps[0].token).toBe('')
     expect(wrapper.html()).not.toContain('PROMPT_AUDIT_CANARY_SECRET_DO_NOT_PERSIST')
+  })
+
+  it('keeps probe governance scoped to the persisted config while the main draft is unsaved', async () => {
+    const wrapper = mountView()
+    await flushPromises()
+    await wrapper.get('[data-test="tab-config"]').trigger('click')
+    await wrapper.get('[data-test="inject-secret"]').trigger('click')
+
+    const governanceDraft = wrapper.getComponent(ProbeGovernanceStub).props('draft') as PromptAuditConfig
+    expect(governanceDraft.config_version).toBe(7)
+    expect(governanceDraft.endpoints[0]).not.toHaveProperty('token', 'PROMPT_AUDIT_CANARY_SECRET_DO_NOT_PERSIST')
   })
 
   it('reports real probe progress/results and invalidates filter confirmation when filters change', async () => {

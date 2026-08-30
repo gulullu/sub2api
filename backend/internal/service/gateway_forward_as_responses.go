@@ -139,6 +139,7 @@ func (s *GatewayService) ForwardAsResponses(
 	}
 
 	// 11. Send request
+	MarkGatewayUpstreamDispatchAttempted(c)
 	resp, err := s.httpUpstream.DoWithTLS(upstreamReq, proxyURL, account.ID, account.Concurrency, s.tlsFPProfileService.ResolveTLSProfile(account))
 	if err != nil {
 		if resp != nil && resp.Body != nil {
@@ -362,12 +363,17 @@ func (s *GatewayService) handleResponsesBufferedStreamingResponse(
 	// Accumulate the final Anthropic response from streaming events
 	var finalResp *apicompat.AnthropicResponse
 	var usage ClaudeUsage
+	sawUpstreamTerminal := false
+	sawUpstreamFailure := false
 
 	for scanner.Scan() {
 		line := scanner.Text()
 		eventType, ok := parseAnthropicSSEField(line, "event")
 		if !ok {
 			continue
+		}
+		if anthropicSSEPayloadFailed(eventType, "") {
+			sawUpstreamFailure = true
 		}
 
 		// Read the data line
@@ -379,6 +385,13 @@ func (s *GatewayService) handleResponsesBufferedStreamingResponse(
 		if !ok {
 			continue
 		}
+		if anthropicSSEPayloadFailed(eventType, payload) {
+			sawUpstreamFailure = true
+		}
+		if strings.TrimSpace(payload) == "[DONE]" {
+			sawUpstreamTerminal = true
+			continue
+		}
 
 		var event apicompat.AnthropicStreamEvent
 		if err := json.Unmarshal([]byte(payload), &event); err != nil {
@@ -388,6 +401,9 @@ func (s *GatewayService) handleResponsesBufferedStreamingResponse(
 				zap.String("event_type", eventType),
 			)
 			continue
+		}
+		if event.Type == "message_stop" {
+			sawUpstreamTerminal = true
 		}
 
 		// message_start carries the initial response structure
@@ -432,11 +448,20 @@ func (s *GatewayService) handleResponsesBufferedStreamingResponse(
 				zap.String("request_id", requestID),
 			)
 		}
+		return nil, fmt.Errorf("upstream stream read error: %w", err)
 	}
 
 	if finalResp == nil {
 		writeResponsesError(c, http.StatusBadGateway, "server_error", "Upstream stream ended without a response")
 		return nil, fmt.Errorf("upstream stream ended without response")
+	}
+	if !sawUpstreamTerminal {
+		writeResponsesError(c, http.StatusBadGateway, "server_error", "Upstream stream ended before completion")
+		return nil, fmt.Errorf("upstream stream ended before completion")
+	}
+	if sawUpstreamFailure {
+		writeResponsesError(c, http.StatusBadGateway, "server_error", "Upstream stream ended with an error")
+		return nil, fmt.Errorf("upstream stream ended with error event")
 	}
 
 	// Update usage from accumulated delta
@@ -474,13 +499,14 @@ func (s *GatewayService) handleResponsesBufferedStreamingResponse(
 	}
 
 	return &ForwardResult{
-		RequestID:       requestID,
-		Usage:           usage,
-		Model:           originalModel,
-		UpstreamModel:   mappedModel,
-		ReasoningEffort: reasoningEffort,
-		Stream:          false,
-		Duration:        time.Since(startTime),
+		RequestID:         requestID,
+		Usage:             usage,
+		Model:             originalModel,
+		UpstreamModel:     mappedModel,
+		ReasoningEffort:   reasoningEffort,
+		Stream:            false,
+		UpstreamCompleted: sawUpstreamTerminal,
+		Duration:          time.Since(startTime),
 	}, nil
 }
 
@@ -512,6 +538,9 @@ func (s *GatewayService) handleResponsesStreamingResponse(
 	var usage ClaudeUsage
 	var firstTokenMs *int
 	firstChunk := true
+	sawTerminalEvent := false
+	sawFailureEvent := false
+	clientDisconnected := false
 
 	scanner := bufio.NewScanner(resp.Body)
 	maxLineSize := defaultMaxLineSize
@@ -522,19 +551,24 @@ func (s *GatewayService) handleResponsesStreamingResponse(
 
 	resultWithUsage := func() *ForwardResult {
 		return &ForwardResult{
-			RequestID:       requestID,
-			Usage:           usage,
-			Model:           originalModel,
-			UpstreamModel:   mappedModel,
-			ReasoningEffort: reasoningEffort,
-			Stream:          true,
-			Duration:        time.Since(startTime),
-			FirstTokenMs:    firstTokenMs,
+			RequestID:         requestID,
+			Usage:             usage,
+			Model:             originalModel,
+			UpstreamModel:     mappedModel,
+			ReasoningEffort:   reasoningEffort,
+			Stream:            true,
+			ClientDisconnect:  clientDisconnected,
+			UpstreamCompleted: sawTerminalEvent && !sawFailureEvent && !clientDisconnected,
+			Duration:          time.Since(startTime),
+			FirstTokenMs:      firstTokenMs,
 		}
 	}
 
 	// processEvent handles a single parsed Anthropic SSE event.
 	processEvent := func(event *apicompat.AnthropicStreamEvent) bool {
+		if event.Type == "message_stop" {
+			sawTerminalEvent = true
+		}
 		if firstChunk {
 			firstChunk = false
 			ms := int(time.Since(startTime).Milliseconds())
@@ -573,6 +607,7 @@ func (s *GatewayService) handleResponsesStreamingResponse(
 			for _, restored := range payloads {
 				eventType := gjson.GetBytes(restored, "type").String()
 				if _, err := fmt.Fprintf(c.Writer, "event: %s\ndata: %s\n\n", eventType, restored); err != nil {
+					clientDisconnected = true
 					logger.L().Info("forward_as_responses stream: client disconnected",
 						zap.String("request_id", requestID),
 					)
@@ -594,7 +629,9 @@ func (s *GatewayService) handleResponsesStreamingResponse(
 					continue
 				}
 				out := string(reverseToolNamesIfPresent(c, []byte(sse)))
-				fmt.Fprint(c.Writer, out) //nolint:errcheck
+				if _, err := fmt.Fprint(c.Writer, out); err != nil {
+					clientDisconnected = true
+				}
 			}
 			c.Writer.Flush()
 		}
@@ -608,6 +645,9 @@ func (s *GatewayService) handleResponsesStreamingResponse(
 		if !ok {
 			continue
 		}
+		if anthropicSSEPayloadFailed(eventType, "") {
+			sawFailureEvent = true
+		}
 
 		// Read data line
 		if !scanner.Scan() {
@@ -617,6 +657,9 @@ func (s *GatewayService) handleResponsesStreamingResponse(
 		payload, ok := parseAnthropicSSEField(dataLine, "data")
 		if !ok {
 			continue
+		}
+		if anthropicSSEPayloadFailed(eventType, payload) {
+			sawFailureEvent = true
 		}
 
 		var event apicompat.AnthropicStreamEvent
@@ -643,7 +686,11 @@ func (s *GatewayService) handleResponsesStreamingResponse(
 		}
 	}
 
-	return finalizeStream()
+	result, err := finalizeStream()
+	if err == nil && sawFailureEvent {
+		err = fmt.Errorf("upstream stream ended with error event")
+	}
+	return result, err
 }
 
 // appendRawJSON appends a JSON fragment string to existing raw JSON.

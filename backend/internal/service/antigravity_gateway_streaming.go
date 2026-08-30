@@ -17,9 +17,10 @@ import (
 )
 
 type antigravityStreamResult struct {
-	usage            *ClaudeUsage
-	firstTokenMs     *int
-	clientDisconnect bool // 客户端是否在流式传输过程中断开
+	usage             *ClaudeUsage
+	firstTokenMs      *int
+	clientDisconnect  bool // 客户端是否在流式传输过程中断开
+	upstreamCompleted bool
 }
 
 func (s *AntigravityGatewayService) observeAntigravityGeminiSSELine(c *gin.Context, line string) {
@@ -207,6 +208,7 @@ func (s *AntigravityGatewayService) handleGeminiStreamingResponse(c *gin.Context
 		keepaliveCh = keepaliveTicker.C
 	}
 	lastDataAt := time.Now()
+	sawUpstreamTerminal := false
 
 	cw := newAntigravityClientWriter(c.Writer, flusher, "antigravity gemini")
 
@@ -225,7 +227,7 @@ func (s *AntigravityGatewayService) handleGeminiStreamingResponse(c *gin.Context
 		select {
 		case ev, ok := <-events:
 			if !ok {
-				return &antigravityStreamResult{usage: usage, firstTokenMs: firstTokenMs, clientDisconnect: cw.Disconnected()}, nil
+				return &antigravityStreamResult{usage: usage, firstTokenMs: firstTokenMs, clientDisconnect: cw.Disconnected(), upstreamCompleted: sawUpstreamTerminal}, nil
 			}
 			if ev.err != nil {
 				if disconnect, handled := handleStreamReadError(ev.err, cw.Disconnected(), "antigravity gemini"); handled {
@@ -243,6 +245,9 @@ func (s *AntigravityGatewayService) handleGeminiStreamingResponse(c *gin.Context
 			lastDataAt = time.Now()
 
 			line := ev.line
+			if geminiSSELineHasTerminal(line) {
+				sawUpstreamTerminal = true
+			}
 			s.observeAntigravityGeminiSSELine(c, line)
 			trimmed := strings.TrimRight(line, "\r\n")
 			if strings.HasPrefix(trimmed, "data:") {
@@ -339,6 +344,7 @@ func (s *AntigravityGatewayService) handleGeminiStreamToNonStreaming(c *gin.Cont
 	var lastWithParts map[string]any
 	var collectedImageParts []map[string]any // 收集所有包含图片的 parts
 	var collectedTextParts []string          // 收集所有文本片段
+	sawUpstreamTerminal := false
 
 	type scanEvent struct {
 		line string
@@ -404,6 +410,9 @@ func (s *AntigravityGatewayService) handleGeminiStreamToNonStreaming(c *gin.Cont
 			}
 
 			line := ev.line
+			if geminiSSELineHasTerminal(line) {
+				sawUpstreamTerminal = true
+			}
 			s.observeAntigravityGeminiSSELine(c, line)
 			trimmed := strings.TrimRight(line, "\r\n")
 
@@ -509,7 +518,7 @@ returnResponse:
 	}
 	c.Data(http.StatusOK, "application/json", respBody)
 
-	return &antigravityStreamResult{usage: usage, firstTokenMs: firstTokenMs}, nil
+	return &antigravityStreamResult{usage: usage, firstTokenMs: firstTokenMs, upstreamCompleted: sawUpstreamTerminal}, nil
 }
 
 // getOrCreateGeminiParts 获取 Gemini 响应的 parts 结构，返回深拷贝和更新回调
@@ -810,6 +819,7 @@ func (s *AntigravityGatewayService) collectClaudeStreamResponse(c *gin.Context, 
 	var lastWithParts map[string]any
 	var collectedParts []map[string]any // 收集所有 parts（包括 text、thinking、functionCall、inlineData 等）
 	var meaningfulResponse bool
+	sawUpstreamTerminal := false
 
 	type scanEvent struct {
 		line string
@@ -875,6 +885,9 @@ func (s *AntigravityGatewayService) collectClaudeStreamResponse(c *gin.Context, 
 			}
 
 			line := ev.line
+			if geminiSSELineHasTerminal(line) {
+				sawUpstreamTerminal = true
+			}
 			trimmed := strings.TrimRight(line, "\r\n")
 
 			if !strings.HasPrefix(trimmed, "data:") {
@@ -967,7 +980,7 @@ returnResponse:
 		ImageOutputTokens:        agUsage.ImageOutputTokens,
 	}
 
-	return claudeResp, &antigravityStreamResult{usage: usage, firstTokenMs: firstTokenMs}, nil
+	return claudeResp, &antigravityStreamResult{usage: usage, firstTokenMs: firstTokenMs, upstreamCompleted: sawUpstreamTerminal}, nil
 }
 
 // handleClaudeStreamToNonStreaming 收集上游流式响应，转换为 Claude 非流式格式返回
@@ -1098,6 +1111,7 @@ func (s *AntigravityGatewayService) handleClaudeStreamingResponse(c *gin.Context
 		keepaliveCh = keepaliveTicker.C
 	}
 	lastDataAt := time.Now()
+	sawUpstreamTerminal := false
 
 	cw := newAntigravityClientWriter(c.Writer, flusher, "antigravity claude")
 
@@ -1136,7 +1150,7 @@ func (s *AntigravityGatewayService) handleClaudeStreamingResponse(c *gin.Context
 						RetryableOnSameAccount: true,
 					}
 				}
-				return &antigravityStreamResult{usage: convertUsage(agUsage), firstTokenMs: firstTokenMs, clientDisconnect: cw.Disconnected()}, nil
+				return &antigravityStreamResult{usage: convertUsage(agUsage), firstTokenMs: firstTokenMs, clientDisconnect: cw.Disconnected(), upstreamCompleted: sawUpstreamTerminal}, nil
 			}
 			if ev.err != nil {
 				if disconnect, handled := handleStreamReadError(ev.err, cw.Disconnected(), "antigravity claude"); handled {
@@ -1152,6 +1166,9 @@ func (s *AntigravityGatewayService) handleClaudeStreamingResponse(c *gin.Context
 			}
 
 			lastDataAt = time.Now()
+			if geminiSSELineHasTerminal(ev.line) {
+				sawUpstreamTerminal = true
+			}
 			s.observeAntigravityGeminiSSELine(c, ev.line)
 
 			// 处理 SSE 行，转换为 Claude 格式

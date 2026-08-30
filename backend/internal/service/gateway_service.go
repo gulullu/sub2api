@@ -25,6 +25,7 @@ import (
 	"github.com/Wei-Shaw/sub2api/internal/pkg/xai"
 	"github.com/Wei-Shaw/sub2api/internal/util/responseheaders"
 	"github.com/cespare/xxhash/v2"
+	"github.com/gin-gonic/gin"
 	gocache "github.com/patrickmn/go-cache"
 	"github.com/tidwall/gjson"
 	"github.com/tidwall/sjson"
@@ -622,7 +623,11 @@ type ForwardResult struct {
 	Duration                    time.Duration
 	FirstTokenMs                *int // 首字时间（流式请求）
 	ClientDisconnect            bool // 客户端是否在流式传输过程中断开
-	ReasoningEffort             *string
+	// UpstreamCompleted proves that the real upstream reached a successful
+	// protocol terminal (or that a complete non-stream response was parsed).
+	// Synthetic downstream finalization and a bare EOF must never set it.
+	UpstreamCompleted bool
+	ReasoningEffort   *string
 	// ServiceTier records the tier requested by the client. OpenAI uses
 	// service_tier; Anthropic speed=fast is normalized to "fast". Usage recording
 	// lowers it to UpstreamResponseServiceTier when the upstream reports a
@@ -639,6 +644,60 @@ type ForwardResult struct {
 	ImageSizeBreakdown map[string]int
 	SearchCount        int
 	AudioUsage         *AudioUsage
+}
+
+const gatewayUpstreamCompletedContextKey = "gateway.upstream_completed"
+const gatewayUpstreamDispatchAttemptedContextKey = "gateway.upstream_dispatch_attempted"
+
+// MarkGatewayUpstreamDispatchAttempted records the exact point at which a
+// forwarder is about to call the upstream transport. Parsing, token lookup,
+// request conversion, and request construction must happen before this marker.
+func MarkGatewayUpstreamDispatchAttempted(c *gin.Context) {
+	if c != nil {
+		c.Set(gatewayUpstreamDispatchAttemptedContextKey, true)
+	}
+}
+
+func GatewayUpstreamDispatchAttempted(c *gin.Context) bool {
+	if c == nil {
+		return false
+	}
+	value, ok := c.Get(gatewayUpstreamDispatchAttemptedContextKey)
+	attempted, _ := value.(bool)
+	return ok && attempted
+}
+
+func setGatewayUpstreamCompleted(c *gin.Context, completed bool) {
+	if c != nil {
+		c.Set(gatewayUpstreamCompletedContextKey, completed)
+	}
+}
+
+func gatewayUpstreamCompletedFromContext(c *gin.Context) bool {
+	if c == nil {
+		return false
+	}
+	value, ok := c.Get(gatewayUpstreamCompletedContextKey)
+	completed, _ := value.(bool)
+	return ok && completed
+}
+
+func anthropicNonStreamingResponseCompleted(body []byte) bool {
+	return json.Valid(body) &&
+		strings.TrimSpace(gjson.GetBytes(body, "type").String()) == "message" &&
+		!gjson.GetBytes(body, "error").Exists()
+}
+
+func anthropicSSEPayloadFailed(eventType, payload string) bool {
+	if strings.EqualFold(strings.TrimSpace(eventType), "error") {
+		return true
+	}
+	parsed := gjson.Parse(strings.TrimSpace(payload))
+	if strings.EqualFold(strings.TrimSpace(parsed.Get("type").String()), "error") {
+		return true
+	}
+	errorValue := parsed.Get("error")
+	return errorValue.Exists() && errorValue.Type != gjson.Null
 }
 
 // GatewayFailureStage identifies which request stage failed. The zero value is

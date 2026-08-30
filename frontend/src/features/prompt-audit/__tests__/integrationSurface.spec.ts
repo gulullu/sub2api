@@ -62,18 +62,24 @@ describe('Prompt Audit integration surface', () => {
     expect(events).not.toContain('sm:grid-cols-2')
   })
 
-  it('uses the shared Usage-style column settings control for all seven lists', () => {
+  it('uses the shared Usage-style column settings control for all ten lists', () => {
     const endpoint = read('../components/EndpointPool.vue')
     const events = read('../components/EventWorkspace.vue')
     const groups = read('../components/GroupPolicyWorkspace.vue')
     const cyber = read('../components/CyberLearningWorkspace.vue')
-    const combined = [endpoint, events, groups, cyber].join('\n')
+    const probePolicies = read('../components/ProbeGovernanceWorkspace.vue')
+    const probeEvents = read('../components/ProbeGovernanceEventsDialog.vue')
+    const probeExemptions = read('../components/ProbeGovernanceExemptionsDialog.vue')
+    const combined = [endpoint, events, groups, cyber, probePolicies, probeEvents, probeExemptions].join('\n')
 
-    expect(combined.match(/<ColumnSettingsDropdown/g)).toHaveLength(7)
+    expect(combined.match(/<ColumnSettingsDropdown/g)).toHaveLength(10)
     expect(endpoint).toContain('button-test="endpoint-column-settings"')
     expect(events).toContain('button-test="event-column-settings"')
     expect(groups.match(/<ColumnSettingsDropdown/g)).toHaveLength(4)
     expect(cyber).toContain('button-test="cyber-column-settings"')
+    expect(probePolicies).toContain('button-test="probe-governance-column-settings"')
+    expect(probeEvents).toContain('button-test="probe-governance-event-column-settings"')
+    expect(probeExemptions).toContain('button-test="probe-governance-exemption-column-settings"')
     expect(combined).not.toContain("t('admin.promptAudit.pool.fixedColumns')")
     expect(combined).not.toContain("t('admin.promptAudit.events.fixedColumns')")
     expect(combined).not.toContain("t('admin.promptAudit.groups.fixedColumns')")
@@ -93,6 +99,11 @@ describe('Prompt Audit integration surface', () => {
       read('../components/EventWorkspace.vue'),
       read('../components/FilterDeleteDialog.vue'),
       read('../components/CyberLearningWorkspace.vue'),
+      read('../components/ProbeGovernanceWorkspace.vue'),
+      read('../components/ProbeGovernancePolicyDialog.vue'),
+      read('../components/ProbeGovernanceEventsDialog.vue'),
+      read('../components/ProbeGovernanceEventDetailDialog.vue'),
+      read('../components/ProbeGovernanceExemptionsDialog.vue'),
     ].join('\n')
 
     expect(sources).not.toMatch(/<select\b/)

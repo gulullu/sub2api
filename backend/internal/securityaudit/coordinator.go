@@ -25,6 +25,23 @@ type PromptModeResolver interface {
 	ModeForRequest(req Request) Mode
 }
 
+type ProbeGovernanceEngine interface {
+	ProbeGovernanceEnabled(context.Context, Request) bool
+	GovernProbe(context.Context, Request) ProbeGovernanceResult
+	GovernConfirmedProbe(context.Context, Request) ProbeGovernanceResult
+	FinalizeProbeForward(*ProbeForwardClaim, bool, bool)
+	ReleaseProbeForwardClaim(*ProbeForwardClaim)
+	RejectProbeForwardClaim(*ProbeForwardClaim, string) *ProbeLocalResponse
+}
+
+func (c *Coordinator) ProbeGovernanceEnabled(ctx context.Context, req Request) bool {
+	if c == nil || c.prompt == nil {
+		return false
+	}
+	governor, ok := c.prompt.(ProbeGovernanceEngine)
+	return ok && governor.ProbeGovernanceEnabled(ctx, req)
+}
+
 type Coordinator struct {
 	legacy LegacyEngine
 	prompt PromptEngine
@@ -32,6 +49,52 @@ type Coordinator struct {
 
 func NewCoordinator(legacy LegacyEngine, prompt PromptEngine) *Coordinator {
 	return &Coordinator{legacy: legacy, prompt: prompt}
+}
+
+func (c *Coordinator) GovernProbe(ctx context.Context, req Request) ProbeGovernanceResult {
+	if c == nil || c.prompt == nil {
+		return ProbeGovernanceResult{}
+	}
+	governor, ok := c.prompt.(ProbeGovernanceEngine)
+	if !ok {
+		return ProbeGovernanceResult{}
+	}
+	return c.mergeProbeAuditDecision(ctx, req, governor, governor.GovernProbe(ctx, req))
+}
+
+func (c *Coordinator) mergeProbeAuditDecision(ctx context.Context, req Request, governor ProbeGovernanceEngine, result ProbeGovernanceResult) ProbeGovernanceResult {
+	if result.Claim == nil || result.PromptDecision == nil {
+		return result
+	}
+	legacy, _ := c.checkLegacy(ctx, req)
+	decision := prioritize(legacy, result.PromptDecision)
+	result.AuditDecision = &decision
+	if !decision.AllowNextStage {
+		result.Local = governor.RejectProbeForwardClaim(result.Claim, "legacy_policy_block")
+		result.Claim = nil
+		result.AuditDecision = nil
+	}
+	return result
+}
+
+func (c *Coordinator) GovernConfirmedProbe(ctx context.Context, req Request) ProbeGovernanceResult {
+	if c == nil || c.prompt == nil {
+		return ProbeGovernanceResult{}
+	}
+	governor, ok := c.prompt.(ProbeGovernanceEngine)
+	if !ok {
+		return ProbeGovernanceResult{}
+	}
+	return governor.GovernConfirmedProbe(ctx, req)
+}
+
+func (c *Coordinator) FinalizeProbeForward(claim *ProbeForwardClaim, upstreamAttempted, upstreamSucceeded bool) {
+	if c == nil || c.prompt == nil || claim == nil {
+		return
+	}
+	if governor, ok := c.prompt.(ProbeGovernanceEngine); ok {
+		governor.FinalizeProbeForward(claim, upstreamAttempted, upstreamSucceeded)
+	}
 }
 
 func (c *Coordinator) Check(ctx context.Context, req Request) Decision {

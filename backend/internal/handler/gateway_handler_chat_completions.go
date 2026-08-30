@@ -106,6 +106,10 @@ func (h *GatewayHandler) ChatCompletions(c *gin.Context) {
 			"This group is restricted to Claude Code clients (/v1/messages only)")
 		return
 	}
+	if h.checkProbeGovernance(c, apiKey, subject, service.ContentModerationProtocolOpenAIChat, reqModel, body) {
+		return
+	}
+	defer finalizeProbeGovernance(c, h.securityAuditCoordinator)
 	requestPlatform := effectiveAPIKeyPlatform(c, apiKey)
 	if scope, scopeErr := h.gatewayService.ResolveModelAvailabilityScope(c.Request.Context(), apiKey.GroupID, reqModel); scopeErr == nil {
 		requestPlatform = scope.Platform
@@ -373,6 +377,7 @@ func (h *GatewayHandler) ChatCompletions(c *gin.Context) {
 				)
 			}
 		})
+		markProbeGatewayUpstreamSuccess(c, result)
 		return
 	}
 }

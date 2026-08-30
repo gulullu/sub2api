@@ -438,6 +438,10 @@ func (h *OpenAIGatewayHandler) Responses(c *gin.Context) {
 	setOpsRequestContext(c, reqModel, reqStream)
 	setOpsEndpointContext(c, "", int16(service.RequestTypeFromLegacy(reqStream, false)))
 	requestPlatform := openAICompatibleRequestPlatform(c.Request.Context(), apiKey)
+	if h.checkProbeGovernance(c, apiKey, subject, service.ContentModerationProtocolOpenAIResponses, reqModel, body) {
+		return
+	}
+	defer finalizeProbeGovernance(c, h.securityAuditCoordinator)
 
 	if classification, reject := preflightModelAvailabilityFromGin(
 		c, h.gatewayService, apiKey.GroupID, reqModel, clientRequestedModel(c, reqModel), requestPlatform,
@@ -879,6 +883,7 @@ func (h *OpenAIGatewayHandler) Responses(c *gin.Context) {
 			zap.Int64("account_id", account.ID),
 			zap.Int("switch_count", switchCount),
 		)
+		markProbeOpenAIUpstreamSuccess(c, result)
 		return
 	}
 }
@@ -1109,6 +1114,15 @@ func (h *OpenAIGatewayHandler) Messages(c *gin.Context) {
 	if preferredMappedModel != "" {
 		preflightRoutingModel = preferredMappedModel
 	}
+	if isMaxTokensOneHaikuRequest(reqModel, int(gjson.GetBytes(body, "max_tokens").Int())) {
+		ctx := service.WithIsMaxTokensOneHaikuRequest(c.Request.Context(), true, false)
+		c.Request = c.Request.WithContext(ctx)
+	}
+	SetClaudeCodeClientContext(c, body, nil)
+	if h.checkProbeGovernance(c, apiKey, subject, service.ContentModerationProtocolAnthropicMessages, reqModel, body) {
+		return
+	}
+	defer finalizeProbeGovernance(c, h.securityAuditCoordinator)
 	if classification, reject := preflightModelAvailabilityFromGin(
 		c, h.gatewayService, apiKey.GroupID, preflightRoutingModel, clientRequestedModel(c, reqModel), requestPlatform,
 	); reject {
@@ -1431,6 +1445,7 @@ func (h *OpenAIGatewayHandler) Messages(c *gin.Context) {
 			zap.Int64("account_id", account.ID),
 			zap.Int("switch_count", switchCount),
 		)
+		markProbeOpenAIUpstreamSuccess(c, result)
 		return
 	}
 }

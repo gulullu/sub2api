@@ -30,12 +30,16 @@ type PromptAdminService interface {
 type PromptAdminHandler struct {
 	service PromptAdminService
 	cyber   PromptCyberAdminService
+	probe   PromptProbeAdminService
 }
 
 func NewPromptAdminHandler(service PromptAdminService) *PromptAdminHandler {
 	handler := &PromptAdminHandler{service: service}
 	if cyber, ok := service.(PromptCyberAdminService); ok {
 		handler.cyber = cyber
+	}
+	if probe, ok := service.(PromptProbeAdminService); ok {
+		handler.probe = probe
 	}
 	return handler
 }

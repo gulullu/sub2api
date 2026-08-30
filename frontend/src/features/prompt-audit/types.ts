@@ -405,6 +405,144 @@ export interface PromptAuditGroup {
   platform: string
 }
 
+export type ProbeGovernanceHealthScope = 'group_model_protocol'
+export type ProbeGovernanceStatusFilter = '' | 'enabled' | 'disabled'
+export type ProbeVerdict = 'healthy' | 'confirmed_violation' | 'unknown'
+export type ProbeClassification = 'known_health' | 'candidate' | 'healthy' | 'confirmed_violation' | 'unknown' | 'cleared'
+export type ProbeProtocol = 'openai_responses' | 'openai_chat_completions' | 'anthropic_messages'
+export type ProbeResponseKind = 'upstream' | 'healthy' | 'violation' | 'unknown'
+
+export interface ProbeGovernancePolicy {
+  group_id: number
+  group_name: string
+  enabled: boolean
+  interval_seconds: number
+  health_scope: ProbeGovernanceHealthScope
+  allow_first_real_probe: boolean
+  skip_repeat_audit: boolean
+  skip_repeat_upstream: boolean
+  healthy_response: string
+  violation_response: string
+  unknown_response: string
+  local_responses_24h: number
+  skipped_audits_24h: number
+  skipped_upstream_24h: number
+  last_probe_at?: string
+  created_at?: string
+  updated_at?: string
+  updated_by?: number
+}
+
+export interface ProbeGovernancePolicyUpdate {
+  enabled?: boolean
+  interval_seconds?: number
+  health_scope?: ProbeGovernanceHealthScope
+  allow_first_real_probe?: boolean
+  skip_repeat_audit?: boolean
+  skip_repeat_upstream?: boolean
+  healthy_response?: string
+  violation_response?: string
+  unknown_response?: string
+}
+
+export interface ProbeGovernancePolicyPage {
+  items: ProbeGovernancePolicy[]
+  total: number
+  page: number
+  page_size: number
+  pages: number
+}
+
+export interface ProbeGovernanceEvent {
+  id: number
+  group_id: number
+  group_name: string
+  family_fingerprint: string
+  family_preview: string
+  classification: ProbeClassification
+  verdict: ProbeVerdict
+  user_id: number | null
+  user_email: string
+  api_key_id: number | null
+  api_key_name: string
+  model: string
+  protocol: ProbeProtocol
+  stream: boolean
+  max_tokens: number | null
+  first_seen_at: string
+  last_seen_at: string
+  total_count: number
+  local_response_count: number
+  audit_skipped_count: number
+  upstream_skipped_count: number
+  audit_call_count: number
+  upstream_call_count: number
+  handling: string
+  last_real_health_at?: string
+  linked_audit_event_id?: number | null
+}
+
+export interface ProbeGovernanceEventDetail extends ProbeGovernanceEvent {
+  audit_config_version: number
+  probe_config_version: number
+  evidence: Record<string, unknown>
+  risk_source: string
+  window_expires_at?: string
+  next_real_probe_at?: string
+  response_kind: ProbeResponseKind
+  prompt_snapshot: Record<string, unknown>
+  created_at: string
+  updated_at: string
+}
+
+export interface ProbeGovernanceEventFilters {
+  verdict: string
+  user_id?: number
+  user_email: string
+  api_key_id?: number
+  api_key_name: string
+  model: string
+  protocol: string
+  start_at: string
+  end_at: string
+}
+
+export interface ProbeGovernanceEventPage {
+  items: ProbeGovernanceEvent[]
+  total: number
+  page: number
+  page_size: number
+  pages: number
+}
+
+export interface ProbeGovernanceExemption {
+  id: number
+  group_id: number
+  user_id: number | null
+  user_email: string
+  api_key_id: number | null
+  api_key_name: string
+  reason: string
+  expires_at?: string | null
+  created_at: string
+  created_by: number | null
+}
+
+export interface ProbeGovernanceExemptionPage {
+  items: ProbeGovernanceExemption[]
+  total: number
+  page: number
+  page_size: number
+  pages: number
+}
+
+export interface ProbeGovernanceExemptionCreate {
+  user_id?: number
+  api_key_id?: number
+  reason: string
+  expires_at?: string
+}
+
 export type CyberFeedbackStatus = 'pending' | 'approved' | 'rejected'
 export type CyberPolicyRuleStatus = 'active' | 'disabled' | 'deleted' | 'revoked' | string
 

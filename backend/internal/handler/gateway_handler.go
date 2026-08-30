@@ -208,6 +208,10 @@ func (h *GatewayHandler) Messages(c *gin.Context) {
 		h.errorResponse(c, http.StatusBadRequest, "invalid_request_error", "Model is not supported by composite groups")
 		return
 	}
+	if h.checkProbeGovernance(c, apiKey, subject, service.ContentModerationProtocolAnthropicMessages, reqModel, body) {
+		return
+	}
+	defer finalizeProbeGovernance(c, h.securityAuditCoordinator)
 	if scope, scopeErr := h.gatewayService.ResolveModelAvailabilityScope(c.Request.Context(), apiKey.GroupID, reqModel); scopeErr == nil {
 		if classification, reject := preflightModelAvailabilityFromGin(
 			c, h.gatewayService, scope.GroupID, scope.RoutingModel, clientRequestedModel(c, reqModel), scope.Platform,
@@ -369,7 +373,7 @@ func (h *GatewayHandler) Messages(c *gin.Context) {
 			setOpsSelectedAccount(c, account.ID, account.Platform)
 
 			// 检查请求拦截（预热请求、SUGGESTION MODE等）
-			if account.IsInterceptWarmupEnabled() {
+			if account.IsInterceptWarmupEnabled() && !hasProbeForwardClaim(c) {
 				interceptType := detectInterceptType(body, reqModel, parsedReq.MaxTokens, isClaudeCodeClient)
 				if interceptType != InterceptTypeNone {
 					if selection.Acquired && selection.ReleaseFunc != nil {
@@ -601,6 +605,7 @@ func (h *GatewayHandler) Messages(c *gin.Context) {
 					).Error("gateway.record_usage_failed", zap.Error(err))
 				}
 			})
+			markProbeGatewayUpstreamSuccess(c, result)
 			return
 		}
 	}
@@ -696,7 +701,7 @@ func (h *GatewayHandler) Messages(c *gin.Context) {
 			)
 
 			// 检查请求拦截（预热请求、SUGGESTION MODE等）
-			if account.IsInterceptWarmupEnabled() {
+			if account.IsInterceptWarmupEnabled() && !hasProbeForwardClaim(c) {
 				interceptType := detectInterceptType(body, reqModel, parsedReq.MaxTokens, isClaudeCodeClient)
 				if interceptType != InterceptTypeNone {
 					if selection.Acquired && selection.ReleaseFunc != nil {
@@ -1074,6 +1079,7 @@ func (h *GatewayHandler) Messages(c *gin.Context) {
 			}
 
 			submitForwardUsage(result)
+			markProbeGatewayUpstreamSuccess(c, result)
 			return
 		}
 		if !retryWithFallback {

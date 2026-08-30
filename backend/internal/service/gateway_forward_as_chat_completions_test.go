@@ -3,6 +3,7 @@
 package service
 
 import (
+	"context"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -56,6 +57,17 @@ func TestExtractCCReasoningEffortFromBody(t *testing.T) {
 	})
 }
 
+func TestForwardAsChatCompletionsParseFailureIsPreDispatch(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	c, _ := gin.CreateTestContext(httptest.NewRecorder())
+	result, err := (&GatewayService{}).ForwardAsChatCompletions(
+		context.Background(), c, &Account{}, []byte(`{"model":`), nil,
+	)
+	require.Error(t, err)
+	require.Nil(t, result)
+	require.False(t, GatewayUpstreamDispatchAttempted(c))
+}
+
 func TestHandleCCBufferedFromAnthropic_PreservesMessageStartCacheUsageAndReasoning(t *testing.T) {
 	t.Parallel()
 	gin.SetMode(gin.TestMode)
@@ -76,6 +88,9 @@ func TestHandleCCBufferedFromAnthropic_PreservesMessageStartCacheUsageAndReasoni
 			`event: message_delta`,
 			`data: {"type":"message_delta","delta":{"stop_reason":"end_turn"},"usage":{"output_tokens":7}}`,
 			``,
+			`event: message_stop`,
+			`data: {"type":"message_stop"}`,
+			``,
 		}, "\n"))),
 	}
 
@@ -83,6 +98,7 @@ func TestHandleCCBufferedFromAnthropic_PreservesMessageStartCacheUsageAndReasoni
 	result, err := svc.handleCCBufferedFromAnthropic(resp, c, "gpt-5", "claude-sonnet-4.5", &reasoningEffort, time.Now())
 	require.NoError(t, err)
 	require.NotNil(t, result)
+	require.True(t, result.UpstreamCompleted)
 	require.Equal(t, 12, result.Usage.InputTokens)
 	require.Equal(t, 7, result.Usage.OutputTokens)
 	require.Equal(t, 9, result.Usage.CacheReadInputTokens)
@@ -113,6 +129,9 @@ func TestHandleCCBufferedFromAnthropic_CompactSSEFormat(t *testing.T) {
 			`event:message_delta`,
 			`data:{"type":"message_delta","delta":{"stop_reason":"end_turn"},"usage":{"output_tokens":3}}`,
 			``,
+			`event:message_stop`,
+			`data:{"type":"message_stop"}`,
+			``,
 		}, "\n"))),
 	}
 
@@ -120,6 +139,7 @@ func TestHandleCCBufferedFromAnthropic_CompactSSEFormat(t *testing.T) {
 	result, err := svc.handleCCBufferedFromAnthropic(resp, c, "k3", "k3", nil, time.Now())
 	require.NoError(t, err)
 	require.NotNil(t, result)
+	require.True(t, result.UpstreamCompleted)
 	require.Equal(t, 15, result.Usage.InputTokens)
 	require.Equal(t, 3, result.Usage.OutputTokens)
 	require.Equal(t, 5, result.Usage.CacheReadInputTokens)
@@ -156,6 +176,7 @@ func TestHandleCCStreamingFromAnthropic_CompactSSEFormat(t *testing.T) {
 	result, err := svc.handleCCStreamingFromAnthropic(resp, c, "k3", "k3", nil, time.Now(), true)
 	require.NoError(t, err)
 	require.NotNil(t, result)
+	require.True(t, result.UpstreamCompleted)
 	require.Equal(t, 21, result.Usage.InputTokens)
 	require.Equal(t, 4, result.Usage.OutputTokens)
 	require.Equal(t, 6, result.Usage.CacheReadInputTokens)
@@ -193,6 +214,7 @@ func TestHandleCCStreamingFromAnthropic_PreservesMessageStartCacheUsageAndReason
 	result, err := svc.handleCCStreamingFromAnthropic(resp, c, "gpt-5", "claude-sonnet-4.5", &reasoningEffort, time.Now(), true)
 	require.NoError(t, err)
 	require.NotNil(t, result)
+	require.True(t, result.UpstreamCompleted)
 	require.Equal(t, 20, result.Usage.InputTokens)
 	require.Equal(t, 8, result.Usage.OutputTokens)
 	require.Equal(t, 11, result.Usage.CacheReadInputTokens)
@@ -200,4 +222,83 @@ func TestHandleCCStreamingFromAnthropic_PreservesMessageStartCacheUsageAndReason
 	require.NotNil(t, result.ReasoningEffort)
 	require.Equal(t, "medium", *result.ReasoningEffort)
 	require.Contains(t, rec.Body.String(), `[DONE]`)
+}
+
+func TestHandleCCBufferedFromAnthropic_RequiresRealUpstreamTerminal(t *testing.T) {
+	t.Parallel()
+	gin.SetMode(gin.TestMode)
+	c, _ := gin.CreateTestContext(httptest.NewRecorder())
+	resp := &http.Response{Body: io.NopCloser(strings.NewReader(strings.Join([]string{
+		`event: message_start`,
+		`data: {"type":"message_start","message":{"id":"msg_truncated","type":"message","role":"assistant","content":[],"model":"claude","usage":{"input_tokens":1}}}`,
+		``,
+		`event: message_delta`,
+		`data: {"type":"message_delta","delta":{"stop_reason":"end_turn"},"usage":{"output_tokens":1}}`,
+		``,
+	}, "\n")))}
+
+	result, err := (&GatewayService{}).handleCCBufferedFromAnthropic(resp, c, "model", "claude", nil, time.Now())
+	require.Error(t, err)
+	require.Nil(t, result)
+}
+
+func TestHandleCCBufferedFromAnthropic_ErrorCannotBeHiddenByTerminal(t *testing.T) {
+	t.Parallel()
+	gin.SetMode(gin.TestMode)
+	c, _ := gin.CreateTestContext(httptest.NewRecorder())
+	resp := &http.Response{Body: io.NopCloser(strings.NewReader(strings.Join([]string{
+		`event: message_start`,
+		`data: {"type":"message_start","message":{"id":"msg_failed","type":"message","role":"assistant","content":[],"model":"claude","usage":{"input_tokens":1}}}`,
+		``,
+		`event: error`,
+		`data: {"type":"error","error":{"type":"api_error","message":"failed"}}`,
+		``,
+		`event: message_stop`,
+		`data: {"type":"message_stop"}`,
+		``,
+	}, "\n")))}
+
+	result, err := (&GatewayService{}).handleCCBufferedFromAnthropic(resp, c, "model", "claude", nil, time.Now())
+	require.Error(t, err)
+	require.Nil(t, result)
+}
+
+func TestHandleCCStreamingFromAnthropic_ErrorCannotBeHiddenByTerminal(t *testing.T) {
+	t.Parallel()
+	gin.SetMode(gin.TestMode)
+	c, _ := gin.CreateTestContext(httptest.NewRecorder())
+	resp := &http.Response{Body: io.NopCloser(strings.NewReader(strings.Join([]string{
+		`event: message_start`,
+		`data: {"type":"message_start","message":{"id":"msg_failed","type":"message","role":"assistant","content":[],"model":"claude","usage":{"input_tokens":1}}}`,
+		``,
+		`event: error`,
+		`data: {"type":"error","error":{"type":"api_error","message":"failed"}}`,
+		``,
+		`event: message_stop`,
+		`data: {"type":"message_stop"}`,
+		``,
+	}, "\n")))}
+
+	result, err := (&GatewayService{}).handleCCStreamingFromAnthropic(resp, c, "model", "claude", nil, time.Now(), false)
+	require.Error(t, err)
+	require.NotNil(t, result)
+	require.False(t, result.UpstreamCompleted)
+}
+
+func TestHandleCCStreamingFromAnthropic_TruncatedStreamIsNotCompleted(t *testing.T) {
+	t.Parallel()
+	gin.SetMode(gin.TestMode)
+	c, _ := gin.CreateTestContext(httptest.NewRecorder())
+	resp := &http.Response{Body: io.NopCloser(strings.NewReader(strings.Join([]string{
+		`event: message_start`,
+		`data: {"type":"message_start","message":{"id":"msg_truncated","type":"message","role":"assistant","content":[],"model":"claude","usage":{"input_tokens":1}}}`,
+		``,
+		`event: message_delta`,
+		`data: {"type":"message_delta","delta":{"stop_reason":"end_turn"},"usage":{"output_tokens":1}}`,
+		``,
+	}, "\n")))}
+
+	result, _ := (&GatewayService{}).handleCCStreamingFromAnthropic(resp, c, "model", "claude", nil, time.Now(), false)
+	require.NotNil(t, result)
+	require.False(t, result.UpstreamCompleted)
 }

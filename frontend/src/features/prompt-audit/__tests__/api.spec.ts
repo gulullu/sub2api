@@ -131,6 +131,68 @@ describe('Prompt Audit API', () => {
     })
   })
 
+  it('uses the isolated probe-governance routes and sends only meaningful filters', async () => {
+    client.get.mockResolvedValue({ data: { items: [], total: 0, page: 1, page_size: 100, pages: 0 } })
+    await promptAuditAPI.listProbeGovernancePolicies({ page: 1, page_size: 100 })
+    expect(client.get).toHaveBeenLastCalledWith('/admin/prompt-audit/probe-governance/groups', {
+      params: { page: 1, page_size: 100 },
+    })
+
+    client.put.mockResolvedValue({ data: { group_id: 41, enabled: true } })
+    await promptAuditAPI.updateProbeGovernancePolicy(41, { enabled: true, interval_seconds: 300 })
+    expect(client.put).toHaveBeenCalledWith('/admin/prompt-audit/probe-governance/groups/41', {
+      enabled: true,
+      interval_seconds: 300,
+    })
+
+    client.get.mockResolvedValue({ data: { items: [], total: 0, page: 2, page_size: 20, pages: 0 } })
+    await promptAuditAPI.listProbeGovernanceEvents(41, {
+      verdict: 'healthy',
+      user_id: 44,
+      user_email: '',
+      api_key_id: 55,
+      api_key_name: '',
+      model: 'gpt-5.6-luna',
+      protocol: 'openai_responses',
+      start_at: '2026-08-31T00:00:00.000Z',
+      end_at: '',
+    }, 2, 20)
+    expect(client.get).toHaveBeenLastCalledWith('/admin/prompt-audit/probe-governance/groups/41/events', {
+      params: {
+        page: 2,
+        page_size: 20,
+        verdict: 'healthy',
+        user_id: 44,
+        api_key_id: 55,
+        model: 'gpt-5.6-luna',
+        protocol: 'openai_responses',
+        start_at: '2026-08-31T00:00:00.000Z',
+      },
+    })
+
+    client.get.mockResolvedValue({ data: { id: 91, evidence: {}, prompt_snapshot: {} } })
+    await promptAuditAPI.getProbeGovernanceEvent(91)
+    expect(client.get).toHaveBeenLastCalledWith('/admin/prompt-audit/probe-governance/events/91')
+
+    client.post.mockResolvedValue({ data: { cleared: true } })
+    await promptAuditAPI.clearProbeGovernanceEvent(91, 'false positive')
+    expect(client.post).toHaveBeenCalledWith('/admin/prompt-audit/probe-governance/events/91/clear', { reason: 'false positive' })
+
+    client.get.mockResolvedValue({ data: { items: [], total: 0, page: 1, page_size: 20, pages: 0 } })
+    await promptAuditAPI.listProbeGovernanceExemptions(41, 1, 20, ' monitor ')
+    expect(client.get).toHaveBeenLastCalledWith('/admin/prompt-audit/probe-governance/groups/41/exemptions', {
+      params: { page: 1, page_size: 20, keyword: 'monitor' },
+    })
+
+    client.post.mockResolvedValue({ data: { id: 7 } })
+    await promptAuditAPI.createProbeGovernanceExemption(41, { api_key_id: 55, reason: 'monitor' })
+    expect(client.post).toHaveBeenCalledWith('/admin/prompt-audit/probe-governance/groups/41/exemptions', { api_key_id: 55, reason: 'monitor' })
+
+    client.delete.mockResolvedValue({ data: { deleted: true } })
+    await promptAuditAPI.deleteProbeGovernanceExemption(41, 7)
+    expect(client.delete).toHaveBeenCalledWith('/admin/prompt-audit/probe-governance/groups/41/exemptions/7')
+  })
+
   it.each([
     { label: 'null arrays', data: { items: null, active_rules: null, total: 0, page: 1, page_size: 20, config_version: 30 } },
     { label: 'missing arrays', data: { total: 0, page: 1, page_size: 20, config_version: 30 } },

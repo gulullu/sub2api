@@ -70,6 +70,11 @@
                 @retry-accounts="loadRiskRouteAccounts"
               />
               <div v-if="loadErrors.groups" role="alert" class="mt-5 rounded-lg bg-amber-50 px-4 py-3 text-sm text-amber-800 dark:bg-amber-950/30 dark:text-amber-200">{{ loadErrors.groups }}</div>
+              <ProbeGovernanceWorkspace
+                :draft="serverConfig || draft"
+                :groups="groups"
+                @view-audit-event="openEvent"
+              />
             </template>
           </div>
 
@@ -198,6 +203,7 @@ import RuntimeOverview from './components/RuntimeOverview.vue'
 import EndpointPool from './components/EndpointPool.vue'
 import PromptTemplatePanel from './components/PromptTemplatePanel.vue'
 import GroupPolicyWorkspace from './components/GroupPolicyWorkspace.vue'
+import ProbeGovernanceWorkspace from './components/ProbeGovernanceWorkspace.vue'
 import EventWorkspace from './components/EventWorkspace.vue'
 import EventDetailDialog from './components/EventDetailDialog.vue'
 import FilterDeleteDialog from './components/FilterDeleteDialog.vue'

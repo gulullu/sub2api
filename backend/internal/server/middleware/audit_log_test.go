@@ -130,20 +130,44 @@ func TestPromptAuditAdminOperationsUseOmittedBodiesAndAllowlistedDetails(t *test
 	require.Equal(t, true, probe.Extra["token_applied"])
 }
 
+func TestProbeGovernanceAuditFieldsAreAllowlistedScalars(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	c, _ := gin.CreateTestContext(httptest.NewRecorder())
+	SetAuditExtra(c, map[string]any{
+		"group_id": int64(11), "exemption_id": int64(12), "user_id": int64(13),
+		"api_key_id": int64(14), "interval_seconds": 300, "policy_version": int64(7),
+		"family_fingerprint": "must-not-be-persisted",
+	})
+	value, exists := c.Get(auditCtxKeyExtra)
+	require.True(t, exists)
+	extra := value.(map[string]any)
+	require.EqualValues(t, 11, extra["group_id"])
+	require.EqualValues(t, 12, extra["exemption_id"])
+	require.EqualValues(t, 13, extra["user_id"])
+	require.EqualValues(t, 14, extra["api_key_id"])
+	require.EqualValues(t, 300, extra["interval_seconds"])
+	require.EqualValues(t, 7, extra["policy_version"])
+	require.NotContains(t, extra, "family_fingerprint")
+}
+
 func TestPromptAuditMutationAuditRoutesHaveStableActionsAndOmitBodies(t *testing.T) {
 	expected := map[string]string{
-		"PUT /api/v1/admin/prompt-audit/config":                       "admin.prompt_audit.config.update",
-		"POST /api/v1/admin/prompt-audit/endpoints/probe":             "admin.prompt_audit.endpoint.probe",
-		"DELETE /api/v1/admin/prompt-audit/events/:id":                "admin.prompt_audit.event.delete",
-		"POST /api/v1/admin/prompt-audit/events/batch-delete":         "admin.prompt_audit.events.batch_delete",
-		"POST /api/v1/admin/prompt-audit/events/delete-preview":       "admin.prompt_audit.events.delete_preview",
-		"POST /api/v1/admin/prompt-audit/events/delete-by-filter":     "admin.prompt_audit.events.filter_delete",
-		"POST /api/v1/admin/prompt-audit/cyber/events/:id/adopt":      "admin.prompt_audit.cyber.feedback.adopt",
-		"POST /api/v1/admin/prompt-audit/cyber/events/:id/reject":     "admin.prompt_audit.cyber.feedback.reject",
-		"POST /api/v1/admin/prompt-audit/cyber/events/:id/regenerate": "admin.prompt_audit.cyber.feedback.regenerate",
-		"POST /api/v1/admin/prompt-audit/cyber/rules/:id/revoke":      "admin.prompt_audit.cyber.rule.disable",
-		"POST /api/v1/admin/prompt-audit/cyber/rules/:id/restore":     "admin.prompt_audit.cyber.rule.restore",
-		"DELETE /api/v1/admin/prompt-audit/cyber/rules/:id":           "admin.prompt_audit.cyber.rule.delete",
+		"PUT /api/v1/admin/prompt-audit/config":                                             "admin.prompt_audit.config.update",
+		"POST /api/v1/admin/prompt-audit/endpoints/probe":                                   "admin.prompt_audit.endpoint.probe",
+		"DELETE /api/v1/admin/prompt-audit/events/:id":                                      "admin.prompt_audit.event.delete",
+		"POST /api/v1/admin/prompt-audit/events/batch-delete":                               "admin.prompt_audit.events.batch_delete",
+		"POST /api/v1/admin/prompt-audit/events/delete-preview":                             "admin.prompt_audit.events.delete_preview",
+		"POST /api/v1/admin/prompt-audit/events/delete-by-filter":                           "admin.prompt_audit.events.filter_delete",
+		"POST /api/v1/admin/prompt-audit/cyber/events/:id/adopt":                            "admin.prompt_audit.cyber.feedback.adopt",
+		"POST /api/v1/admin/prompt-audit/cyber/events/:id/reject":                           "admin.prompt_audit.cyber.feedback.reject",
+		"POST /api/v1/admin/prompt-audit/cyber/events/:id/regenerate":                       "admin.prompt_audit.cyber.feedback.regenerate",
+		"POST /api/v1/admin/prompt-audit/cyber/rules/:id/revoke":                            "admin.prompt_audit.cyber.rule.disable",
+		"POST /api/v1/admin/prompt-audit/cyber/rules/:id/restore":                           "admin.prompt_audit.cyber.rule.restore",
+		"DELETE /api/v1/admin/prompt-audit/cyber/rules/:id":                                 "admin.prompt_audit.cyber.rule.delete",
+		"PUT /api/v1/admin/prompt-audit/probe-governance/groups/:groupID":                   "admin.prompt_audit.probe.group.update",
+		"POST /api/v1/admin/prompt-audit/probe-governance/events/:id/clear":                 "admin.prompt_audit.probe.event.clear",
+		"POST /api/v1/admin/prompt-audit/probe-governance/groups/:groupID/exemptions":       "admin.prompt_audit.probe.exemption.create",
+		"DELETE /api/v1/admin/prompt-audit/probe-governance/groups/:groupID/exemptions/:id": "admin.prompt_audit.probe.exemption.delete",
 	}
 	for route, action := range expected {
 		require.Equal(t, action, auditActionOverrides[route])
@@ -155,6 +179,11 @@ func TestPromptAuditMutationAuditRoutesHaveStableActionsAndOmitBodies(t *testing
 func TestPromptAuditCyberEvidenceReadIsAudited(t *testing.T) {
 	require.Equal(t, "admin.prompt_audit.cyber.evidence.read",
 		auditSensitiveReads["GET /api/v1/admin/prompt-audit/cyber/events/:id/evidence"])
+}
+
+func TestProbeGovernanceEventDetailReadIsAudited(t *testing.T) {
+	require.Equal(t, "admin.prompt_audit.probe.event_detail.read",
+		auditSensitiveReads["GET /api/v1/admin/prompt-audit/probe-governance/events/:id"])
 }
 
 func TestPasskeyLoginAuditUsesCanonicalLoginActionAndOmitsCredentialBody(t *testing.T) {

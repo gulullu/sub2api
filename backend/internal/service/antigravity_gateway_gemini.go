@@ -399,6 +399,7 @@ handleSuccess:
 	var usage *ClaudeUsage
 	var firstTokenMs *int
 	var clientDisconnect bool
+	var upstreamCompleted bool
 
 	if stream {
 		// 客户端要求流式，直接透传
@@ -410,6 +411,7 @@ handleSuccess:
 		usage = streamRes.usage
 		firstTokenMs = streamRes.firstTokenMs
 		clientDisconnect = streamRes.clientDisconnect
+		upstreamCompleted = streamRes.upstreamCompleted
 	} else {
 		// 客户端要求非流式，收集流式响应后返回
 		streamRes, err := s.handleGeminiStreamToNonStreaming(c, resp, startTime)
@@ -419,6 +421,7 @@ handleSuccess:
 		}
 		usage = streamRes.usage
 		firstTokenMs = streamRes.firstTokenMs
+		upstreamCompleted = streamRes.upstreamCompleted
 	}
 
 	if usage == nil {
@@ -443,6 +446,7 @@ handleSuccess:
 		Duration:                      time.Since(startTime),
 		FirstTokenMs:                  firstTokenMs,
 		ClientDisconnect:              clientDisconnect,
+		UpstreamCompleted:             upstreamCompleted,
 		ImageCount:                    imageCount,
 		ImageSize:                     imageSize,
 		ImageInputSize:                imageInputSize,

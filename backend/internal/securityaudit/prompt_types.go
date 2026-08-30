@@ -73,21 +73,25 @@ const (
 )
 
 type Request struct {
-	RequestID    string
-	UserID       int64
-	Username     string
-	UserEmail    string
-	APIKeyID     int64
-	APIKeyName   string
-	APIKeyPrefix string
-	GroupID      *int64
-	GroupName    string
-	Provider     string
-	Endpoint     string
-	Protocol     string
-	Model        string
-	Body         []byte
-	Stage        string
+	RequestID       string
+	UserID          int64
+	Username        string
+	UserEmail       string
+	APIKeyID        int64
+	APIKeyName      string
+	APIKeyPrefix    string
+	GroupID         *int64
+	GroupName       string
+	Provider        string
+	Endpoint        string
+	RawEndpointPath string
+	Protocol        string
+	Model           string
+	Body            []byte
+	Stage           string
+	// ClientIsClaudeCode is request-local detection state used only by narrow
+	// compatibility heuristics. It is never persisted in audit snapshots.
+	ClientIsClaudeCode bool
 }
 
 func (r Request) Clone() Request {

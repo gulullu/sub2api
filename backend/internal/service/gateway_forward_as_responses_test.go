@@ -3,6 +3,7 @@
 package service
 
 import (
+	"context"
 	"encoding/json"
 	"io"
 	"net/http"
@@ -160,6 +161,17 @@ func TestExtractResponsesReasoningEffortFromBody(t *testing.T) {
 	require.Nil(t, ExtractResponsesReasoningEffortFromBody([]byte(`{"model":"claude-sonnet-4.5"}`)))
 }
 
+func TestForwardAsResponsesParseFailureIsPreDispatch(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	c, _ := gin.CreateTestContext(httptest.NewRecorder())
+	result, err := (&GatewayService{}).ForwardAsResponses(
+		context.Background(), c, &Account{}, []byte(`{"model":`), nil,
+	)
+	require.Error(t, err)
+	require.Nil(t, result)
+	require.False(t, GatewayUpstreamDispatchAttempted(c))
+}
+
 func TestHandleResponsesBufferedStreamingResponse_PreservesMessageStartCacheUsage(t *testing.T) {
 	t.Parallel()
 	gin.SetMode(gin.TestMode)
@@ -179,6 +191,9 @@ func TestHandleResponsesBufferedStreamingResponse_PreservesMessageStartCacheUsag
 			`event: message_delta`,
 			`data: {"type":"message_delta","delta":{"stop_reason":"end_turn"},"usage":{"output_tokens":7}}`,
 			``,
+			`event: message_stop`,
+			`data: {"type":"message_stop"}`,
+			``,
 		}, "\n"))),
 	}
 
@@ -186,6 +201,7 @@ func TestHandleResponsesBufferedStreamingResponse_PreservesMessageStartCacheUsag
 	result, err := svc.handleResponsesBufferedStreamingResponse(resp, c, "claude-sonnet-4.5", "claude-sonnet-4.5", nil, time.Now(), apicompat.ResponsesClientToolMapping{})
 	require.NoError(t, err)
 	require.NotNil(t, result)
+	require.True(t, result.UpstreamCompleted)
 	require.Equal(t, 12, result.Usage.InputTokens)
 	require.Equal(t, 7, result.Usage.OutputTokens)
 	require.Equal(t, 9, result.Usage.CacheReadInputTokens)
@@ -222,6 +238,7 @@ func TestHandleResponsesStreamingResponse_PreservesMessageStartCacheUsage(t *tes
 	result, err := svc.handleResponsesStreamingResponse(resp, c, "claude-sonnet-4.5", "claude-sonnet-4.5", nil, time.Now(), apicompat.ResponsesClientToolMapping{})
 	require.NoError(t, err)
 	require.NotNil(t, result)
+	require.True(t, result.UpstreamCompleted)
 	require.Equal(t, 20, result.Usage.InputTokens)
 	require.Equal(t, 8, result.Usage.OutputTokens)
 	require.Equal(t, 11, result.Usage.CacheReadInputTokens)
@@ -326,6 +343,9 @@ func TestHandleResponsesBufferedStreamingResponse_CompactSSEFormat(t *testing.T)
 			`event:message_delta`,
 			`data:{"type":"message_delta","delta":{"stop_reason":"end_turn"},"usage":{"output_tokens":5}}`,
 			``,
+			`event:message_stop`,
+			`data:{"type":"message_stop"}`,
+			``,
 		}, "\n"))),
 	}
 
@@ -333,6 +353,7 @@ func TestHandleResponsesBufferedStreamingResponse_CompactSSEFormat(t *testing.T)
 	result, err := svc.handleResponsesBufferedStreamingResponse(resp, c, "claude-sonnet-4.5", "claude-sonnet-4.5", nil, time.Now(), apicompat.ResponsesClientToolMapping{})
 	require.NoError(t, err)
 	require.NotNil(t, result)
+	require.True(t, result.UpstreamCompleted)
 	require.Equal(t, 10, result.Usage.InputTokens)
 	require.Equal(t, 5, result.Usage.OutputTokens)
 }
@@ -367,7 +388,95 @@ func TestHandleResponsesStreamingResponse_CompactSSEFormat(t *testing.T) {
 	result, err := svc.handleResponsesStreamingResponse(resp, c, "claude-sonnet-4.5", "claude-sonnet-4.5", nil, time.Now(), apicompat.ResponsesClientToolMapping{})
 	require.NoError(t, err)
 	require.NotNil(t, result)
+	require.True(t, result.UpstreamCompleted)
 	require.Equal(t, 15, result.Usage.InputTokens)
 	require.Equal(t, 6, result.Usage.OutputTokens)
 	require.Contains(t, rec.Body.String(), `response.completed`)
+}
+
+func TestHandleResponsesBufferedStreamingResponse_RequiresRealUpstreamTerminal(t *testing.T) {
+	t.Parallel()
+	gin.SetMode(gin.TestMode)
+	c, _ := gin.CreateTestContext(httptest.NewRecorder())
+	resp := &http.Response{Body: io.NopCloser(strings.NewReader(strings.Join([]string{
+		`event: message_start`,
+		`data: {"type":"message_start","message":{"id":"msg_truncated","type":"message","role":"assistant","content":[],"model":"claude","usage":{"input_tokens":1}}}`,
+		``,
+		`event: message_delta`,
+		`data: {"type":"message_delta","delta":{"stop_reason":"end_turn"},"usage":{"output_tokens":1}}`,
+		``,
+	}, "\n")))}
+
+	result, err := (&GatewayService{}).handleResponsesBufferedStreamingResponse(
+		resp, c, "model", "claude", nil, time.Now(), apicompat.ResponsesClientToolMapping{},
+	)
+	require.Error(t, err)
+	require.Nil(t, result)
+}
+
+func TestHandleResponsesBufferedStreamingResponse_ErrorCannotBeHiddenByTerminal(t *testing.T) {
+	t.Parallel()
+	gin.SetMode(gin.TestMode)
+	c, _ := gin.CreateTestContext(httptest.NewRecorder())
+	resp := &http.Response{Body: io.NopCloser(strings.NewReader(strings.Join([]string{
+		`event: message_start`,
+		`data: {"type":"message_start","message":{"id":"msg_failed","type":"message","role":"assistant","content":[],"model":"claude","usage":{"input_tokens":1}}}`,
+		``,
+		`event: error`,
+		`data: {"type":"error","error":{"type":"api_error","message":"failed"}}`,
+		``,
+		`event: message_stop`,
+		`data: {"type":"message_stop"}`,
+		``,
+	}, "\n")))}
+
+	result, err := (&GatewayService{}).handleResponsesBufferedStreamingResponse(
+		resp, c, "model", "claude", nil, time.Now(), apicompat.ResponsesClientToolMapping{},
+	)
+	require.Error(t, err)
+	require.Nil(t, result)
+}
+
+func TestHandleResponsesStreamingResponse_ErrorCannotBeHiddenByTerminal(t *testing.T) {
+	t.Parallel()
+	gin.SetMode(gin.TestMode)
+	c, _ := gin.CreateTestContext(httptest.NewRecorder())
+	resp := &http.Response{Body: io.NopCloser(strings.NewReader(strings.Join([]string{
+		`event: message_start`,
+		`data: {"type":"message_start","message":{"id":"msg_failed","type":"message","role":"assistant","content":[],"model":"claude","usage":{"input_tokens":1}}}`,
+		``,
+		`event: error`,
+		`data: {"type":"error","error":{"type":"api_error","message":"failed"}}`,
+		``,
+		`event: message_stop`,
+		`data: {"type":"message_stop"}`,
+		``,
+	}, "\n")))}
+
+	result, err := (&GatewayService{}).handleResponsesStreamingResponse(
+		resp, c, "model", "claude", nil, time.Now(), apicompat.ResponsesClientToolMapping{},
+	)
+	require.Error(t, err)
+	require.NotNil(t, result)
+	require.False(t, result.UpstreamCompleted)
+}
+
+func TestHandleResponsesStreamingResponse_TruncatedStreamIsNotCompleted(t *testing.T) {
+	t.Parallel()
+	gin.SetMode(gin.TestMode)
+	c, _ := gin.CreateTestContext(httptest.NewRecorder())
+	resp := &http.Response{Body: io.NopCloser(strings.NewReader(strings.Join([]string{
+		`event: message_start`,
+		`data: {"type":"message_start","message":{"id":"msg_truncated","type":"message","role":"assistant","content":[],"model":"claude","usage":{"input_tokens":1}}}`,
+		``,
+		`event: message_delta`,
+		`data: {"type":"message_delta","delta":{"stop_reason":"end_turn"},"usage":{"output_tokens":1}}`,
+		``,
+	}, "\n")))}
+
+	result, _ := (&GatewayService{}).handleResponsesStreamingResponse(
+		resp, c, "model", "claude", nil, time.Now(), apicompat.ResponsesClientToolMapping{},
+	)
+	require.NotNil(t, result)
+	require.False(t, result.UpstreamCompleted)
 }

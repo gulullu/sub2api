@@ -32,13 +32,16 @@ type PromptService struct {
 	cyberAdminRepo   CyberFeedbackRepository
 	cyberAdminConfig CyberSupplementConfigStore
 
-	lifecycleMu  sync.Mutex
-	cancel       context.CancelFunc
-	background   context.Context
-	enqueueWG    sync.WaitGroup
-	enqueueSlots chan struct{}
-	probeMu      sync.RWMutex
-	probes       map[string]ProbeResult
+	lifecycleMu         sync.Mutex
+	cancel              context.CancelFunc
+	background          context.Context
+	enqueueWG           sync.WaitGroup
+	enqueueSlots        chan struct{}
+	probeEventSlots     chan struct{}
+	probeStatsCleanupAt time.Time
+	probeEventDropLogAt time.Time
+	probeMu             sync.RWMutex
+	probes              map[string]ProbeResult
 }
 
 type EndpointCredentialSourceResolver interface {
@@ -63,7 +66,7 @@ func NewPromptService(
 	return &PromptService{
 		config: config, repo: repo, payload: payload, scanner: scanner, metrics: metrics,
 		enqueuer: enqueuer, evaluator: evaluator, runner: runner, circuit: sharedCircuit, clock: realClock{},
-		enqueueSlots: make(chan struct{}, 128), probes: map[string]ProbeResult{},
+		enqueueSlots: make(chan struct{}, 128), probeEventSlots: make(chan struct{}, 8), probes: map[string]ProbeResult{},
 	}
 }
 

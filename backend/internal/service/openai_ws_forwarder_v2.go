@@ -786,10 +786,12 @@ func (s *OpenAIGatewayService) forwardOpenAIWSV2(
 		ReasoningEffort:               extractOpenAIReasoningEffort(reqBody, mappedModel, originalModel),
 		Stream:                        reqStream,
 		OpenAIWSMode:                  true,
+		UpstreamCompleted:             upstreamTerminalEvent == "response.completed" || upstreamTerminalEvent == "response.done",
 		UpstreamTerminalEvent:         upstreamTerminalEvent,
 		ResponseHeaders:               lease.HandshakeHeaders(),
 		Duration:                      time.Since(startTime),
 		FirstTokenMs:                  firstTokenMs,
+		ClientDisconnect:              clientDisconnected,
 	}, nil
 }
 

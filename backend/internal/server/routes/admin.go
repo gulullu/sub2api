@@ -157,6 +157,14 @@ func registerPromptAuditRoutes(admin *gin.RouterGroup, h *handler.Handlers) {
 		promptAudit.POST("/cyber/rules/:id/revoke", h.Admin.PromptAudit.RevokeCyberRule)
 		promptAudit.POST("/cyber/rules/:id/restore", h.Admin.PromptAudit.RestoreCyberRule)
 		promptAudit.DELETE("/cyber/rules/:id", h.Admin.PromptAudit.DeleteCyberRule)
+		promptAudit.GET("/probe-governance/groups", h.Admin.PromptAudit.ListProbeGroups)
+		promptAudit.PUT("/probe-governance/groups/:groupID", h.Admin.PromptAudit.UpdateProbeGroup)
+		promptAudit.GET("/probe-governance/groups/:groupID/events", h.Admin.PromptAudit.ListProbeEvents)
+		promptAudit.GET("/probe-governance/events/:id", h.Admin.PromptAudit.GetProbeEvent)
+		promptAudit.POST("/probe-governance/events/:id/clear", h.Admin.PromptAudit.ClearProbeEvent)
+		promptAudit.GET("/probe-governance/groups/:groupID/exemptions", h.Admin.PromptAudit.ListProbeExemptions)
+		promptAudit.POST("/probe-governance/groups/:groupID/exemptions", h.Admin.PromptAudit.CreateProbeExemption)
+		promptAudit.DELETE("/probe-governance/groups/:groupID/exemptions/:id", h.Admin.PromptAudit.DeleteProbeExemption)
 	}
 }
 
