@@ -40,6 +40,95 @@ func TestPromptRiskRouteContextIsHardAllowlist(t *testing.T) {
 	require.True(t, PromptRiskRouteAllowsAccount(ctx, 1))
 	require.True(t, PromptRiskRouteAllowsAccount(ctx, 2))
 	require.False(t, PromptRiskRouteAllowsAccount(ctx, 3))
+	require.False(t, PromptRiskRouteFallbackAllowed(ctx))
+
+	allowCtx := WithPromptRiskRoutePolicy(base, []int64{2, 1}, true)
+	require.True(t, PromptRiskRouteEnabled(allowCtx))
+	require.True(t, PromptRiskRouteFallbackAllowed(allowCtx))
+	require.False(t, PromptRiskRouteAllowsAccount(allowCtx, 3), "fallback must not soften the first-pass hard pool")
+}
+
+func TestSelectWithPromptRiskRouteFallbackRetriesOnlyDedicatedPoolExhaustion(t *testing.T) {
+	t.Run("allow retries once through ordinary pool", func(t *testing.T) {
+		calls := 0
+		ctx := WithPromptRiskRoutePolicy(context.Background(), []int64{99}, true)
+		value, err := selectWithPromptRiskRouteFallback(ctx, func(attemptCtx context.Context) (int, error) {
+			calls++
+			if PromptRiskRouteEnabled(attemptCtx) {
+				return 0, ErrNoAvailableAccounts
+			}
+			return 42, nil
+		})
+
+		require.NoError(t, err)
+		require.Equal(t, 42, value)
+		require.Equal(t, 2, calls)
+	})
+
+	t.Run("block keeps dedicated unavailable error", func(t *testing.T) {
+		calls := 0
+		ctx := WithPromptRiskRouteAccounts(context.Background(), []int64{99})
+		_, err := selectWithPromptRiskRouteFallback(ctx, func(context.Context) (int, error) {
+			calls++
+			return 0, ErrNoAvailableAccounts
+		})
+
+		require.ErrorIs(t, err, ErrPromptRiskRouteUnavailable)
+		require.Equal(t, 1, calls)
+	})
+
+	t.Run("state conflict never falls back", func(t *testing.T) {
+		calls := 0
+		ctx := WithPromptRiskRoutePolicy(context.Background(), []int64{99}, true)
+		_, err := selectWithPromptRiskRouteFallback(ctx, func(context.Context) (int, error) {
+			calls++
+			return 0, newPromptRiskRouteStateConflictError()
+		})
+
+		require.ErrorIs(t, err, ErrPromptRiskRouteStateConflict)
+		require.Equal(t, 1, calls)
+	})
+
+	t.Run("unknown internal error never falls back", func(t *testing.T) {
+		calls := 0
+		sentinel := errors.New("repository unavailable")
+		ctx := WithPromptRiskRoutePolicy(context.Background(), []int64{99}, true)
+		_, err := selectWithPromptRiskRouteFallback(ctx, func(context.Context) (int, error) {
+			calls++
+			return 0, sentinel
+		})
+
+		require.ErrorIs(t, err, sentinel)
+		require.Equal(t, 1, calls)
+	})
+
+	t.Run("canceled request never starts ordinary retry", func(t *testing.T) {
+		calls := 0
+		base, cancel := context.WithCancel(context.Background())
+		ctx := WithPromptRiskRoutePolicy(base, []int64{99}, true)
+		_, err := selectWithPromptRiskRouteFallback(ctx, func(context.Context) (int, error) {
+			calls++
+			cancel()
+			return 0, ErrNoAvailableAccounts
+		})
+
+		require.ErrorIs(t, err, context.Canceled)
+		require.Equal(t, 1, calls)
+	})
+
+	t.Run("ordinary retry failure is marked but preserves cause", func(t *testing.T) {
+		calls := 0
+		ctx := WithPromptRiskRoutePolicy(context.Background(), []int64{99}, true)
+		_, err := selectWithPromptRiskRouteFallback(ctx, func(attemptCtx context.Context) (int, error) {
+			calls++
+			return 0, ErrNoAvailableAccounts
+		})
+
+		require.True(t, IsPromptRiskRouteFallbackResult(err))
+		require.ErrorIs(t, err, ErrNoAvailableAccounts)
+		require.False(t, errors.Is(err, ErrPromptRiskRouteUnavailable))
+		require.Equal(t, 2, calls)
+	})
 }
 
 func TestPromptRiskRouteFiltersAccountSchedulability(t *testing.T) {

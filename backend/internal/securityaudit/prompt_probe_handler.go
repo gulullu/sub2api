@@ -16,6 +16,7 @@ type PromptProbeAdminService interface {
 	SaveProbeGroup(context.Context, int64, UpdateProbeGroupConfigRequest, int64) (ProbeGroupConfig, error)
 	ListProbeEvents(context.Context, int64, ProbeEventFilter, int, int) (*ProbeEventPage, error)
 	GetProbeEvent(context.Context, int64) (*ProbeEvent, error)
+	GetProbeEventEvidence(context.Context, int64) (*ProbeEventEvidence, error)
 	ClearProbeEvent(context.Context, int64, int64, string) (*ProbeEvent, error)
 	ListProbeExemptions(context.Context, int64, string, int, int) (*ProbeExemptionPage, error)
 	CreateProbeExemption(context.Context, int64, CreateProbeExemptionRequest, int64) (*ProbeExemption, error)
@@ -131,6 +132,26 @@ func (h *PromptAdminHandler) GetProbeEvent(c *gin.Context) {
 		return
 	}
 	result, err := service.GetProbeEvent(c.Request.Context(), id)
+	if err != nil {
+		response.ErrorFrom(c, err)
+		return
+	}
+	response.Success(c, result)
+}
+
+func (h *PromptAdminHandler) GetProbeEventEvidence(c *gin.Context) {
+	setProbeAdminNoStore(c)
+	service, err := h.probeService()
+	if err != nil {
+		response.ErrorFrom(c, err)
+		return
+	}
+	id, err := positiveProbePathID(c, "id", "prompt_probe_invalid_event_id", "探针事件 ID 无效")
+	if err != nil {
+		response.ErrorFrom(c, err)
+		return
+	}
+	result, err := service.GetProbeEventEvidence(c.Request.Context(), id)
 	if err != nil {
 		response.ErrorFrom(c, err)
 		return

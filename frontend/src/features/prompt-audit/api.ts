@@ -24,6 +24,7 @@ import type {
   CyberFeedbackStatus,
   CyberPolicyRule,
   ProbeGovernanceEventDetail,
+  ProbeGovernanceEventEvidence,
   ProbeGovernanceEventFilters,
   ProbeGovernanceEventPage,
   ProbeGovernanceExemption,
@@ -362,6 +363,17 @@ export async function getProbeGovernanceEvent(id: number): Promise<ProbeGovernan
   return data
 }
 
+export async function getProbeGovernanceEventEvidence(id: number): Promise<ProbeGovernanceEventEvidence> {
+  const { data } = await apiClient.get<Partial<ProbeGovernanceEventEvidence> | null>(`${probeGovernancePath}/events/${id}/evidence`)
+  return {
+    available: data?.available === true,
+    full_prompt: typeof data?.full_prompt === 'string' ? data.full_prompt : '',
+    prompt_length: typeof data?.prompt_length === 'number' ? data.prompt_length : 0,
+    request_id: typeof data?.request_id === 'string' ? data.request_id : '',
+    source: typeof data?.source === 'string' ? data.source : 'unavailable',
+  }
+}
+
 export async function clearProbeGovernanceEvent(id: number, reason: string): Promise<{ cleared: boolean }> {
   const { data } = await apiClient.post<{ cleared: boolean }>(`${probeGovernancePath}/events/${id}/clear`, { reason })
   return data
@@ -419,6 +431,7 @@ export const promptAuditAPI = {
   updateProbeGovernancePolicy,
   listProbeGovernanceEvents,
   getProbeGovernanceEvent,
+  getProbeGovernanceEventEvidence,
   clearProbeGovernanceEvent,
   listProbeGovernanceExemptions,
   createProbeGovernanceExemption,

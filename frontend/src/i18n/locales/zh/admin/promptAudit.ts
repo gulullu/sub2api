@@ -207,7 +207,7 @@ export default {
       detail: {
         title: '探针事件详情', classification: '分类与判定', group: '审计分组', auditConfigVersion: '审计配置版本', probeConfigVersion: '治理策略版本', riskSource: '风险来源', evidence: '判定证据', preview: '安全摘要',
         request: '请求信息', stream: '流式请求', maxTokens: '最大输出 Token', responseKind: '响应类型', statistics: '窗口与调用统计', firstSeen: '首次出现', lastSeen: '最近出现', totalCount: '累计次数', localResponseCount: '本地应答', savedAudit: '节省审核调用', savedUpstream: '节省上游调用', actualAuditCalls: '实际审核调用', actualUpstreamCalls: '实际上游调用', lastRealHealth: '最近真实健康检测', windowExpires: '当前窗口结束', nextRealProbe: '下次真实检测',
-        promptSnapshot: '提示词快照', promptSnapshotHint: '仅管理员可见，并按现有审计权限与脱敏规则展示。请将其视为敏感数据。',
+        promptSnapshot: '提示词快照', promptSnapshotHint: '仅管理员可见，通过独立证据接口读取完整快照。请将其视为敏感数据。', promptSnapshotUnavailable: '该历史事件没有保存可还原的完整提示词快照。',
         addExemption: '加入真实监控豁免', viewAuditEvent: '查看关联审计事件', clearClassification: '重新评估', clearReason: '操作原因', clearReasonPlaceholder: '说明为什么需要清除缓存并重新评估', confirmClear: '确认清除缓存',
       },
       exemptions: {
@@ -216,7 +216,7 @@ export default {
         search: '搜索豁免对象', searchPlaceholder: '用户邮箱 / 用户 ID / API Key 名称 / ID', target: '对象', created: '操作记录', permanent: '长期', operator: '管理员 #{id}', empty: '当前没有真实监控豁免。', eventReason: '从探针事件加入真实监控豁免', removeTitle: '移除真实监控豁免？', removeMessage: '将移除“{name}”的真实监控豁免；后续探针恢复普通治理规则。',
       },
       messages: { enabled: '已为“{name}”启用探针治理。', disabled: '已为“{name}”停用探针治理。', saved: '探针治理策略已保存。', classificationCleared: '探针缓存已清除，后续请求将重新评估。', exemptionAdded: '真实监控豁免已添加。', exemptionRemoved: '真实监控豁免已移除。' },
-      errors: { loadPolicies: '无法加载探针治理策略。', savePolicy: '无法保存探针治理策略。', loadEvents: '无法加载探针事件。', loadDetail: '无法加载探针事件详情。', clearClassification: '无法清除探针缓存并重新评估。', loadExemptions: '无法加载真实监控豁免。', createExemption: '无法添加真实监控豁免。', deleteExemption: '无法移除真实监控豁免。' },
+      errors: { loadPolicies: '无法加载探针治理策略。', savePolicy: '无法保存探针治理策略。', loadEvents: '无法加载探针事件。', loadDetail: '无法加载探针事件详情。', loadEvidence: '无法加载完整提示词快照。', clearClassification: '无法清除探针缓存并重新评估。', loadExemptions: '无法加载真实监控豁免。', createExemption: '无法添加真实监控豁免。', deleteExemption: '无法移除真实监控豁免。' },
     },
     saveBar: { enabled: '启用提示词审计', blocking: '同步阻止', blockingLatestTurnOnly: '仅审最新输入和上一轮输出', storePass: '保存安全事件', dirty: '有未保存的更改', synced: '配置已同步' },
     blockingConfirm: {

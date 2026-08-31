@@ -150,6 +150,19 @@ func TestClassifyNoAccountError_PromptRiskPoolExhaustionAlwaysReturns503(t *test
 	require.False(t, service.HasOpsClientBusinessLimited(c))
 }
 
+func TestClassifyNoAccountError_AllowedRuntimeFallbackUsesOrdinaryPoolDiagnosis(t *testing.T) {
+	c := newTestGinContextWithRequest()
+	c.Request = c.Request.WithContext(service.WithPromptRiskRoutePolicy(c.Request.Context(), []int64{99}, true))
+	fd := &fakeDiagnoser{resp: service.ModelAvailabilityDiagnosis{HasAccountsInPool: true, HasModelSupport: false}}
+	apiKey := &service.APIKey{GroupID: ptrInt64(42)}
+
+	cls := classifyNoAccountErrorFromGin(c, fd, apiKey, "gpt-unsupported", "gpt-unsupported", service.PlatformOpenAI)
+
+	require.Equal(t, http.StatusNotFound, cls.Status)
+	require.True(t, cls.ModelNotFound)
+	require.Len(t, fd.calls, 1, "allowed fallback failures must be classified against the ordinary group")
+}
+
 func TestWebSearchSelectionErrorMessageHidesPromptRiskRouteDetails(t *testing.T) {
 	ctx := service.WithPromptRiskRouteAccounts(context.Background(), []int64{99})
 	message := webSearchSelectionErrorMessage(ctx, fmt.Errorf("wrapped: %w", service.ErrPromptRiskRouteUnavailable))

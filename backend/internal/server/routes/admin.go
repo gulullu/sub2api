@@ -161,6 +161,7 @@ func registerPromptAuditRoutes(admin *gin.RouterGroup, h *handler.Handlers) {
 		promptAudit.PUT("/probe-governance/groups/:groupID", h.Admin.PromptAudit.UpdateProbeGroup)
 		promptAudit.GET("/probe-governance/groups/:groupID/events", h.Admin.PromptAudit.ListProbeEvents)
 		promptAudit.GET("/probe-governance/events/:id", h.Admin.PromptAudit.GetProbeEvent)
+		promptAudit.GET("/probe-governance/events/:id/evidence", h.Admin.PromptAudit.GetProbeEventEvidence)
 		promptAudit.POST("/probe-governance/events/:id/clear", h.Admin.PromptAudit.ClearProbeEvent)
 		promptAudit.GET("/probe-governance/groups/:groupID/exemptions", h.Admin.PromptAudit.ListProbeExemptions)
 		promptAudit.POST("/probe-governance/groups/:groupID/exemptions", h.Admin.PromptAudit.CreateProbeExemption)

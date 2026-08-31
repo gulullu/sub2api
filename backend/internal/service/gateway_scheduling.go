@@ -32,8 +32,9 @@ func (s *GatewayService) SelectAccountForModel(ctx context.Context, groupID *int
 
 // SelectAccountForModelWithExclusions selects an account supporting the requested model while excluding specified accounts.
 func (s *GatewayService) SelectAccountForModelWithExclusions(ctx context.Context, groupID *int64, sessionHash string, requestedModel string, excludedIDs map[int64]struct{}) (*Account, error) {
-	account, err := s.selectAccountForModelWithExclusions(ctx, groupID, sessionHash, requestedModel, excludedIDs)
-	return account, normalizePromptRiskRouteSelectionError(ctx, err)
+	return selectWithPromptRiskRouteFallback(ctx, func(attemptCtx context.Context) (*Account, error) {
+		return s.selectAccountForModelWithExclusions(attemptCtx, groupID, sessionHash, requestedModel, excludedIDs)
+	})
 }
 
 func (s *GatewayService) selectAccountForModelWithExclusions(ctx context.Context, groupID *int64, sessionHash string, requestedModel string, excludedIDs map[int64]struct{}) (*Account, error) {
@@ -103,8 +104,9 @@ func (s *GatewayService) selectAccountForModelWithExclusions(ctx context.Context
 // metadataUserID: 用于客户端亲和调度，从中提取客户端 ID
 // sub2apiUserID: 系统用户 ID，用于二维亲和调度
 func (s *GatewayService) SelectAccountWithLoadAwareness(ctx context.Context, groupID *int64, sessionHash string, requestedModel string, excludedIDs map[int64]struct{}, metadataUserID string, sub2apiUserID int64) (*AccountSelectionResult, error) {
-	selection, err := s.selectAccountWithLoadAwareness(ctx, groupID, sessionHash, requestedModel, excludedIDs, metadataUserID, sub2apiUserID)
-	return selection, normalizePromptRiskRouteSelectionError(ctx, err)
+	return selectWithPromptRiskRouteFallback(ctx, func(attemptCtx context.Context) (*AccountSelectionResult, error) {
+		return s.selectAccountWithLoadAwareness(attemptCtx, groupID, sessionHash, requestedModel, excludedIDs, metadataUserID, sub2apiUserID)
+	})
 }
 
 func (s *GatewayService) selectAccountWithLoadAwareness(ctx context.Context, groupID *int64, sessionHash string, requestedModel string, excludedIDs map[int64]struct{}, metadataUserID string, sub2apiUserID int64) (*AccountSelectionResult, error) {

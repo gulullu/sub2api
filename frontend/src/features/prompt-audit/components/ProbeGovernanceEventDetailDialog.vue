@@ -63,7 +63,12 @@
       <section class="border-t border-gray-200 pt-5 dark:border-dark-700">
         <h3 class="text-sm font-semibold text-gray-900 dark:text-white">{{ t('admin.promptAudit.probeGovernance.detail.promptSnapshot') }}</h3>
         <p class="mt-1 text-xs leading-5 text-gray-500 dark:text-dark-400">{{ t('admin.promptAudit.probeGovernance.detail.promptSnapshotHint') }}</p>
-        <pre class="mt-3 max-h-64 overflow-auto whitespace-pre-wrap break-words rounded-xl border border-gray-200 bg-gray-50 p-4 text-xs leading-5 text-gray-700 dark:border-dark-700 dark:bg-dark-900 dark:text-dark-200">{{ safeJSON(event.prompt_snapshot) }}</pre>
+        <div v-if="evidenceLoading" class="mt-3 flex min-h-24 items-center justify-center rounded-xl border border-gray-200 bg-gray-50 dark:border-dark-700 dark:bg-dark-900">
+          <LoadingSpinner size="sm" />
+        </div>
+        <div v-else-if="evidenceError" role="alert" class="mt-3 rounded-xl bg-red-50 px-4 py-3 text-sm text-red-700 dark:bg-red-950/30 dark:text-red-300" data-test="probe-prompt-evidence-error">{{ evidenceError }}</div>
+        <pre v-else-if="promptEvidence?.available && promptEvidence.full_prompt" class="mt-3 max-h-64 overflow-auto whitespace-pre-wrap break-words rounded-xl border border-gray-200 bg-gray-50 p-4 font-mono text-xs leading-5 text-gray-700 dark:border-dark-700 dark:bg-dark-900 dark:text-dark-200" data-test="probe-full-prompt">{{ promptEvidence.full_prompt }}</pre>
+        <div v-else class="mt-3 rounded-xl bg-amber-50 px-4 py-3 text-sm text-amber-800 dark:bg-amber-950/30 dark:text-amber-200" data-test="probe-prompt-evidence-unavailable">{{ t('admin.promptAudit.probeGovernance.detail.promptSnapshotUnavailable') }}</div>
       </section>
 
       <section v-if="clearing" class="rounded-xl border border-amber-200 bg-amber-50/70 p-4 dark:border-amber-900/60 dark:bg-amber-950/20">
@@ -103,9 +108,17 @@ import { useI18n } from 'vue-i18n'
 import BaseDialog from '@/components/common/BaseDialog.vue'
 import Input from '@/components/common/Input.vue'
 import LoadingSpinner from '@/components/common/LoadingSpinner.vue'
-import type { ProbeGovernanceEventDetail } from '../types'
+import type { ProbeGovernanceEventDetail, ProbeGovernanceEventEvidence } from '../types'
 
-const props = defineProps<{ show: boolean; event: ProbeGovernanceEventDetail | null; loading: boolean; clearingBusy: boolean }>()
+const props = defineProps<{
+  show: boolean
+  event: ProbeGovernanceEventDetail | null
+  loading: boolean
+  clearingBusy: boolean
+  promptEvidence: ProbeGovernanceEventEvidence | null
+  evidenceLoading: boolean
+  evidenceError: string
+}>()
 const emit = defineEmits<{
   (event: 'close'): void
   (event: 'clear', id: number, reason: string): void

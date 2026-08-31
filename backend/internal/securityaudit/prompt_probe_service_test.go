@@ -166,6 +166,12 @@ func TestAnalyzeProbeRequestRequiresClaudeCodeForHaikuCompatibilityProbe(t *test
 	require.True(t, ok)
 	require.True(t, shape.Candidate)
 	require.True(t, shape.KnownHealth)
+	require.Contains(t, shape.FullPrompt, "You are Claude Code")
+	require.Contains(t, shape.FullPrompt, "hello")
+}
+
+func TestProbeBehaviorKeyVersionsCachedDecisionSchema(t *testing.T) {
+	require.Contains(t, probeBehaviorKey(17, 23, 57, "family"), "behavior:v2:")
 }
 
 func TestAnalyzeProbeRequestDoesNotTreatConversationEndingInHiAsProbe(t *testing.T) {
@@ -328,6 +334,7 @@ func TestGovernProbeCompatibilityAndCoreStateMatrix(t *testing.T) {
 		scanner := &probeMatrixScanner{action: ActionWarn}
 		active := probeMatrixActiveConfig()
 		active.RiskRouteAccountIDs = []int64{701, 702}
+		active.NoRouteFallbackMode = NoRouteFallbackAllow
 		svc, mock, _, client := newProbeMatrixService(t, active, scanner)
 		cacheProbeMatrixGroupConfig(t, client, true)
 		expectProbeMatrixExemption(mock, false)
@@ -339,6 +346,7 @@ func TestGovernProbeCompatibilityAndCoreStateMatrix(t *testing.T) {
 		require.NotNil(t, first.PromptDecision)
 		require.Equal(t, DecisionFlag, first.PromptDecision.Kind)
 		require.Equal(t, []int64{701, 702}, first.PromptDecision.RouteAccountIDs)
+		require.True(t, first.PromptDecision.AllowRiskRouteFallback)
 		svc.FinalizeProbeForward(first.Claim, false, false)
 
 		repeat := svc.GovernProbe(context.Background(), candidateRequest())
@@ -346,6 +354,7 @@ func TestGovernProbeCompatibilityAndCoreStateMatrix(t *testing.T) {
 		require.NotNil(t, repeat.PromptDecision)
 		require.Equal(t, DecisionFlag, repeat.PromptDecision.Kind)
 		require.Equal(t, []int64{701, 702}, repeat.PromptDecision.RouteAccountIDs)
+		require.True(t, repeat.PromptDecision.AllowRiskRouteFallback)
 		require.Equal(t, int64(1), scanner.calls.Load(), "pre-dispatch failure must not cause another Luna audit")
 		svc.ReleaseProbeForwardClaim(repeat.Claim)
 		require.NoError(t, mock.ExpectationsWereMet())

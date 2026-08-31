@@ -104,6 +104,12 @@ func (s *GeminiMessagesCompatService) SelectAccountForModel(ctx context.Context,
 }
 
 func (s *GeminiMessagesCompatService) SelectAccountForModelWithExclusions(ctx context.Context, groupID *int64, sessionHash string, requestedModel string, excludedIDs map[int64]struct{}) (*Account, error) {
+	return selectWithPromptRiskRouteFallback(ctx, func(attemptCtx context.Context) (*Account, error) {
+		return s.selectAccountForModelWithExclusionsOnce(attemptCtx, groupID, sessionHash, requestedModel, excludedIDs)
+	})
+}
+
+func (s *GeminiMessagesCompatService) selectAccountForModelWithExclusionsOnce(ctx context.Context, groupID *int64, sessionHash string, requestedModel string, excludedIDs map[int64]struct{}) (*Account, error) {
 	// 1. 确定目标平台和调度模式
 	// Determine target platform and scheduling mode
 	platform, useMixedScheduling, hasForcePlatform, err := s.resolvePlatformAndSchedulingMode(ctx, groupID)

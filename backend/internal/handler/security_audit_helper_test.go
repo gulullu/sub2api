@@ -112,7 +112,7 @@ func TestRunSecurityAuditCachesFlaggedWebSocketDecisionAndInstallsHardPool(t *te
 	engine := &turnCountingEngine{
 		mode: securityaudit.ModeBlocking,
 		decisions: []*securityaudit.PromptDecision{
-			{Kind: securityaudit.DecisionFlag, AllowNextStage: true, RouteAccountIDs: []int64{11, 22}},
+			{Kind: securityaudit.DecisionFlag, AllowNextStage: true, RouteAccountIDs: []int64{11, 22}, AllowRiskRouteFallback: true},
 			{Kind: securityaudit.DecisionAllow, AllowNextStage: true},
 		},
 	}
@@ -134,6 +134,7 @@ func TestRunSecurityAuditCachesFlaggedWebSocketDecisionAndInstallsHardPool(t *te
 	require.Equal(t, int64(1), engine.evaluates.Load())
 	require.True(t, service.PromptRiskRouteAllowsAccount(c.Request.Context(), 11))
 	require.False(t, service.PromptRiskRouteAllowsAccount(c.Request.Context(), 33))
+	require.True(t, service.PromptRiskRouteFallbackAllowed(c.Request.Context()))
 }
 
 func TestRunSecurityAuditMarksOnlyPromptPolicyBlocksAsClientBusinessLimited(t *testing.T) {

@@ -994,6 +994,18 @@ func maxBatchImageReferenceImagesForModel(model string) int {
 }
 
 func (s *BatchImagePublicService) selectProviderAndAccount(ctx context.Context, owner BatchImageOwner, requestedProvider, model string) (BatchImageProvider, *Account, error) {
+	type selection struct {
+		provider BatchImageProvider
+		account  *Account
+	}
+	result, err := selectWithPromptRiskRouteFallback(ctx, func(attemptCtx context.Context) (selection, error) {
+		provider, account, selectErr := s.selectProviderAndAccountOnce(attemptCtx, owner, requestedProvider, model)
+		return selection{provider: provider, account: account}, selectErr
+	})
+	return result.provider, result.account, err
+}
+
+func (s *BatchImagePublicService) selectProviderAndAccountOnce(ctx context.Context, owner BatchImageOwner, requestedProvider, model string) (BatchImageProvider, *Account, error) {
 	providers := batchImageProviderSelectionOrder(requestedProvider)
 	for _, providerName := range providers {
 		provider, ok := s.ProviderRegistry.Get(providerName)

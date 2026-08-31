@@ -495,6 +495,14 @@ export interface ProbeGovernanceEventDetail extends ProbeGovernanceEvent {
   updated_at: string
 }
 
+export interface ProbeGovernanceEventEvidence {
+  available: boolean
+  full_prompt: string
+  prompt_length: number
+  request_id: string
+  source: 'probe_event' | 'linked_audit_event' | 'unavailable' | string
+}
+
 export interface ProbeGovernanceEventFilters {
   verdict: string
   user_id?: number

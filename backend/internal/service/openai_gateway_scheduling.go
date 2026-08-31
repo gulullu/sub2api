@@ -256,8 +256,9 @@ func (s *OpenAIGatewayService) SelectAccountForModel(ctx context.Context, groupI
 // SelectAccountForModelWithExclusions 选择支持指定模型的账号，同时排除指定的账号。
 func (s *OpenAIGatewayService) SelectAccountForModelWithExclusions(ctx context.Context, groupID *int64, sessionHash string, requestedModel string, excludedIDs map[int64]struct{}) (*Account, error) {
 	ctx = s.withOpenAIQuotaAutoPauseContext(ctx)
-	account, err := s.selectAccountForModelWithExclusions(ctx, groupID, PlatformOpenAI, sessionHash, requestedModel, excludedIDs, false, 0, "", false)
-	return account, normalizePromptRiskRouteSelectionError(ctx, err)
+	return selectWithPromptRiskRouteFallback(ctx, func(attemptCtx context.Context) (*Account, error) {
+		return s.selectAccountForModelWithExclusions(attemptCtx, groupID, PlatformOpenAI, sessionHash, requestedModel, excludedIDs, false, 0, "", false)
+	})
 }
 
 // SelectAccountForTokenCount selects an account for a non-billable token-count
@@ -273,18 +274,20 @@ func (s *OpenAIGatewayService) SelectAccountForTokenCount(
 ) (*Account, error) {
 	ctx = WithOpenAIProfitControlSuppressed(ctx)
 	ctx = s.withOpenAIQuotaAutoPauseContext(ctx)
-	return s.selectAccountForModelWithExclusions(
-		ctx,
-		groupID,
-		platform,
-		sessionHash,
-		requestedModel,
-		nil,
-		false,
-		0,
-		requiredCapability,
-		false,
-	)
+	return selectWithPromptRiskRouteFallback(ctx, func(attemptCtx context.Context) (*Account, error) {
+		return s.selectAccountForModelWithExclusions(
+			attemptCtx,
+			groupID,
+			platform,
+			sessionHash,
+			requestedModel,
+			nil,
+			false,
+			0,
+			requiredCapability,
+			false,
+		)
+	})
 }
 
 // NormalizeOpenAICompatiblePlatform 保留 grok 与国产 OpenAI 兼容供应商（kimi/zhipu/
@@ -1125,8 +1128,9 @@ func (s *OpenAIGatewayService) SelectAccountWithLoadAwareness(ctx context.Contex
 	// 分组利润控制：legacy 公共入口同样装门，保证不经
 	// selectAccountWithScheduler 的调用方也无法绕过利润准入。
 	ctx = s.withOpenAIProfitControlGate(ctx, groupID)
-	selection, err := s.selectAccountWithLoadAwareness(ctx, groupID, PlatformOpenAI, sessionHash, requestedModel, excludedIDs, false, "", true)
-	return selection, normalizePromptRiskRouteSelectionError(ctx, err)
+	return selectWithPromptRiskRouteFallback(ctx, func(attemptCtx context.Context) (*AccountSelectionResult, error) {
+		return s.selectAccountWithLoadAwareness(attemptCtx, groupID, PlatformOpenAI, sessionHash, requestedModel, excludedIDs, false, "", true)
+	})
 }
 
 func (s *OpenAIGatewayService) selectAccountWithLoadAwareness(ctx context.Context, groupID *int64, platform string, sessionHash string, requestedModel string, excludedIDs map[int64]struct{}, requireCompact bool, requiredCapability OpenAIEndpointCapability, useUpstreamTokenCost bool) (*AccountSelectionResult, error) {

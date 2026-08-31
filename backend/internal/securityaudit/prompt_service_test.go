@@ -145,7 +145,7 @@ func TestPromptServiceUnavailableAuditFallsBackToHardRiskRoute(t *testing.T) {
 	now := time.Unix(2_000, 0).UTC()
 	cfg := ActiveConfig{
 		RiskControlEnabled: true, Enabled: true, BlockingEnabled: true, AllGroups: true, ConfigVersion: 7,
-		Scanners: AllScannerIDs, RiskRouteAccountIDs: []int64{21, 22},
+		Scanners: AllScannerIDs, RiskRouteAccountIDs: []int64{21, 22}, NoRouteFallbackMode: NoRouteFallbackAllow,
 		Endpoints: []ActiveEndpoint{{ID: "guard-1", Priority: 1, Enabled: true, TimeoutMS: 1000, InputLimit: 4096}},
 	}
 	repo := &fakeJobRepository{}
@@ -167,6 +167,7 @@ func TestPromptServiceUnavailableAuditFallsBackToHardRiskRoute(t *testing.T) {
 	require.Equal(t, ErrorCodeUnavailable, decision.ErrorCode)
 	require.True(t, decision.AllowNextStage)
 	require.Equal(t, []int64{21, 22}, decision.RouteAccountIDs)
+	require.False(t, decision.AllowRiskRouteFallback, "audit dependency outages must remain fail-closed even when no-route fallback is allow")
 	cfg.RiskRouteAccountIDs[0] = 999
 	require.Equal(t, []int64{21, 22}, decision.RouteAccountIDs, "the decision must own an immutable copy of the hard route pool")
 	require.NotNil(t, decision.Result)

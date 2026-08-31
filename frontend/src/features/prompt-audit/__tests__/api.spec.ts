@@ -174,6 +174,16 @@ describe('Prompt Audit API', () => {
     await promptAuditAPI.getProbeGovernanceEvent(91)
     expect(client.get).toHaveBeenLastCalledWith('/admin/prompt-audit/probe-governance/events/91')
 
+    client.get.mockResolvedValue({ data: { available: true, full_prompt: 'exact probe text', prompt_length: 16, request_id: 'req-91', source: 'probe_event' } })
+    await expect(promptAuditAPI.getProbeGovernanceEventEvidence(91)).resolves.toEqual({
+      available: true,
+      full_prompt: 'exact probe text',
+      prompt_length: 16,
+      request_id: 'req-91',
+      source: 'probe_event',
+    })
+    expect(client.get).toHaveBeenLastCalledWith('/admin/prompt-audit/probe-governance/events/91/evidence')
+
     client.post.mockResolvedValue({ data: { cleared: true } })
     await promptAuditAPI.clearProbeGovernanceEvent(91, 'false positive')
     expect(client.post).toHaveBeenCalledWith('/admin/prompt-audit/probe-governance/events/91/clear', { reason: 'false positive' })

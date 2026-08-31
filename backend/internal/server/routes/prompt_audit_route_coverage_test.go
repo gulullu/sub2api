@@ -139,6 +139,7 @@ func TestPromptAuditAdminRoutesRejectUnauthenticatedAndNonAdminRequests(t *testi
 			{http.MethodPut, "/api/v1/admin/prompt-audit/probe-governance/groups/7"},
 			{http.MethodGet, "/api/v1/admin/prompt-audit/probe-governance/groups/7/events"},
 			{http.MethodGet, "/api/v1/admin/prompt-audit/probe-governance/events/9"},
+			{http.MethodGet, "/api/v1/admin/prompt-audit/probe-governance/events/9/evidence"},
 			{http.MethodPost, "/api/v1/admin/prompt-audit/probe-governance/events/9/clear"},
 			{http.MethodGet, "/api/v1/admin/prompt-audit/probe-governance/groups/7/exemptions"},
 			{http.MethodPost, "/api/v1/admin/prompt-audit/probe-governance/groups/7/exemptions"},

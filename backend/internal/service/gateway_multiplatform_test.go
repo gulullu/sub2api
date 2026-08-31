@@ -21,10 +21,11 @@ func testConfig() *config.Config {
 
 // mockAccountRepoForPlatform 单平台测试用的 mock
 type mockAccountRepoForPlatform struct {
-	accounts         []Account
-	accountsByID     map[int64]*Account
-	listPlatformFunc func(ctx context.Context, platform string) ([]Account, error)
-	getByIDCalls     int
+	accounts          []Account
+	accountsByID      map[int64]*Account
+	listPlatformFunc  func(ctx context.Context, platform string) ([]Account, error)
+	getByIDCalls      int
+	listPlatformCalls int
 }
 
 func (m *mockAccountRepoForPlatform) GetByID(ctx context.Context, id int64) (*Account, error) {
@@ -54,6 +55,7 @@ func (m *mockAccountRepoForPlatform) ExistsByID(ctx context.Context, id int64) (
 }
 
 func (m *mockAccountRepoForPlatform) ListSchedulableByPlatform(ctx context.Context, platform string) ([]Account, error) {
+	m.listPlatformCalls++
 	if m.listPlatformFunc != nil {
 		return m.listPlatformFunc(ctx, platform)
 	}
@@ -64,6 +66,66 @@ func (m *mockAccountRepoForPlatform) ListSchedulableByPlatform(ctx context.Conte
 		}
 	}
 	return result, nil
+}
+
+func TestGatewayService_PromptRiskRouteRuntimeFallbackHonorsGroupPolicy(t *testing.T) {
+	groupID := int64(5)
+	group := &Group{ID: groupID, Platform: PlatformAnthropic, Status: StatusActive, Hydrated: true}
+	newService := func() (*GatewayService, *mockAccountRepoForPlatform) {
+		repo := &mockAccountRepoForPlatform{
+			accounts: []Account{{
+				ID: 1, Platform: PlatformAnthropic, Priority: 1,
+				Status: StatusActive, Schedulable: true,
+			}},
+			accountsByID: map[int64]*Account{},
+		}
+		repo.accountsByID[1] = &repo.accounts[0]
+		return &GatewayService{
+			accountRepo: repo,
+			groupRepo:   &mockGroupRepoForGateway{groups: map[int64]*Group{groupID: group}},
+			cache:       &mockGatewayCacheForPlatform{},
+			cfg:         testConfig(),
+		}, repo
+	}
+
+	t.Run("allow retries ordinary pool once", func(t *testing.T) {
+		svc, repo := newService()
+		ctx := context.WithValue(context.Background(), ctxkey.Group, group)
+		ctx = WithPromptRiskRoutePolicy(ctx, []int64{99}, true)
+
+		account, err := svc.SelectAccountForModelWithExclusions(ctx, &groupID, "", "claude-opus-4-6", nil)
+
+		require.NoError(t, err)
+		require.NotNil(t, account)
+		require.Equal(t, int64(1), account.ID)
+		require.Equal(t, 2, repo.listPlatformCalls)
+	})
+
+	t.Run("load-aware messages path falls back once without re-auditing", func(t *testing.T) {
+		svc, repo := newService()
+		ctx := context.WithValue(context.Background(), ctxkey.Group, group)
+		ctx = WithPromptRiskRoutePolicy(ctx, []int64{99}, true)
+
+		selection, err := svc.SelectAccountWithLoadAwareness(ctx, &groupID, "", "claude-opus-4-6", nil, "", 23)
+
+		require.NoError(t, err)
+		require.NotNil(t, selection)
+		require.NotNil(t, selection.Account)
+		require.Equal(t, int64(1), selection.Account.ID)
+		require.Equal(t, 2, repo.listPlatformCalls, "the runtime path must perform exactly one hard-pool pass and one ordinary-pool pass")
+	})
+
+	t.Run("block keeps hard-pool unavailable", func(t *testing.T) {
+		svc, repo := newService()
+		ctx := context.WithValue(context.Background(), ctxkey.Group, group)
+		ctx = WithPromptRiskRouteAccounts(ctx, []int64{99})
+
+		account, err := svc.SelectAccountForModelWithExclusions(ctx, &groupID, "", "claude-opus-4-6", nil)
+
+		require.Nil(t, account)
+		require.ErrorIs(t, err, ErrPromptRiskRouteUnavailable)
+		require.Equal(t, 1, repo.listPlatformCalls)
+	})
 }
 
 func (m *mockAccountRepoForPlatform) ListSchedulableByGroupIDAndPlatform(ctx context.Context, groupID int64, platform string) ([]Account, error) {
@@ -135,6 +197,7 @@ func (m *mockAccountRepoForPlatform) ListSchedulableByGroupID(ctx context.Contex
 	return nil, nil
 }
 func (m *mockAccountRepoForPlatform) ListSchedulableByPlatforms(ctx context.Context, platforms []string) ([]Account, error) {
+	m.listPlatformCalls++
 	var result []Account
 	platformSet := make(map[string]bool)
 	for _, p := range platforms {

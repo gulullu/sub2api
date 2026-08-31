@@ -163,6 +163,7 @@ func (g *GuardEvaluator) finishDecision(ctx context.Context, cfg ActiveConfig, s
 	if kind == DecisionFlag && matchedPromptScanner(aggregated.MatchedScanners, confidenceScoreKey) {
 		if len(cfg.RiskRouteAccountIDs) > 0 {
 			decision.RouteAccountIDs = append([]int64(nil), cfg.RiskRouteAccountIDs...)
+			decision.AllowRiskRouteFallback = cfg.AllowsNoRouteFallback()
 		} else if strings.TrimSpace(cfg.NoRouteFallbackMode) != "" && !cfg.AllowsNoRouteFallback() {
 			// A group policy explicitly chose the secure default: a high-risk
 			// finding with no destination account must not silently pass through.
@@ -243,6 +244,7 @@ func (g *GuardEvaluator) finishOversized(ctx context.Context, cfg ActiveConfig, 
 	decision := &PromptDecision{Kind: DecisionFlag, Result: result, AllowNextStage: true}
 	if len(cfg.RiskRouteAccountIDs) > 0 {
 		decision.RouteAccountIDs = append([]int64(nil), cfg.RiskRouteAccountIDs...)
+		decision.AllowRiskRouteFallback = cfg.AllowsNoRouteFallback()
 	} else if strings.TrimSpace(cfg.NoRouteFallbackMode) != "" && cfg.AllowsNoRouteFallback() {
 		// Explicit per-group allow means an oversized prompt may continue when
 		// there is no spare risk-route account. Keep the finding as a flag for

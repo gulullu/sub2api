@@ -75,10 +75,11 @@ type probeLockClaim struct {
 }
 
 type probeFamilyState struct {
-	Classification  string       `json:"classification"`
-	Verdict         string       `json:"verdict"`
-	AuditKind       DecisionKind `json:"audit_kind,omitempty"`
-	RouteAccountIDs []int64      `json:"route_account_ids,omitempty"`
+	Classification         string       `json:"classification"`
+	Verdict                string       `json:"verdict"`
+	AuditKind              DecisionKind `json:"audit_kind,omitempty"`
+	RouteAccountIDs        []int64      `json:"route_account_ids,omitempty"`
+	AllowRiskRouteFallback bool         `json:"allow_risk_route_fallback,omitempty"`
 }
 
 func promptDecisionFromProbeFamilyState(state probeFamilyState) *PromptDecision {
@@ -87,9 +88,10 @@ func promptDecisionFromProbeFamilyState(state probeFamilyState) *PromptDecision 
 		kind = DecisionAllow
 	}
 	return &PromptDecision{
-		Kind:            kind,
-		AllowNextStage:  true,
-		RouteAccountIDs: append([]int64(nil), state.RouteAccountIDs...),
+		Kind:                   kind,
+		AllowNextStage:         true,
+		RouteAccountIDs:        append([]int64(nil), state.RouteAccountIDs...),
+		AllowRiskRouteFallback: state.AllowRiskRouteFallback,
 	}
 }
 
@@ -280,10 +282,11 @@ func (s *PromptService) governProbe(ctx context.Context, req Request, confirmedV
 	// unavailable before dispatch, or reaches an unhealthy upstream. A cached
 	// flag also retains its hard-route pool for the next real forward.
 	_ = s.setProbeFamilyState(ctx, behaviorKey, probeFamilyState{
-		Classification:  ProbeClassificationHealthy,
-		Verdict:         ProbeVerdictHealthy,
-		AuditKind:       decision.Kind,
-		RouteAccountIDs: append([]int64(nil), decision.RouteAccountIDs...),
+		Classification:         ProbeClassificationHealthy,
+		Verdict:                ProbeVerdictHealthy,
+		AuditKind:              decision.Kind,
+		RouteAccountIDs:        append([]int64(nil), decision.RouteAccountIDs...),
+		AllowRiskRouteFallback: decision.AllowRiskRouteFallback,
 	}, probeFamilyHealthyTTL)
 
 	// Audit allow/flag is not health. It only authorizes one real request. The
@@ -722,8 +725,12 @@ func analyzeProbeRequest(req Request) (probeRequestShape, bool) {
 		return probeRequestShape{}, false
 	}
 	digest := sha256.Sum256([]byte("sub2api/prompt-probe-family/v1\x00" + normalized))
+	fullPrompt := FullPromptFromScanText(latest)
+	if snapshot, snapshotErr := ExtractPromptSnapshot(req); snapshotErr == nil {
+		fullPrompt = snapshot.FullPrompt
+	}
 	return probeRequestShape{
-		Fingerprint: hex.EncodeToString(digest[:]), Preview: BuildPromptPreview(latest, 96), ScanText: latest,
+		Fingerprint: hex.EncodeToString(digest[:]), Preview: BuildPromptPreview(latest, 96), ScanText: latest, FullPrompt: fullPrompt,
 		Stream: stream, MaxTokens: maxTokens, KnownHealth: known, Candidate: candidate,
 		Evidence: map[string]any{"short_single_turn": true, "tiny_output_limit": maxTokens > 0 && maxTokens <= 8,
 			"known_health_fingerprint": known, "has_tools_or_files": false},
@@ -734,15 +741,16 @@ func fallbackProbeShape(req Request) probeRequestShape {
 	snapshot, err := ExtractBlockingPromptSnapshot(req, true)
 	text := string(req.Body)
 	preview := "[content withheld]"
+	fullPrompt := BuildFullPrompt(text, DefaultFullPromptMaxRunes)
 	if err == nil {
-		text, preview = snapshot.ScanText, snapshot.RedactedPreview
+		text, preview, fullPrompt = snapshot.ScanText, snapshot.RedactedPreview, snapshot.FullPrompt
 	}
 	normalized := normalizeProbeFamilyText(text)
 	digest := sha256.Sum256([]byte("sub2api/prompt-probe-family/v1\x00" + normalized))
 	var root map[string]any
 	_ = json.Unmarshal(req.Body, &root)
 	stream, _ := root["stream"].(bool)
-	return probeRequestShape{Fingerprint: hex.EncodeToString(digest[:]), Preview: preview, ScanText: text,
+	return probeRequestShape{Fingerprint: hex.EncodeToString(digest[:]), Preview: preview, ScanText: text, FullPrompt: fullPrompt,
 		Stream: stream, MaxTokens: probeMaxTokens(root), Candidate: true, Evidence: map[string]any{"confirmed_source": true}}
 }
 
@@ -835,7 +843,10 @@ func probeConfigKey(groupID int64) string {
 	return probeRedisPrefix + "config:" + strconv.FormatInt(groupID, 10)
 }
 func probeBehaviorKey(groupID, userID, version int64, fingerprint string) string {
-	return fmt.Sprintf("%sbehavior:%d:%d:%d:%s", probeRedisPrefix, groupID, userID, version, fingerprint)
+	// v2 adds AllowRiskRouteFallback to the cached decision. Keeping the schema
+	// in the key prevents a pre-v2 healthy entry from silently defaulting that
+	// field to false and being renewed indefinitely after an upgrade.
+	return fmt.Sprintf("%sbehavior:v2:%d:%d:%d:%s", probeRedisPrefix, groupID, userID, version, fingerprint)
 }
 func probeAuditLockKey(groupID, userID, version int64, fingerprint string) string {
 	return fmt.Sprintf("%saudit-lock:%d:%d:%d:%s", probeRedisPrefix, groupID, userID, version, fingerprint)
@@ -990,6 +1001,17 @@ func (s *PromptService) GetProbeEvent(ctx context.Context, id int64) (*ProbeEven
 		return nil, infraerrors.BadRequest("prompt_probe_group_not_in_scope", "分组当前未纳入提示词审计范围")
 	}
 	return event, nil
+}
+
+func (s *PromptService) GetProbeEventEvidence(ctx context.Context, id int64) (*ProbeEventEvidence, error) {
+	if _, err := s.GetProbeEvent(ctx, id); err != nil {
+		return nil, err
+	}
+	evidence, err := s.repo.GetProbeEventEvidence(ctx, id)
+	if err != nil {
+		return nil, probeAdminError(err)
+	}
+	return evidence, nil
 }
 
 func (s *PromptService) ClearProbeEvent(ctx context.Context, id, actorID int64, reason string) (*ProbeEvent, error) {

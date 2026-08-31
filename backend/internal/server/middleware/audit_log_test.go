@@ -184,6 +184,8 @@ func TestPromptAuditCyberEvidenceReadIsAudited(t *testing.T) {
 func TestProbeGovernanceEventDetailReadIsAudited(t *testing.T) {
 	require.Equal(t, "admin.prompt_audit.probe.event_detail.read",
 		auditSensitiveReads["GET /api/v1/admin/prompt-audit/probe-governance/events/:id"])
+	require.Equal(t, "admin.prompt_audit.probe.event_evidence.read",
+		auditSensitiveReads["GET /api/v1/admin/prompt-audit/probe-governance/events/:id/evidence"])
 }
 
 func TestPasskeyLoginAuditUsesCanonicalLoginActionAndOmitsCredentialBody(t *testing.T) {

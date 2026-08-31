@@ -174,6 +174,11 @@ type PromptDecision struct {
 	// config snapshot that produced a flag decision. It is never serialized to
 	// clients or accepted from request payloads.
 	RouteAccountIDs []int64 `json:"-"`
+	// AllowRiskRouteFallback preserves the per-group "no route" policy for the
+	// runtime scheduler. When true, a genuinely exhausted hard pool may retry
+	// once through the ordinary account pool. It never permits state-affine
+	// requests to move between accounts.
+	AllowRiskRouteFallback bool `json:"-"`
 }
 
 type LegacyDecision struct {

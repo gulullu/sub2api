@@ -149,6 +149,9 @@
     :event="detail"
     :loading="detailLoading"
     :clearing-busy="clearing"
+    :prompt-evidence="detailEvidence"
+    :evidence-loading="detailEvidenceLoading"
+    :evidence-error="detailEvidenceError"
     @close="closeDetail"
     @clear="clearClassification"
     @add-exemption="forwardExemption"
@@ -170,7 +173,7 @@ import type { Column } from '@/components/common/types'
 import { useAppStore } from '@/stores/app'
 import { extractApiErrorMessage } from '@/utils/apiError'
 import promptAuditAPI from '../api'
-import type { ProbeGovernanceEvent, ProbeGovernanceEventDetail, ProbeGovernanceEventFilters, ProbeGovernancePolicy } from '../types'
+import type { ProbeGovernanceEvent, ProbeGovernanceEventDetail, ProbeGovernanceEventEvidence, ProbeGovernanceEventFilters, ProbeGovernancePolicy } from '../types'
 import ColumnSettingsDropdown from './ColumnSettingsDropdown.vue'
 import ProbeGovernanceEventDetailDialog from './ProbeGovernanceEventDetailDialog.vue'
 
@@ -199,6 +202,9 @@ const apiKeysLoading = ref(false)
 const detailOpen = ref(false)
 const detailLoading = ref(false)
 const detail = ref<ProbeGovernanceEventDetail | null>(null)
+const detailEvidence = ref<ProbeGovernanceEventEvidence | null>(null)
+const detailEvidenceLoading = ref(false)
+const detailEvidenceError = ref('')
 const clearing = ref(false)
 let userSearchSequence = 0
 let apiKeySearchSequence = 0
@@ -247,13 +253,19 @@ const configurableColumns = computed(() => columns.value.filter((column) => !['f
 const visibleColumns = computed(() => columns.value.filter((column) => !hiddenColumns.value.includes(column.key) || ['family', 'actions'].includes(column.key)))
 
 watch(() => [props.show, props.group?.group_id] as const, ([show]) => {
+  // A detail response contains administrator-only raw prompt evidence. Any
+  // dialog/group transition invalidates pending reads and releases that state,
+  // including a live switch from one valid group to another.
+  detailLoadSequence += 1
+  detailLoading.value = false
+  detailOpen.value = false
+  detail.value = null
+  detailEvidence.value = null
+  detailEvidenceLoading.value = false
+  detailEvidenceError.value = ''
   if (!show || !props.group) {
     eventLoadSequence += 1
-    detailLoadSequence += 1
     loading.value = false
-    detailLoading.value = false
-    detailOpen.value = false
-    detail.value = null
     return
   }
   reset(false)
@@ -332,6 +344,9 @@ function close() {
     detailLoading.value = false
     detailOpen.value = false
     detail.value = null
+    detailEvidence.value = null
+    detailEvidenceLoading.value = false
+    detailEvidenceError.value = ''
     emit('close')
   }
 }
@@ -390,16 +405,30 @@ async function openDetail(id: number) {
   detailOpen.value = true
   detailLoading.value = true
   detail.value = null
+  detailEvidence.value = null
+  detailEvidenceLoading.value = true
+  detailEvidenceError.value = ''
   try {
-    const result = await promptAuditAPI.getProbeGovernanceEvent(id)
+    const [result, evidenceResult] = await Promise.all([
+      promptAuditAPI.getProbeGovernanceEvent(id),
+      promptAuditAPI.getProbeGovernanceEventEvidence(id).then(
+        (value) => ({ ok: true as const, value }),
+        (errorValue: unknown) => ({ ok: false as const, errorValue }),
+      ),
+    ])
     if (sequence !== detailLoadSequence) return
     detail.value = result
+    if (evidenceResult.ok) detailEvidence.value = evidenceResult.value
+    else detailEvidenceError.value = extractApiErrorMessage(evidenceResult.errorValue, t('admin.promptAudit.probeGovernance.errors.loadEvidence'))
   } catch (caught) {
     if (sequence !== detailLoadSequence) return
     appStore.showError(extractApiErrorMessage(caught, t('admin.promptAudit.probeGovernance.errors.loadDetail')))
     detailOpen.value = false
   } finally {
-    if (sequence === detailLoadSequence) detailLoading.value = false
+    if (sequence === detailLoadSequence) {
+      detailLoading.value = false
+      detailEvidenceLoading.value = false
+    }
   }
 }
 function closeDetail() {
@@ -408,12 +437,18 @@ function closeDetail() {
   detailLoading.value = false
   detailOpen.value = false
   detail.value = null
+  detailEvidence.value = null
+  detailEvidenceLoading.value = false
+  detailEvidenceError.value = ''
 }
 function forwardAuditEvent(id: number) {
   detailLoadSequence += 1
   detailLoading.value = false
   detailOpen.value = false
   detail.value = null
+  detailEvidence.value = null
+  detailEvidenceLoading.value = false
+  detailEvidenceError.value = ''
   emit('close')
   emit('view-audit-event', id)
 }
@@ -422,6 +457,9 @@ function forwardExemption(event: ProbeGovernanceEventDetail) {
   detailLoading.value = false
   detailOpen.value = false
   detail.value = null
+  detailEvidence.value = null
+  detailEvidenceLoading.value = false
+  detailEvidenceError.value = ''
   emit('close')
   emit('add-exemption', event)
 }
@@ -434,6 +472,9 @@ async function clearClassification(id: number, reason: string) {
     detailLoading.value = false
     detailOpen.value = false
     detail.value = null
+    detailEvidence.value = null
+    detailEvidenceLoading.value = false
+    detailEvidenceError.value = ''
     await load()
   } catch (caught) { appStore.showError(extractApiErrorMessage(caught, t('admin.promptAudit.probeGovernance.errors.clearClassification'))) }
   finally { clearing.value = false }

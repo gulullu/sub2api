@@ -24,6 +24,7 @@ const mocks = vi.hoisted(() => ({
   updatePolicy: vi.fn(),
   listEvents: vi.fn(),
   getEvent: vi.fn(),
+  getEvidence: vi.fn(),
   clearEvent: vi.fn(),
   listExemptions: vi.fn(),
   createExemption: vi.fn(),
@@ -39,6 +40,7 @@ vi.mock('../api', () => ({ default: {
   updateProbeGovernancePolicy: mocks.updatePolicy,
   listProbeGovernanceEvents: mocks.listEvents,
   getProbeGovernanceEvent: mocks.getEvent,
+  getProbeGovernanceEventEvidence: mocks.getEvidence,
   clearProbeGovernanceEvent: mocks.clearEvent,
   listProbeGovernanceExemptions: mocks.listExemptions,
   createProbeGovernanceExemption: mocks.createExemption,
@@ -184,6 +186,7 @@ describe('Probe governance reliability', () => {
     mocks.searchUsers.mockResolvedValue([])
     mocks.searchApiKeys.mockResolvedValue([])
     mocks.listEvents.mockResolvedValue(page([]))
+    mocks.getEvidence.mockResolvedValue({ available: true, full_prompt: 'exact probe prompt', prompt_length: 18, request_id: 'req-1', source: 'probe_event' })
     mocks.listExemptions.mockResolvedValue(page([]))
     mocks.createExemption.mockResolvedValue(exemption(1))
     mocks.deleteExemption.mockResolvedValue({ deleted: true })
@@ -279,6 +282,31 @@ describe('Probe governance reliability', () => {
     older.resolve({ ...probeDetail(), id: 1 })
     await flushPromises()
     expect(wrapper.get('[data-test="probe-detail-id"]').text()).toBe('2')
+  })
+
+  it('clears administrator prompt evidence when switching groups', async () => {
+    mocks.listEvents.mockResolvedValue(page([probeEvent(1)]))
+    mocks.getEvent.mockResolvedValue(probeDetail())
+    const detailStub = defineComponent({
+      props: ['show', 'promptEvidence'],
+      template: '<div v-if="show" data-test="probe-detail-stub">{{ promptEvidence?.full_prompt ?? "" }}</div>',
+    })
+    const wrapper = mount(ProbeGovernanceEventsDialog, {
+      props: { show: false, group: policy(1, 'claude-max') },
+      global: { stubs: { BaseDialog: BaseDialogStub, Pagination: true, ProbeGovernanceEventDetailDialog: detailStub } },
+    })
+    await wrapper.setProps({ show: true })
+    await flushPromises()
+
+    const view = wrapper.findAll('button').find((button) => button.text() === 'common.view')
+    expect(view).toBeDefined()
+    await view!.trigger('click')
+    await flushPromises()
+    expect(wrapper.get('[data-test="probe-detail-stub"]').text()).toBe('exact probe prompt')
+
+    await wrapper.setProps({ group: policy(2, 'claude-max-ultra') })
+    await flushPromises()
+    expect(wrapper.find('[data-test="probe-detail-stub"]').exists()).toBe(false)
   })
 
   it('immediately clears remote-search loading and invalidates stale API Key results when the user changes', async () => {
@@ -381,7 +409,15 @@ describe('Probe governance reliability', () => {
 
   it('shows separate audit and governance versions in event details', () => {
     const wrapper = mount(ProbeGovernanceEventDetailDialog, {
-      props: { show: true, event: probeDetail(), loading: false, clearingBusy: false },
+      props: {
+        show: true,
+        event: probeDetail(),
+        loading: false,
+        clearingBusy: false,
+        promptEvidence: { available: true, full_prompt: 'exact probe prompt', prompt_length: 18, request_id: 'req-1', source: 'probe_event' },
+        evidenceLoading: false,
+        evidenceError: '',
+      },
       global: { stubs: { BaseDialog: BaseDialogStub } },
     })
     expect(wrapper.text()).toContain('admin.promptAudit.probeGovernance.detail.auditConfigVersion')
@@ -389,5 +425,25 @@ describe('Probe governance reliability', () => {
     expect(wrapper.text()).toContain('admin.promptAudit.probeGovernance.detail.probeConfigVersion')
     expect(wrapper.text()).toContain('v106')
     expect(wrapper.text()).not.toContain('v57000001')
+    expect(wrapper.get('[data-test="probe-full-prompt"]').text()).toBe('exact probe prompt')
+  })
+
+  it('does not render the masked metadata preview as a fake full prompt for legacy events', () => {
+    const detail = probeDetail()
+    detail.prompt_snapshot = { redacted_preview: '****************' }
+    const wrapper = mount(ProbeGovernanceEventDetailDialog, {
+      props: {
+        show: true,
+        event: detail,
+        loading: false,
+        clearingBusy: false,
+        promptEvidence: { available: false, full_prompt: '', prompt_length: 0, request_id: 'legacy', source: 'unavailable' },
+        evidenceLoading: false,
+        evidenceError: '',
+      },
+      global: { stubs: { BaseDialog: BaseDialogStub } },
+    })
+    expect(wrapper.get('[data-test="probe-prompt-evidence-unavailable"]').exists()).toBe(true)
+    expect(wrapper.text()).not.toContain('****************')
   })
 })

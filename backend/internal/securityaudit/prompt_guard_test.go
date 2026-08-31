@@ -424,12 +424,15 @@ func TestGuardEvaluatorLastChunkFailureNeverAllows(t *testing.T) {
 
 func TestGuardEvaluatorTotalInputLimitRoutesOrFailsClosedWithoutScannerCalls(t *testing.T) {
 	for _, tt := range []struct {
-		name     string
-		routeIDs []int64
-		wantKind DecisionKind
-		wantCode string
+		name         string
+		routeIDs     []int64
+		fallbackMode string
+		wantKind     DecisionKind
+		wantCode     string
+		wantFallback bool
 	}{
-		{name: "risk pool", routeIDs: []int64{21, 22}, wantKind: DecisionFlag},
+		{name: "risk pool block fallback", routeIDs: []int64{21, 22}, fallbackMode: NoRouteFallbackBlock, wantKind: DecisionFlag},
+		{name: "risk pool allow fallback", routeIDs: []int64{21, 22}, fallbackMode: NoRouteFallbackAllow, wantKind: DecisionFlag, wantFallback: true},
 		{name: "no risk pool", wantKind: DecisionBlock, wantCode: ErrorCodeInputTooLarge},
 	} {
 		t.Run(tt.name, func(t *testing.T) {
@@ -441,6 +444,7 @@ func TestGuardEvaluatorTotalInputLimitRoutesOrFailsClosedWithoutScannerCalls(t *
 			cfg := guardConfig(ActiveEndpoint{ID: "one", Enabled: true, TimeoutMS: 1000, InputLimit: 3})
 			cfg.MaxTotalInputChars = MinMaxTotalInputChars
 			cfg.RiskRouteAccountIDs = tt.routeIDs
+			cfg.NoRouteFallbackMode = tt.fallbackMode
 			text := strings.Repeat("x", MinMaxTotalInputChars+1)
 
 			decision, err := evaluator.Evaluate(context.Background(), cfg, PromptSnapshot{ScanText: text, PromptLength: len([]rune(text))})
@@ -450,6 +454,7 @@ func TestGuardEvaluatorTotalInputLimitRoutesOrFailsClosedWithoutScannerCalls(t *
 			require.Equal(t, tt.wantKind, decision.Kind)
 			require.Equal(t, tt.wantCode, decision.ErrorCode)
 			require.Equal(t, tt.routeIDs, decision.RouteAccountIDs)
+			require.Equal(t, tt.wantFallback, decision.AllowRiskRouteFallback)
 			if tt.wantKind == DecisionBlock {
 				require.Equal(t, 413, decision.BlockHTTPStatus)
 				require.False(t, decision.AllowNextStage)
@@ -567,11 +572,13 @@ func TestGuardEvaluatorFlagSharedDeadlineFailClosedAndContextCancel(t *testing.T
 		}), nil, metrics, 2, 2)
 		cfg := guardConfig(ActiveEndpoint{ID: "one", Enabled: true, TimeoutMS: 1000, InputLimit: 100})
 		cfg.RiskRouteAccountIDs = []int64{21, 22}
+		cfg.NoRouteFallbackMode = NoRouteFallbackAllow
 		decision, err := evaluator.Evaluate(context.Background(), cfg, PromptSnapshot{ScanText: "review", PromptLength: 6})
 		require.NoError(t, err)
 		require.Equal(t, DecisionFlag, decision.Kind)
 		require.True(t, decision.AllowNextStage)
 		require.Equal(t, []int64{21, 22}, decision.RouteAccountIDs)
+		require.True(t, decision.AllowRiskRouteFallback)
 		require.Equal(t, int64(1), metrics.Snapshot().Flagged)
 	})
 

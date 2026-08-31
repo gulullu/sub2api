@@ -2094,7 +2094,9 @@ func (s *OpenAIGatewayService) SelectAccountWithScheduler(
 	requiredTransport OpenAIUpstreamTransport,
 	requireCompact bool,
 ) (*AccountSelectionResult, OpenAIAccountScheduleDecision, error) {
-	return s.selectAccountWithScheduler(ctx, groupID, previousResponseID, sessionHash, requestedModel, excludedIDs, requiredTransport, "", "", requireCompact, PlatformOpenAI, false, true)
+	return selectOpenAIAccountWithPromptRiskRouteFallback(ctx, func(attemptCtx context.Context) (*AccountSelectionResult, OpenAIAccountScheduleDecision, error) {
+		return s.selectAccountWithScheduler(attemptCtx, groupID, previousResponseID, sessionHash, requestedModel, excludedIDs, requiredTransport, "", "", requireCompact, PlatformOpenAI, false, true)
+	})
 }
 
 // SelectAccountWithSchedulerForCapability 按能力要求调度账号。
@@ -2118,7 +2120,9 @@ func (s *OpenAIGatewayService) SelectAccountWithSchedulerForCapability(
 	if len(platformOverride) > 0 {
 		platform = platformOverride[0]
 	}
-	return s.selectAccountWithScheduler(ctx, groupID, previousResponseID, sessionHash, requestedModel, excludedIDs, requiredTransport, requiredCapability, "", requireCompact, platform, previousResponseCanMove, useUpstreamTokenCost)
+	return selectOpenAIAccountWithPromptRiskRouteFallback(ctx, func(attemptCtx context.Context) (*AccountSelectionResult, OpenAIAccountScheduleDecision, error) {
+		return s.selectAccountWithScheduler(attemptCtx, groupID, previousResponseID, sessionHash, requestedModel, excludedIDs, requiredTransport, requiredCapability, "", requireCompact, platform, previousResponseCanMove, useUpstreamTokenCost)
+	})
 }
 
 func (s *OpenAIGatewayService) SelectAccountWithSchedulerForImages(
@@ -2129,25 +2133,66 @@ func (s *OpenAIGatewayService) SelectAccountWithSchedulerForImages(
 	excludedIDs map[int64]struct{},
 	requiredCapability OpenAIImagesCapability,
 ) (*AccountSelectionResult, OpenAIAccountScheduleDecision, error) {
-	selection, decision, err := s.selectAccountWithScheduler(ctx, groupID, "", sessionHash, requestedModel, excludedIDs, OpenAIUpstreamTransportHTTPSSE, "", requiredCapability, false, PlatformOpenAI, false, false)
-	if err == nil && selection != nil && selection.Account != nil {
-		return selection, decision, nil
-	}
-	// 如果要求 native 能力（如指定了模型）但没有可用的 APIKey 账号，回退到 basic（OAuth 账号）
-	if requiredCapability == OpenAIImagesCapabilityNative {
-		return s.selectAccountWithScheduler(ctx, groupID, "", sessionHash, requestedModel, excludedIDs, OpenAIUpstreamTransportHTTPSSE, "", OpenAIImagesCapabilityBasic, false, PlatformOpenAI, false, false)
-	}
-	return selection, decision, err
+	return selectOpenAIAccountWithPromptRiskRouteFallback(ctx, func(attemptCtx context.Context) (*AccountSelectionResult, OpenAIAccountScheduleDecision, error) {
+		selection, decision, err := s.selectAccountWithScheduler(attemptCtx, groupID, "", sessionHash, requestedModel, excludedIDs, OpenAIUpstreamTransportHTTPSSE, "", requiredCapability, false, PlatformOpenAI, false, false)
+		if err == nil && selection != nil && selection.Account != nil {
+			return selection, decision, nil
+		}
+		// 如果要求 native 能力（如指定了模型）但没有可用的 APIKey 账号，回退到 basic（OAuth 账号）
+		if requiredCapability == OpenAIImagesCapabilityNative {
+			return s.selectAccountWithScheduler(attemptCtx, groupID, "", sessionHash, requestedModel, excludedIDs, OpenAIUpstreamTransportHTTPSSE, "", OpenAIImagesCapabilityBasic, false, PlatformOpenAI, false, false)
+		}
+		return selection, decision, err
+	})
 }
 
-// selectAccountWithScheduler wraps selectAccountWithSchedulerOnce with a
+type openAIAccountSchedulerAttempt struct {
+	selection *AccountSelectionResult
+	decision  OpenAIAccountScheduleDecision
+}
+
+func selectOpenAIAccountWithPromptRiskRouteFallback(
+	ctx context.Context,
+	selectOnce func(context.Context) (*AccountSelectionResult, OpenAIAccountScheduleDecision, error),
+) (*AccountSelectionResult, OpenAIAccountScheduleDecision, error) {
+	attempt, err := selectWithPromptRiskRouteFallback(ctx, func(attemptCtx context.Context) (openAIAccountSchedulerAttempt, error) {
+		selection, decision, selectErr := selectOnce(attemptCtx)
+		return openAIAccountSchedulerAttempt{selection: selection, decision: decision}, selectErr
+	})
+	return attempt.selection, attempt.decision, err
+}
+
+func (s *OpenAIGatewayService) selectAccountWithScheduler(
+	ctx context.Context,
+	groupID *int64,
+	previousResponseID string,
+	sessionHash string,
+	requestedModel string,
+	excludedIDs map[int64]struct{},
+	requiredTransport OpenAIUpstreamTransport,
+	requiredCapability OpenAIEndpointCapability,
+	requiredImageCapability OpenAIImagesCapability,
+	requireCompact bool,
+	platform string,
+	previousResponseCanMove bool,
+	useUpstreamTokenCost bool,
+) (*AccountSelectionResult, OpenAIAccountScheduleDecision, error) {
+	return s.selectAccountWithSchedulerWithinPromptRiskPool(
+		ctx, groupID, previousResponseID, sessionHash, requestedModel, excludedIDs,
+		requiredTransport, requiredCapability, requiredImageCapability, requireCompact,
+		platform, previousResponseCanMove, useUpstreamTokenCost,
+	)
+}
+
+// selectAccountWithSchedulerWithinPromptRiskPool wraps
+// selectAccountWithSchedulerOnce with a
 // fail-open second pass for the proxy stream circuit (#5056): when the only
 // reason no account is available is that every candidate sits behind a
 // quarantined proxy, the quarantine must degrade to a preference instead of
 // zeroing out capacity. The retry re-runs the exact same selection with the
 // quarantine checks bypassed, so healthy proxies always win the first pass
 // and quarantined ones only serve when nothing else can.
-func (s *OpenAIGatewayService) selectAccountWithScheduler(
+func (s *OpenAIGatewayService) selectAccountWithSchedulerWithinPromptRiskPool(
 	ctx context.Context,
 	groupID *int64,
 	previousResponseID string,

@@ -29,6 +29,10 @@ func (s *fakePromptProbeAdminService) GetProbeEvent(context.Context, int64) (*Pr
 	return &ProbeEvent{}, nil
 }
 
+func (s *fakePromptProbeAdminService) GetProbeEventEvidence(context.Context, int64) (*ProbeEventEvidence, error) {
+	return &ProbeEventEvidence{Available: true, FullPrompt: "exact administrator evidence", PromptLength: 28, Source: "probe_event"}, nil
+}
+
 func (s *fakePromptProbeAdminService) ClearProbeEvent(context.Context, int64, int64, string) (*ProbeEvent, error) {
 	return &ProbeEvent{}, nil
 }
@@ -52,6 +56,7 @@ func promptProbeAdminRouter() *gin.Engine {
 	router.GET("/groups", handler.ListProbeGroups)
 	router.GET("/groups/:groupID/events", handler.ListProbeEvents)
 	router.GET("/events/:id", handler.GetProbeEvent)
+	router.GET("/events/:id/evidence", handler.GetProbeEventEvidence)
 	router.GET("/groups/:groupID/exemptions", handler.ListProbeExemptions)
 	return router
 }
@@ -62,6 +67,7 @@ func TestProbeAdminSensitiveListsAndDetailAreNoStore(t *testing.T) {
 		"/groups",
 		"/groups/7/events",
 		"/events/9",
+		"/events/9/evidence",
 		"/groups/7/exemptions",
 	} {
 		recorder := promptAdminRequest(t, router, http.MethodGet, path, nil)
@@ -69,4 +75,15 @@ func TestProbeAdminSensitiveListsAndDetailAreNoStore(t *testing.T) {
 		require.Equal(t, "private, no-store, max-age=0", recorder.Header().Get("Cache-Control"), path)
 		require.Equal(t, "no-cache", recorder.Header().Get("Pragma"), path)
 	}
+}
+
+func TestProbeEventRawPromptOnlyAppearsOnEvidenceEndpoint(t *testing.T) {
+	router := promptProbeAdminRouter()
+	detail := promptAdminRequest(t, router, http.MethodGet, "/events/9", nil)
+	require.Equal(t, http.StatusOK, detail.Code)
+	require.NotContains(t, detail.Body.String(), "exact administrator evidence")
+
+	evidence := promptAdminRequest(t, router, http.MethodGet, "/events/9/evidence", nil)
+	require.Equal(t, http.StatusOK, evidence.Code)
+	require.Contains(t, evidence.Body.String(), "exact administrator evidence")
 }

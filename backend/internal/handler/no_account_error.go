@@ -21,6 +21,9 @@ const opsClientBusinessLimitedReasonLocalModelUnsupported = service.OpsClientBus
 const promptRiskRouteSafeMessage = "Service temporarily unavailable"
 
 func isPromptRiskRouteSelectionError(ctx context.Context, err error) bool {
+	if service.IsPromptRiskRouteFallbackResult(err) {
+		return false
+	}
 	return err != nil && (service.PromptRiskRouteEnabled(ctx) ||
 		errors.Is(err, service.ErrPromptRiskRouteUnavailable) ||
 		errors.Is(err, service.ErrPromptRiskRouteStateConflict))
@@ -178,7 +181,7 @@ func classifyNoAccountError(
 	// Prompt-audit risk routing is a server-side hard pool. Its exhaustion is
 	// temporary routing capacity, never evidence that the client model is
 	// globally unsupported by the group, so it must remain a retryable 503.
-	if service.PromptRiskRouteEnabled(ctx) {
+	if service.PromptRiskRouteEnabled(ctx) && !service.PromptRiskRouteFallbackAllowed(ctx) {
 		return fallback
 	}
 

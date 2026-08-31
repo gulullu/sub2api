@@ -164,9 +164,13 @@ func (r *PostgreSQLRepository) RecordProbeEvent(ctx context.Context, delta probe
 		return nil, errors.New("prompt probe event input invalid")
 	}
 	evidence, _ := json.Marshal(delta.Shape.Evidence)
+	fullPrompt := delta.Shape.FullPrompt
+	if strings.TrimSpace(fullPrompt) == "" {
+		fullPrompt = FullPromptFromScanText(delta.Shape.ScanText)
+	}
 	snapshot, _ := json.Marshal(map[string]any{
 		"redacted_preview": delta.Shape.Preview, "prompt_hash": delta.Shape.Fingerprint,
-		"prompt_length": len([]rune(delta.Shape.ScanText)), "request_id": delta.Request.RequestID,
+		"prompt_length": len([]rune(fullPrompt)), "request_id": delta.Request.RequestID,
 	})
 	var userID, keyID any
 	if delta.Request.UserID > 0 {
@@ -191,9 +195,9 @@ func (r *PostgreSQLRepository) RecordProbeEvent(ctx context.Context, delta probe
 			subject_user_id,user_id,user_email_snapshot,api_key_id,api_key_name_snapshot,model,protocol,stream,max_tokens,
 			policy_version,audit_config_version,probe_config_version,evidence,risk_source,handling,response_kind,prompt_snapshot,
 			total_count,local_response_count,audit_skipped_count,upstream_skipped_count,audit_call_count,
-			upstream_call_count,linked_audit_event_id,last_real_health_at,window_expires_at,next_real_probe_at)
+			upstream_call_count,linked_audit_event_id,last_real_health_at,window_expires_at,next_real_probe_at,full_prompt)
 		VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21,$22,$23,
-			1,$24,$25,$26,$27,$28,$29,$30,$31,$32)
+			1,$24,$25,$26,$27,$28,$29,$30,$31,$32,$34)
 		ON CONFLICT(group_id,subject_user_id,audit_config_version,probe_config_version,family_fingerprint) DO UPDATE SET
 			group_name_snapshot=EXCLUDED.group_name_snapshot,family_preview=EXCLUDED.family_preview,
 			classification=EXCLUDED.classification,verdict=EXCLUDED.verdict,
@@ -203,6 +207,7 @@ func (r *PostgreSQLRepository) RecordProbeEvent(ctx context.Context, delta probe
 			audit_config_version=EXCLUDED.audit_config_version,probe_config_version=EXCLUDED.probe_config_version,
 			evidence=EXCLUDED.evidence,risk_source=EXCLUDED.risk_source,handling=EXCLUDED.handling,
 			response_kind=EXCLUDED.response_kind,prompt_snapshot=EXCLUDED.prompt_snapshot,
+			full_prompt=EXCLUDED.full_prompt,
 			total_count=prompt_audit_probe_events.total_count+1,
 			local_response_count=prompt_audit_probe_events.local_response_count+EXCLUDED.local_response_count,
 			audit_skipped_count=prompt_audit_probe_events.audit_skipped_count+EXCLUDED.audit_skipped_count,
@@ -221,7 +226,7 @@ func (r *PostgreSQLRepository) RecordProbeEvent(ctx context.Context, delta probe
 		delta.PolicyVersion, auditConfigVersion, probeConfigVersion, evidence, delta.RiskSource, delta.Handling, delta.ResponseKind, snapshot,
 		boolInt(delta.LocalResponse), boolInt(delta.AuditSkipped), boolInt(delta.UpstreamSkipped),
 		boolInt(delta.AuditCalled), boolInt(delta.UpstreamCalled), delta.LinkedAuditEventID,
-		delta.LastRealHealthAt, delta.WindowExpiresAt, delta.NextRealProbeAt, observedAt)
+		delta.LastRealHealthAt, delta.WindowExpiresAt, delta.NextRealProbeAt, observedAt, fullPrompt)
 	event, err := scanProbeEvent(row)
 	if err != nil {
 		return nil, err
@@ -371,6 +376,40 @@ func (r *PostgreSQLRepository) GetProbeEvent(ctx context.Context, id int64) (*Pr
 		return nil, ErrProbeEventNotFound
 	}
 	return event, err
+}
+
+func (r *PostgreSQLRepository) GetProbeEventEvidence(ctx context.Context, id int64) (*ProbeEventEvidence, error) {
+	var evidence ProbeEventEvidence
+	var prompt string
+	err := r.db.QueryRowContext(ctx, `
+		SELECT COALESCE(NULLIF(e.full_prompt,''),NULLIF(a.full_prompt,''),NULLIF(request_audit.full_prompt,''),''),
+			COALESCE(e.prompt_snapshot->>'request_id',''),
+			CASE
+				WHEN e.full_prompt<>'' THEN 'probe_event'
+				WHEN COALESCE(a.full_prompt,'')<>'' THEN 'linked_audit_event'
+				WHEN COALESCE(request_audit.full_prompt,'')<>'' THEN 'request_audit_event'
+				ELSE 'unavailable'
+			END
+		FROM prompt_audit_probe_events e
+		LEFT JOIN prompt_audit_events a ON a.id=e.linked_audit_event_id
+		LEFT JOIN LATERAL (
+			SELECT p.full_prompt
+			FROM prompt_audit_events p
+			WHERE p.request_id=e.prompt_snapshot->>'request_id' AND COALESCE(p.full_prompt,'')<>''
+			ORDER BY p.id DESC
+			LIMIT 1
+		) request_audit ON COALESCE(e.full_prompt,'')='' AND COALESCE(a.full_prompt,'')=''
+		WHERE e.id=$1`, id).Scan(&prompt, &evidence.RequestID, &evidence.Source)
+	if errors.Is(err, sql.ErrNoRows) {
+		return nil, ErrProbeEventNotFound
+	}
+	if err != nil {
+		return nil, err
+	}
+	evidence.FullPrompt = prompt
+	evidence.PromptLength = len([]rune(prompt))
+	evidence.Available = strings.TrimSpace(prompt) != ""
+	return &evidence, nil
 }
 
 func (r *PostgreSQLRepository) ClearProbeEvent(ctx context.Context, id, actorID int64, reason string) (*ProbeEvent, error) {

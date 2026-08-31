@@ -25,7 +25,7 @@ func TestOpenAIGatewayService_PreviousResponseOutsidePromptRiskPoolConflicts(t *
 		openaiWSStateStore: store,
 	}
 	require.NoError(t, store.BindResponseAccount(context.Background(), groupID, "resp_risk_conflict", account.ID, time.Hour))
-	ctx := WithPromptRiskRouteAccounts(context.Background(), []int64{3})
+	ctx := WithPromptRiskRoutePolicy(context.Background(), []int64{3}, true)
 
 	selection, err := svc.SelectAccountByPreviousResponseID(ctx, &groupID, "resp_risk_conflict", "gpt-5.1", nil, false)
 

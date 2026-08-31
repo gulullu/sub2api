@@ -130,6 +130,18 @@ type ProbeEventPage struct {
 	Pages    int                 `json:"pages"`
 }
 
+// ProbeEventEvidence is intentionally returned only by the administrator-only
+// evidence endpoint. Probe event list and ordinary detail responses must never
+// include FullPrompt, because those responses are routinely kept in table and
+// dialog state for much longer than the explicit evidence review.
+type ProbeEventEvidence struct {
+	Available    bool   `json:"available"`
+	FullPrompt   string `json:"full_prompt"`
+	PromptLength int    `json:"prompt_length"`
+	RequestID    string `json:"request_id"`
+	Source       string `json:"source"`
+}
+
 type ProbeEventSummary struct {
 	ID                   int64      `json:"id"`
 	GroupID              int64      `json:"group_id"`
@@ -232,6 +244,10 @@ type probeRequestShape struct {
 	Fingerprint string
 	Preview     string
 	ScanText    string
+	// FullPrompt mirrors the unredacted administrator snapshot used by normal
+	// Prompt Audit events. ScanText remains the narrow family-classification
+	// input and must not be overloaded as the review payload.
+	FullPrompt  string
 	Stream      bool
 	MaxTokens   int
 	KnownHealth bool

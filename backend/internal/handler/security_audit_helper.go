@@ -200,7 +200,11 @@ func applySecurityAuditDecisionContext(c *gin.Context, decision securityaudit.De
 	if decision.Kind != securityaudit.DecisionFlag || decision.Prompt == nil || len(decision.Prompt.RouteAccountIDs) == 0 {
 		return
 	}
-	c.Request = c.Request.WithContext(service.WithPromptRiskRouteAccounts(c.Request.Context(), decision.Prompt.RouteAccountIDs))
+	c.Request = c.Request.WithContext(service.WithPromptRiskRoutePolicy(
+		c.Request.Context(),
+		decision.Prompt.RouteAccountIDs,
+		decision.Prompt.AllowRiskRouteFallback,
+	))
 }
 
 func logSecurityAuditStart(reqLog *zap.Logger, request securityaudit.Request, bodyBytes int, cached bool) {
