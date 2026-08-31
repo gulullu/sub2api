@@ -205,7 +205,7 @@ export default {
         unknownUser: '未知用户', unnamedApiKey: '未命名 API Key', savedSummary: '省审核 {audit} · 省上游 {upstream}', empty: '没有匹配的探针事件。',
       },
       detail: {
-        title: '探针事件详情', classification: '分类与判定', group: '审计分组', auditConfigVersion: '审计配置版本', probeConfigVersion: '治理策略版本', riskSource: '风险来源', evidence: '判定证据', preview: '安全摘要',
+        title: '探针事件详情', classification: '分类与判定', group: '审计分组', auditConfigVersion: '审计配置版本', probeConfigVersion: '治理策略版本', riskSource: '风险来源', evidence: '判定证据',
         request: '请求信息', stream: '流式请求', maxTokens: '最大输出 Token', responseKind: '响应类型', statistics: '窗口与调用统计', firstSeen: '首次出现', lastSeen: '最近出现', totalCount: '累计次数', localResponseCount: '本地应答', savedAudit: '节省审核调用', savedUpstream: '节省上游调用', actualAuditCalls: '实际审核调用', actualUpstreamCalls: '实际上游调用', lastRealHealth: '最近真实健康检测', windowExpires: '当前窗口结束', nextRealProbe: '下次真实检测',
         promptSnapshot: '提示词快照', promptSnapshotHint: '仅管理员可见，通过独立证据接口读取完整快照。请将其视为敏感数据。', promptSnapshotUnavailable: '该历史事件没有保存可还原的完整提示词快照。',
         addExemption: '加入真实监控豁免', viewAuditEvent: '查看关联审计事件', clearClassification: '重新评估', clearReason: '操作原因', clearReasonPlaceholder: '说明为什么需要清除缓存并重新评估', confirmClear: '确认清除缓存',

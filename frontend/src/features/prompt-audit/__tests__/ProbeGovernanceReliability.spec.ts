@@ -408,10 +408,12 @@ describe('Probe governance reliability', () => {
   })
 
   it('shows separate audit and governance versions in event details', () => {
+    const detail = probeDetail()
+    detail.family_preview = 'MASKED_FAMILY_PREVIEW_MUST_NOT_RENDER'
     const wrapper = mount(ProbeGovernanceEventDetailDialog, {
       props: {
         show: true,
-        event: probeDetail(),
+        event: detail,
         loading: false,
         clearingBusy: false,
         promptEvidence: { available: true, full_prompt: 'exact probe prompt', prompt_length: 18, request_id: 'req-1', source: 'probe_event' },
@@ -425,6 +427,7 @@ describe('Probe governance reliability', () => {
     expect(wrapper.text()).toContain('admin.promptAudit.probeGovernance.detail.probeConfigVersion')
     expect(wrapper.text()).toContain('v106')
     expect(wrapper.text()).not.toContain('v57000001')
+    expect(wrapper.text()).not.toContain('MASKED_FAMILY_PREVIEW_MUST_NOT_RENDER')
     expect(wrapper.get('[data-test="probe-full-prompt"]').text()).toBe('exact probe prompt')
   })
 

@@ -27,7 +27,6 @@
           <DetailItem :label="t('admin.promptAudit.probeGovernance.detail.probeConfigVersion')" :value="`v${event.probe_config_version}`" />
           <DetailItem :label="t('admin.promptAudit.probeGovernance.detail.riskSource')" :value="event.risk_source || '—'" />
           <DetailItem :label="t('admin.promptAudit.probeGovernance.detail.evidence')" :value="evidenceText" wide />
-          <DetailItem :label="t('admin.promptAudit.probeGovernance.detail.preview')" :value="event.family_preview || '—'" wide />
         </dl>
       </section>
 
