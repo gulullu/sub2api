@@ -346,15 +346,19 @@ func (s *PromptService) ListUserProfiles(ctx context.Context, filter PromptAudit
 	if s == nil || s.repo == nil {
 		return nil, errors.New("prompt audit profile repository unavailable")
 	}
+	var active ActiveConfig
+	hasActiveConfig := false
+	if s.config != nil {
+		active, hasActiveConfig = s.config.Active()
+		if hasActiveConfig {
+			filter.pinnedUserIDs = promptAuditProfileExcludedUserIDs(active, filter.GroupID)
+		}
+	}
 	pageResult, err := s.repo.ListUserProfiles(ctx, filter, page, pageSize)
 	if err != nil {
 		return nil, err
 	}
-	if s.config == nil || pageResult == nil {
-		return pageResult, nil
-	}
-	active, ok := s.config.Active()
-	if !ok {
+	if !hasActiveConfig || pageResult == nil {
 		return pageResult, nil
 	}
 	if filter.GroupID != nil {
@@ -380,6 +384,13 @@ func (s *PromptService) ListUserProfiles(ctx context.Context, filter PromptAudit
 		_, item.Excluded = excluded[item.UserID]
 	}
 	return pageResult, nil
+}
+
+func promptAuditProfileExcludedUserIDs(active ActiveConfig, groupID *int64) []int64 {
+	if groupID != nil {
+		return canonicalInt64s(active.EffectiveForGroup(groupID).ExcludedUserIDs)
+	}
+	return canonicalInt64s(active.ExcludedUserIDs)
 }
 
 func (s *PromptService) Runtime(ctx context.Context) RuntimeSnapshot {

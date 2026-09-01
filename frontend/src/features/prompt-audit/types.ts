@@ -200,6 +200,7 @@ export interface PromptAuditUserProfile {
   status: string
   deleted: boolean
   excluded: boolean
+  has_profile: boolean
   audit_jobs: number
   high_risk_jobs: number
   critical_risk_jobs: number

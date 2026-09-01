@@ -33,14 +33,46 @@ func openPromptAuditIntegrationDB(t *testing.T) *sql.DB {
 	defer cancel()
 	require.NoError(t, db.PingContext(ctx))
 	_, err = db.ExecContext(ctx, `
-		CREATE TABLE IF NOT EXISTS users (id BIGSERIAL PRIMARY KEY);
+		CREATE TABLE IF NOT EXISTS users (
+			id BIGSERIAL PRIMARY KEY,
+			username VARCHAR(255) NOT NULL DEFAULT '',
+			email VARCHAR(320) NOT NULL DEFAULT '',
+			status VARCHAR(32) NOT NULL DEFAULT 'active',
+			deleted_at TIMESTAMPTZ
+		);
 		CREATE TABLE IF NOT EXISTS groups (id BIGSERIAL PRIMARY KEY);
-		CREATE TABLE IF NOT EXISTS api_keys (id BIGSERIAL PRIMARY KEY);
+		CREATE TABLE IF NOT EXISTS api_keys (
+			id BIGSERIAL PRIMARY KEY,
+			user_id BIGINT,
+			group_id BIGINT,
+			deleted_at TIMESTAMPTZ
+		);
+		CREATE TABLE IF NOT EXISTS usage_logs (
+			id BIGSERIAL PRIMARY KEY,
+			user_id BIGINT,
+			group_id BIGINT,
+			request_type SMALLINT NOT NULL DEFAULT 0,
+			created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+		);
+		CREATE TABLE IF NOT EXISTS content_moderation_logs (
+			id BIGSERIAL PRIMARY KEY,
+			user_id BIGINT,
+			group_id BIGINT,
+			action VARCHAR(32) NOT NULL DEFAULT '',
+			created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+		);
 		CREATE TABLE IF NOT EXISTS settings (
 			key VARCHAR(255) PRIMARY KEY,
 			value TEXT NOT NULL DEFAULT '',
 			updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
 		);
+		ALTER TABLE users ADD COLUMN IF NOT EXISTS username VARCHAR(255) NOT NULL DEFAULT '';
+		ALTER TABLE users ADD COLUMN IF NOT EXISTS email VARCHAR(320) NOT NULL DEFAULT '';
+		ALTER TABLE users ADD COLUMN IF NOT EXISTS status VARCHAR(32) NOT NULL DEFAULT 'active';
+		ALTER TABLE users ADD COLUMN IF NOT EXISTS deleted_at TIMESTAMPTZ;
+		ALTER TABLE api_keys ADD COLUMN IF NOT EXISTS user_id BIGINT;
+		ALTER TABLE api_keys ADD COLUMN IF NOT EXISTS group_id BIGINT;
+		ALTER TABLE api_keys ADD COLUMN IF NOT EXISTS deleted_at TIMESTAMPTZ;
 	`)
 	require.NoError(t, err)
 	for _, name := range []string{"181_prompt_audit.sql", "182_prompt_audit_full_prompt.sql", "231_prompt_audit_group_policy_event_names.sql"} {
@@ -60,7 +92,7 @@ func openPromptAuditIntegrationDB(t *testing.T) *sql.DB {
 
 func resetPromptAuditIntegrationDB(t *testing.T, db *sql.DB) {
 	t.Helper()
-	_, err := db.Exec(`TRUNCATE TABLE prompt_audit_events, prompt_audit_jobs, api_keys, users, groups, settings RESTART IDENTITY CASCADE`)
+	_, err := db.Exec(`TRUNCATE TABLE prompt_audit_events, prompt_audit_jobs, content_moderation_logs, usage_logs, api_keys, users, groups, settings RESTART IDENTITY CASCADE`)
 	require.NoError(t, err)
 }
 
@@ -99,6 +131,64 @@ func integrationResult(decision EventDecision) *NormalizedResult {
 		result.ScannerEvidence["pii"] = "redacted evidence"
 	}
 	return result
+}
+
+func TestPromptAuditUserProfilesIncludeDirectorySearchAndPinnedUsers(t *testing.T) {
+	db := openPromptAuditIntegrationDB(t)
+	ctx := context.Background()
+	repo := NewPostgreSQLRepository(db)
+	repo.clock = fixedClock{now: time.Date(2026, time.September, 2, 12, 0, 0, 0, time.UTC)}
+
+	groupID := insertIdentity(t, db, "groups")
+	otherGroupID := insertIdentity(t, db, "groups")
+	var memberID, searchOnlyID, unrelatedID int64
+	require.NoError(t, db.QueryRowContext(ctx, `
+		INSERT INTO users(username,email,status) VALUES ('member','member@example.test','active') RETURNING id`).Scan(&memberID))
+	require.NoError(t, db.QueryRowContext(ctx, `
+		INSERT INTO users(username,email,status) VALUES ('search-only','search-only@example.test','active') RETURNING id`).Scan(&searchOnlyID))
+	require.NoError(t, db.QueryRowContext(ctx, `
+		INSERT INTO users(username,email,status) VALUES ('unrelated','unrelated@example.test','active') RETURNING id`).Scan(&unrelatedID))
+	_, err := db.ExecContext(ctx, `
+		INSERT INTO api_keys(user_id,group_id) VALUES ($1,$2),($3,$4)`, memberID, groupID, unrelatedID, otherGroupID)
+	require.NoError(t, err)
+
+	searched, err := repo.ListUserProfiles(ctx, PromptAuditUserProfileFilter{
+		Days: 7, Search: "search-only@example.test", GroupID: &groupID, MinSamples: 20,
+	}, 1, 20)
+	require.NoError(t, err)
+	require.Equal(t, int64(1), searched.Total)
+	require.Len(t, searched.Items, 1)
+	require.Equal(t, searchOnlyID, searched.Items[0].UserID, "search must not require a pre-existing key in the selected group")
+	require.False(t, searched.Items[0].HasProfile)
+
+	profileService := &PromptService{
+		repo: repo,
+		config: &fakeConfigStore{active: true, cfg: ActiveConfig{GroupPolicies: []GroupPolicy{{
+			GroupID: groupID, ExcludedUserIDs: []int64{searchOnlyID},
+		}}}},
+	}
+	pinned, err := profileService.ListUserProfiles(ctx, PromptAuditUserProfileFilter{
+		Days: 7, GroupID: &groupID, MinSamples: 20,
+	}, 1, 20)
+	require.NoError(t, err)
+	require.Equal(t, int64(1), pinned.Total)
+	require.Len(t, pinned.Items, 1)
+	require.Equal(t, searchOnlyID, pinned.Items[0].UserID, "a saved exclusion must survive the profile sample floor")
+	require.True(t, pinned.Items[0].Excluded)
+	require.False(t, pinned.Items[0].HasProfile)
+
+	directory, err := profileService.ListUserProfiles(ctx, PromptAuditUserProfileFilter{
+		Days: 7, GroupID: &groupID, MinSamples: 0,
+	}, 1, 20)
+	require.NoError(t, err)
+	require.Equal(t, int64(2), directory.Total)
+	require.Len(t, directory.Items, 2)
+	require.Equal(t, searchOnlyID, directory.Items[0].UserID, "pinned exclusions should be visible first")
+	require.True(t, directory.Items[0].Excluded)
+	require.Equal(t, memberID, directory.Items[1].UserID)
+	require.False(t, directory.Items[1].Excluded)
+	require.False(t, directory.Items[0].HasProfile)
+	require.False(t, directory.Items[1].HasProfile)
 }
 
 func TestPromptAuditMigrationSchemaAndLeakageGate(t *testing.T) {

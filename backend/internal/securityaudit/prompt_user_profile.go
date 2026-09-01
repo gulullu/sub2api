@@ -15,6 +15,11 @@ type PromptAuditUserProfileFilter struct {
 	UserID     *int64
 	GroupID    *int64
 	MinSamples int
+	// pinnedUserIDs are supplied by PromptService from the same active config
+	// snapshot used to mark rows as excluded. They are deliberately not bound
+	// from HTTP query parameters: an administrator should not have to send the
+	// potentially large exclusion list back to the server merely to see it.
+	pinnedUserIDs []int64
 }
 
 type PromptAuditUserProfile struct {
@@ -24,6 +29,7 @@ type PromptAuditUserProfile struct {
 	Status              string     `json:"status"`
 	Deleted             bool       `json:"deleted"`
 	Excluded            bool       `json:"excluded"`
+	HasProfile          bool       `json:"has_profile"`
 	AuditJobs           int64      `json:"audit_jobs"`
 	HighRiskJobs        int64      `json:"high_risk_jobs"`
 	CriticalRiskJobs    int64      `json:"critical_risk_jobs"`

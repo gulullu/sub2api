@@ -1,9 +1,10 @@
-import { mount } from '@vue/test-utils'
+import { flushPromises, mount } from '@vue/test-utils'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { defineComponent } from 'vue'
 
 import DataTable from '@/components/common/DataTable.vue'
 import Select from '@/components/common/Select.vue'
+import promptAuditAPI from '../api'
 import GroupPolicyWorkspace from '../components/GroupPolicyWorkspace.vue'
 import type { PromptAuditDraft, PromptAuditGroupPolicy } from '../types'
 import { configToDraft, createGroupPolicyFromConfig } from '../viewModel'
@@ -96,6 +97,7 @@ const scopeButtonFor = (wrapper: ReturnType<typeof mountWorkspace>, name: string
 
 describe('GroupPolicyWorkspace', () => {
   beforeEach(() => {
+    vi.restoreAllMocks()
     desktopMatchMedia()
     localStorage.clear()
   })
@@ -228,5 +230,92 @@ describe('GroupPolicyWorkspace', () => {
     expect(disabled.group_policies).toEqual(expect.arrayContaining([
       expect.objectContaining({ group_id: 2, enabled: false, blocking_enabled: false, blocking_latest_turn_only: false }),
     ]))
+  })
+
+  it('shows users without a profile and keeps profile toolbar buttons consistent with column settings', async () => {
+    const draft = makeDraft(false)
+    draft.group_policies = [{
+      ...createGroupPolicyFromConfig(draft, 2),
+      excluded_user_ids: [71],
+    }]
+    const profile = {
+      user_id: 71,
+      username: 'excluded-without-profile',
+      email: 'excluded@example.test',
+      status: 'active',
+      deleted: false,
+      excluded: true,
+      has_profile: false,
+      audit_jobs: 0,
+      high_risk_jobs: 0,
+      critical_risk_jobs: 0,
+      high_or_critical_jobs: 0,
+      system_exception_jobs: 0,
+      unclassified_jobs: 0,
+      usage_total: 0,
+      cyber_blocked_total: 0,
+      cyber_recorded_total: 0,
+      sample_total: 0,
+      audit_coverage: 0,
+      cyber_ratio: 0,
+      high_risk_ratio: 0,
+      critical_risk_ratio: 0,
+      high_or_critical_ratio: 0,
+      score: 0,
+    }
+    const emptyPage = {
+      items: [],
+      total: 0,
+      page: 1,
+      page_size: 20,
+      pages: 0,
+    }
+    vi.spyOn(promptAuditAPI, 'listUserProfiles').mockImplementation(async (filter) => filter.search ? {
+      items: [profile],
+      total: 1,
+      page: 1,
+      page_size: 20,
+      pages: 1,
+    } : emptyPage)
+    const wrapper = mountWorkspace(false, draft)
+
+    await wrapper.get('[data-test="prompt-audit-edit-group-2"]').trigger('click')
+    await wrapper.get('[data-test="prompt-audit-group-tab-profiles"]').trigger('click')
+    await flushPromises()
+
+    expect(promptAuditAPI.listUserProfiles).toHaveBeenCalledWith(expect.objectContaining({
+      group_id: 2,
+      min_samples: 0,
+    }), 1, 20)
+
+    const controls = [
+      wrapper.get('[data-test="prompt-audit-profile-column-settings"]'),
+      wrapper.get('[data-test="prompt-audit-profile-refresh"]'),
+      wrapper.get('[data-test="prompt-audit-profile-select-page"]'),
+      wrapper.get('[data-test="prompt-audit-profile-clear-page"]'),
+    ]
+    controls.forEach((control) => {
+      expect(control.classes()).toEqual(expect.arrayContaining(['btn', 'btn-secondary', 'px-2', 'md:px-3']))
+      expect(control.classes()).not.toContain('btn-sm')
+      expect(control.classes()).not.toContain('btn-ghost')
+    })
+
+    await wrapper.get('[data-test="prompt-audit-group-profile-search"]').setValue('excluded@example.test')
+    await wrapper.get('[data-test="prompt-audit-group-profile-search"]').trigger('keyup.enter')
+    await flushPromises()
+    expect(promptAuditAPI.listUserProfiles).toHaveBeenLastCalledWith(expect.objectContaining({
+      group_id: 2,
+      search: 'excluded@example.test',
+    }), 1, 20)
+    expect(wrapper.get('[data-test="prompt-audit-group-profile-table"]').text()).toContain('excluded-without-profile')
+    expect(wrapper.get('[data-test="prompt-audit-group-profile-table"]').text()).toContain('admin.promptAudit.groups.noProfile')
+    expect(wrapper.get('[data-test="prompt-audit-group-profile-table"]').text()).toContain('admin.promptAudit.groups.excluded')
+
+    await wrapper.get('[data-test="prompt-audit-profile-clear-page"]').trigger('click')
+    expect((wrapper.emitted('update:draft')?.at(-1)?.[0] as PromptAuditDraft).group_policies).toEqual(expect.arrayContaining([
+      expect.objectContaining({ group_id: 2, excluded_user_ids: [] }),
+    ]))
+    expect(wrapper.get('[data-test="prompt-audit-group-profile-table"]').text()).toContain('admin.promptAudit.groups.included')
+    expect(wrapper.get('[data-test="prompt-audit-group-profile-table"]').text()).not.toContain('admin.promptAudit.groups.excluded')
   })
 })

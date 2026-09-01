@@ -384,9 +384,9 @@
               menu-test="prompt-audit-profile-column-menu"
               @toggle="toggleProfileColumn"
             />
-            <button type="button" class="btn btn-secondary btn-sm" :disabled="profilesLoading" @click="applyProfileFilters">{{ profilesLoading ? t('common.loading') : t('admin.promptAudit.groups.profileRefresh') }}</button>
-            <button type="button" class="btn btn-secondary btn-sm" :disabled="profilesLoading || !profilePage.items.length" @click="selectProfilePage(true)">{{ t('admin.promptAudit.groups.selectPage') }}</button>
-            <button type="button" class="btn btn-ghost btn-sm" :disabled="profilesLoading || !profilePage.items.length" @click="selectProfilePage(false)">{{ t('admin.promptAudit.groups.clearPage') }}</button>
+            <button type="button" class="btn btn-secondary whitespace-nowrap px-2 md:px-3" data-test="prompt-audit-profile-refresh" :disabled="profilesLoading" @click="applyProfileFilters">{{ profilesLoading ? t('common.loading') : t('admin.promptAudit.groups.profileRefresh') }}</button>
+            <button type="button" class="btn btn-secondary whitespace-nowrap px-2 md:px-3" data-test="prompt-audit-profile-select-page" :disabled="profilesLoading || !profilePage.items.length" @click="selectProfilePage(true)">{{ t('admin.promptAudit.groups.selectPage') }}</button>
+            <button type="button" class="btn btn-secondary whitespace-nowrap px-2 md:px-3" data-test="prompt-audit-profile-clear-page" :disabled="profilesLoading || !profilePage.items.length" @click="selectProfilePage(false)">{{ t('admin.promptAudit.groups.clearPage') }}</button>
           </div>
           <div v-if="profileError" role="alert" class="rounded-lg bg-red-50 px-3 py-2 text-sm text-red-700 dark:bg-red-950/30 dark:text-red-200">{{ profileError }}</div>
           <div v-else-if="profilesLoading" class="rounded-lg border border-dashed border-gray-200 px-4 py-10 text-center text-sm text-gray-500 dark:border-dark-700 dark:text-dark-300" aria-busy="true">{{ t('admin.promptAudit.groups.loadingProfiles') }}</div>
@@ -406,12 +406,12 @@
             <template #cell-user="{ row }"><div class="min-w-0"><span class="block truncate font-medium">{{ row.username || `#${row.user_id}` }}</span><span class="block text-xs text-gray-500 dark:text-dark-400">#{{ row.user_id }}</span></div></template>
             <template #cell-email="{ row }"><span class="block max-w-[16rem] truncate text-sm" :title="row.email || undefined">{{ row.email || t('admin.promptAudit.groups.noEmail') }}</span></template>
             <template #cell-status="{ row }"><span class="badge" :class="row.deleted ? 'badge-gray' : row.status === 'active' ? 'badge-success' : 'badge-gray'">{{ row.deleted ? t('admin.promptAudit.groups.deleted') : row.status || t('admin.promptAudit.groups.unknownStatus') }}</span></template>
-            <template #cell-risk="{ row }"><span class="text-xs">{{ formatRisk(row) }}</span></template>
-            <template #cell-cyber="{ row }"><span class="text-xs">{{ formatCyber(row) }}</span></template>
-            <template #cell-samples="{ row }"><span class="tabular-nums text-xs">{{ row.sample_total }}</span></template>
-            <template #cell-coverage="{ row }"><span class="tabular-nums text-xs">{{ formatCoverage(row) }}</span></template>
+            <template #cell-risk="{ row }"><span class="text-xs" :class="{ 'text-gray-400 dark:text-dark-500': !row.has_profile }">{{ formatRisk(row) }}</span></template>
+            <template #cell-cyber="{ row }"><span class="text-xs" :class="{ 'text-gray-400 dark:text-dark-500': !row.has_profile }">{{ formatCyber(row) }}</span></template>
+            <template #cell-samples="{ row }"><span class="tabular-nums text-xs" :class="{ 'text-gray-400 dark:text-dark-500': !row.has_profile }">{{ row.has_profile ? row.sample_total : t('admin.promptAudit.groups.noProfile') }}</span></template>
+            <template #cell-coverage="{ row }"><span class="tabular-nums text-xs" :class="{ 'text-gray-400 dark:text-dark-500': !row.has_profile }">{{ formatCoverage(row) }}</span></template>
             <template #cell-recent="{ row }"><span class="text-xs text-gray-500 dark:text-dark-400">{{ formatDate(row.last_audit_at || row.last_usage_at) }}</span></template>
-            <template #cell-excluded="{ row }"><span class="badge" :class="selectedPolicy!.excluded_user_ids.includes(row.user_id) || row.excluded ? 'badge-warning' : 'badge-gray'">{{ selectedPolicy!.excluded_user_ids.includes(row.user_id) || row.excluded ? t('admin.promptAudit.groups.excluded') : t('admin.promptAudit.groups.included') }}</span></template>
+            <template #cell-excluded="{ row }"><span class="badge" :class="selectedPolicy!.excluded_user_ids.includes(row.user_id) ? 'badge-warning' : 'badge-gray'">{{ selectedPolicy!.excluded_user_ids.includes(row.user_id) ? t('admin.promptAudit.groups.excluded') : t('admin.promptAudit.groups.included') }}</span></template>
             <template #empty><div class="px-4 py-10 text-center text-sm text-gray-500 dark:text-dark-400">{{ t('admin.promptAudit.groups.noProfiles') }}</div></template>
           </DataTable>
           <div class="flex flex-wrap items-center justify-between gap-2 text-xs text-gray-500 dark:text-dark-400">
@@ -831,9 +831,15 @@ function formatDate(value?: string): string {
   if (Number.isNaN(date.getTime())) return '—'
   return new Intl.DateTimeFormat(locale.value, { dateStyle: 'medium', timeStyle: 'short' }).format(date)
 }
-function formatRisk(profile: PromptAuditUserProfile): string { return `${profile.high_or_critical_jobs}/${profile.audit_jobs} · ${(profile.high_or_critical_ratio * 100).toFixed(1)}%` }
-function formatCyber(profile: PromptAuditUserProfile): string { return `${profile.cyber_blocked_total} · ${(profile.cyber_ratio * 100).toFixed(1)}%` }
-function formatCoverage(profile: PromptAuditUserProfile): string { return `${(profile.audit_coverage * 100).toFixed(1)}%` }
+function formatRisk(profile: PromptAuditUserProfile): string {
+  return profile.has_profile ? `${profile.high_or_critical_jobs}/${profile.audit_jobs} · ${(profile.high_or_critical_ratio * 100).toFixed(1)}%` : t('admin.promptAudit.groups.noProfile')
+}
+function formatCyber(profile: PromptAuditUserProfile): string {
+  return profile.has_profile ? `${profile.cyber_blocked_total} · ${(profile.cyber_ratio * 100).toFixed(1)}%` : t('admin.promptAudit.groups.noProfile')
+}
+function formatCoverage(profile: PromptAuditUserProfile): string {
+  return profile.has_profile ? `${(profile.audit_coverage * 100).toFixed(1)}%` : t('admin.promptAudit.groups.noProfile')
+}
 
 function updateExcludedIDs(values: Array<string | number>) {
   const ids = Array.from(new Set(values.map((value) => Number(value)).filter((value) => Number.isSafeInteger(value) && value > 0))).sort((left, right) => left - right)

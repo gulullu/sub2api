@@ -41,6 +41,7 @@ describe('Prompt Audit components', () => {
         status: 'active',
         deleted: false,
         excluded: false,
+        has_profile: true,
         audit_jobs: 100,
         high_risk_jobs: 1,
         critical_risk_jobs: 0,
@@ -192,13 +193,13 @@ describe('Prompt Audit components', () => {
     vi.mocked(promptAuditAPI.listUserProfiles).mockResolvedValue({
       items: [
         {
-          user_id: 10, username: 'risk-user', email: 'risk@example.com', status: 'active', deleted: false, excluded: false,
+          user_id: 10, username: 'risk-user', email: 'risk@example.com', status: 'active', deleted: false, excluded: false, has_profile: true,
           audit_jobs: 100, high_risk_jobs: 2, critical_risk_jobs: 1, high_or_critical_jobs: 3, system_exception_jobs: 4, unclassified_jobs: 90,
           usage_total: 120, cyber_blocked_total: 0, cyber_recorded_total: 0, sample_total: 120, audit_coverage: 0.8, cyber_ratio: 0,
           high_risk_ratio: 0.02, critical_risk_ratio: 0.01, high_or_critical_ratio: 0.03, score: 3,
         },
         {
-          user_id: 11, username: 'quiet-user', email: 'quiet@example.com', status: 'active', deleted: false, excluded: false,
+          user_id: 11, username: 'quiet-user', email: 'quiet@example.com', status: 'active', deleted: false, excluded: false, has_profile: true,
           audit_jobs: 100, high_risk_jobs: 0, critical_risk_jobs: 0, high_or_critical_jobs: 0, system_exception_jobs: 2, unclassified_jobs: 98,
           usage_total: 120, cyber_blocked_total: 0, cyber_recorded_total: 0, sample_total: 120, audit_coverage: 0.8, cyber_ratio: 0,
           high_risk_ratio: 0, critical_risk_ratio: 0, high_or_critical_ratio: 0, score: 0,

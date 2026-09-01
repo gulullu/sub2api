@@ -2,12 +2,15 @@ package securityaudit
 
 import (
 	"context"
+	"crypto/sha256"
 	"database/sql"
 	"errors"
 	"fmt"
 	"strconv"
 	"strings"
 	"time"
+
+	"github.com/lib/pq"
 )
 
 const (
@@ -123,11 +126,25 @@ func promptAuditUserProfileCacheKey(filter PromptAuditUserProfileFilter, page, p
 			groupKey = strconv.FormatInt(*filter.GroupID, 10)
 		}
 	}
+	pinnedDigest := sha256.Sum256([]byte(promptAuditUserProfileIDListKey(filter.pinnedUserIDs)))
 	// The entry expiry, rather than a clock bucket, bounds staleness. Including
 	// a bucket here can make two otherwise identical requests miss when the
 	// first query happens to cross a bucket boundary while the database is
 	// still being read.
-	return fmt.Sprintf("%d|%d|%s|%q|%d|%d|%d", days, userID, groupKey, strings.ToLower(strings.TrimSpace(filter.Search)), minSamples, page, pageSize), true
+	return fmt.Sprintf("%d|%d|%s|%q|%d|%x|%d|%d", days, userID, groupKey, strings.ToLower(strings.TrimSpace(filter.Search)), minSamples, pinnedDigest, page, pageSize), true
+}
+
+func promptAuditUserProfileIDListKey(ids []int64) string {
+	canonical := canonicalInt64s(ids)
+	if len(canonical) == 0 {
+		return ""
+	}
+	var builder strings.Builder
+	for _, id := range canonical {
+		builder.WriteString(strconv.FormatInt(id, 10))
+		builder.WriteByte(',')
+	}
+	return builder.String()
 }
 
 func (r *PostgreSQLRepository) getPromptAuditUserProfileCache(key string, now time.Time) *PromptAuditUserProfilePage {
@@ -230,6 +247,7 @@ func buildUserProfileQuery(filter PromptAuditUserProfileFilter, now time.Time) (
 	jobGroupClause := ""
 	usageGroupClause := ""
 	moderationGroupClause := ""
+	directoryMembershipCondition := "TRUE"
 	if filter.GroupID != nil {
 		if *filter.GroupID == 0 {
 			// The unassigned/default bucket is persisted as SQL NULL because
@@ -237,12 +255,26 @@ func buildUserProfileQuery(filter PromptAuditUserProfileFilter, now time.Time) (
 			jobGroupClause = " AND j.group_id IS NULL"
 			usageGroupClause = " AND ul.group_id IS NULL"
 			moderationGroupClause = " AND l.group_id IS NULL"
+			directoryMembershipCondition = `EXISTS (
+			SELECT 1
+			FROM api_keys k
+			WHERE k.user_id = u.id
+				AND k.group_id IS NULL
+				AND k.deleted_at IS NULL
+		)`
 		} else if *filter.GroupID > 0 {
 			groupIdx := len(args) + 1
 			args = append(args, *filter.GroupID)
 			jobGroupClause = fmt.Sprintf(" AND j.group_id = $%d", groupIdx)
 			usageGroupClause = fmt.Sprintf(" AND ul.group_id = $%d", groupIdx)
 			moderationGroupClause = fmt.Sprintf(" AND l.group_id = $%d", groupIdx)
+			directoryMembershipCondition = fmt.Sprintf(`EXISTS (
+			SELECT 1
+			FROM api_keys k
+			WHERE k.user_id = u.id
+				AND k.group_id = $%d
+				AND k.deleted_at IS NULL
+		)`, groupIdx)
 		}
 	}
 	requestedUserID := int64(0)
@@ -269,6 +301,9 @@ func buildUserProfileQuery(filter PromptAuditUserProfileFilter, now time.Time) (
 	}
 	minSamplesIdx := len(args) + 1
 	args = append(args, minSamples)
+	pinnedUserIDs := canonicalInt64s(filter.pinnedUserIDs)
+	pinnedUserIDsIdx := len(args) + 1
+	args = append(args, pq.Array(pinnedUserIDs))
 	base := fmt.Sprintf(`
 WITH job_scope AS (
 	SELECT
@@ -352,6 +387,16 @@ WITH job_scope AS (
 		AND l.created_at >= $1
 		AND l.created_at < $2%s%s
 	GROUP BY l.user_id
+), directory_scope AS (
+	SELECT u.id AS user_id
+	FROM users u
+	WHERE u.deleted_at IS NULL
+		AND ($%d <= 0 OR $%d > 0 OR $%d <> '')
+		AND ($%d > 0 OR $%d <> '' OR (%s))
+		AND ($%d <= 0 OR u.id = $%d)
+		AND ($%d = '' OR u.username ILIKE '%%' || $%d || '%%' OR u.email ILIKE '%%' || $%d || '%%' OR ($%d > 0 AND u.id = $%d))
+), pinned_scope AS (
+	SELECT UNNEST($%d::bigint[]) AS user_id
 ), profile_rows AS (
 	SELECT
 		COALESCE(u.id, ids.user_id) AS user_id,
@@ -368,6 +413,7 @@ WITH job_scope AS (
 		COALESCE(uq.usage_total, 0) AS usage_total,
 		COALESCE(uq.cyber_blocked_total, 0) AS cyber_blocked_total,
 		COALESCE(cm.cyber_recorded_total, 0) AS cyber_recorded_total,
+		(COALESCE(j.audit_jobs, 0) > 0 OR COALESCE(uq.usage_total, 0) > 0 OR COALESCE(cm.cyber_recorded_total, 0) > 0) AS has_profile,
 		GREATEST(COALESCE(j.audit_jobs, 0), COALESCE(uq.usage_total, 0)) AS sample_total,
 		CASE WHEN COALESCE(uq.usage_total, 0) > 0 THEN COALESCE(j.audit_jobs, 0)::double precision / NULLIF(uq.usage_total, 0) ELSE 0 END AS audit_coverage,
 		CASE WHEN COALESCE(uq.usage_total, 0) > 0 THEN COALESCE(uq.cyber_blocked_total, 0)::double precision / NULLIF(uq.usage_total, 0) ELSE 0 END AS cyber_ratio,
@@ -389,6 +435,10 @@ WITH job_scope AS (
 		SELECT user_id FROM usage_stats
 		UNION
 		SELECT user_id FROM moderation_stats
+		UNION
+		SELECT user_id FROM directory_scope
+		UNION
+		SELECT user_id FROM pinned_scope
 	) ids
 	LEFT JOIN users u ON u.id = ids.user_id
 	LEFT JOIN job_snapshots js ON js.user_id = ids.user_id
@@ -397,18 +447,24 @@ WITH job_scope AS (
 	LEFT JOIN usage_stats uq ON uq.user_id = ids.user_id
 	LEFT JOIN moderation_stats cm ON cm.user_id = ids.user_id
 )
-`, jobGroupClause, jobUserClause, usageGroupClause, usageUserClause, moderationGroupClause, moderationUserClause)
+`, jobGroupClause, jobUserClause, usageGroupClause, usageUserClause, moderationGroupClause, moderationUserClause,
+		minSamplesIdx, requestedUserIDIdx, searchIdx,
+		requestedUserIDIdx, searchIdx, directoryMembershipCondition,
+		requestedUserIDIdx, requestedUserIDIdx,
+		searchIdx, searchIdx, searchIdx, searchUserIDIdx, searchUserIDIdx,
+		pinnedUserIDsIdx)
 	count := base + fmt.Sprintf(`
 SELECT COUNT(*)
 FROM profile_rows
 WHERE ($%d <= 0 OR user_id = $%d)
   AND ($%d = '' OR LOWER(username) LIKE '%%' || $%d || '%%' OR LOWER(email) LIKE '%%' || $%d || '%%' OR ($%d > 0 AND user_id = $%d))
-  AND ($%d <= 0 OR $%d > 0 OR high_or_critical_jobs > 0 OR cyber_blocked_total > 0 OR cyber_recorded_total > 0 OR audit_jobs >= $%d OR usage_total >= $%d)
-`, requestedUserIDIdx, requestedUserIDIdx, searchIdx, searchIdx, searchIdx, searchUserIDIdx, searchUserIDIdx, minSamplesIdx, requestedUserIDIdx, minSamplesIdx, minSamplesIdx)
+  AND ($%d <= 0 OR $%d > 0 OR $%d <> '' OR user_id = ANY($%d) OR high_or_critical_jobs > 0 OR cyber_blocked_total > 0 OR cyber_recorded_total > 0 OR audit_jobs >= $%d OR usage_total >= $%d)
+`, requestedUserIDIdx, requestedUserIDIdx, searchIdx, searchIdx, searchIdx, searchUserIDIdx, searchUserIDIdx, minSamplesIdx, requestedUserIDIdx, searchIdx, pinnedUserIDsIdx, minSamplesIdx, minSamplesIdx)
 	list := base + fmt.Sprintf(`
 SELECT
 	COUNT(*) OVER() AS profile_total,
 	user_id, username, email, status, deleted,
+	has_profile,
 	audit_jobs, high_risk_jobs, critical_risk_jobs, high_or_critical_jobs,
 	system_exception_jobs, unclassified_jobs,
 	usage_total, cyber_blocked_total, cyber_recorded_total,
@@ -417,9 +473,9 @@ SELECT
 FROM profile_rows
 WHERE ($%d <= 0 OR user_id = $%d)
   AND ($%d = '' OR LOWER(username) LIKE '%%' || $%d || '%%' OR LOWER(email) LIKE '%%' || $%d || '%%' OR ($%d > 0 AND user_id = $%d))
-  AND ($%d <= 0 OR $%d > 0 OR high_or_critical_jobs > 0 OR cyber_blocked_total > 0 OR cyber_recorded_total > 0 OR audit_jobs >= $%d OR usage_total >= $%d)
-ORDER BY high_or_critical_ratio DESC, critical_risk_ratio DESC, high_or_critical_jobs DESC, cyber_ratio DESC, sample_total DESC, user_id DESC
-`, requestedUserIDIdx, requestedUserIDIdx, searchIdx, searchIdx, searchIdx, searchUserIDIdx, searchUserIDIdx, minSamplesIdx, requestedUserIDIdx, minSamplesIdx, minSamplesIdx)
+  AND ($%d <= 0 OR $%d > 0 OR $%d <> '' OR user_id = ANY($%d) OR high_or_critical_jobs > 0 OR cyber_blocked_total > 0 OR cyber_recorded_total > 0 OR audit_jobs >= $%d OR usage_total >= $%d)
+ORDER BY (user_id = ANY($%d)) DESC, high_or_critical_ratio DESC, critical_risk_ratio DESC, high_or_critical_jobs DESC, cyber_ratio DESC, sample_total DESC, user_id DESC
+`, requestedUserIDIdx, requestedUserIDIdx, searchIdx, searchIdx, searchIdx, searchUserIDIdx, searchUserIDIdx, minSamplesIdx, requestedUserIDIdx, searchIdx, pinnedUserIDsIdx, minSamplesIdx, minSamplesIdx, pinnedUserIDsIdx)
 	return userProfileQuery{count: count, list: list}, args
 }
 
@@ -429,6 +485,7 @@ func scanPromptAuditUserProfile(row rowScanner, total *int64) (*PromptAuditUserP
 	if err := row.Scan(
 		total,
 		&item.UserID, &item.Username, &item.Email, &item.Status, &item.Deleted,
+		&item.HasProfile,
 		&item.AuditJobs, &item.HighRiskJobs, &item.CriticalRiskJobs, &item.HighOrCriticalJobs,
 		&item.SystemExceptionJobs, &item.UnclassifiedJobs,
 		&item.UsageTotal, &item.CyberBlockedTotal, &item.CyberRecordedTotal,

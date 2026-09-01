@@ -321,12 +321,13 @@ func TestPromptAdminUserProfilesRouteBindsQueryAndReturnsProfiles(t *testing.T) 
 			require.Equal(t, int64(88), *filter.UserID)
 			require.Equal(t, int64(77), *filter.GroupID)
 			require.Equal(t, 3, filter.MinSamples)
-			return &PromptAuditUserProfilePage{Items: []*PromptAuditUserProfile{{UserID: 1, Username: "alice"}}, Total: 1, Page: page, PageSize: pageSize, Pages: 1}, nil
+			return &PromptAuditUserProfilePage{Items: []*PromptAuditUserProfile{{UserID: 1, Username: "alice", HasProfile: true}}, Total: 1, Page: page, PageSize: pageSize, Pages: 1}, nil
 		},
 	}
 	response := promptAdminRequest(t, promptAdminRouter(service), http.MethodGet, "/admin/prompt-audit/user-profiles?days=14&page=2&page_size=10&search=alice&user_id=88&group_id=77&min_samples=3", nil)
 	require.Equal(t, http.StatusOK, response.Code)
 	require.Contains(t, response.Body.String(), `"user_id":1`)
+	require.Contains(t, response.Body.String(), `"has_profile":true`)
 }
 
 func validHandlerUpdateRequest(token string) UpdateConfigRequest {

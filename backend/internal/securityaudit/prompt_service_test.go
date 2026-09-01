@@ -141,6 +141,20 @@ func TestPromptServiceUserExclusionDoesNotChangeCyberFeedbackScope(t *testing.T)
 	require.Equal(t, allowed, excluded)
 }
 
+func TestPromptAuditProfileExcludedUserIDsFollowSelectedGroup(t *testing.T) {
+	groupID := int64(12)
+	active := ActiveConfig{
+		ExcludedUserIDs: []int64{2, 1, 2},
+		GroupPolicies: []GroupPolicy{{
+			GroupID:         groupID,
+			ExcludedUserIDs: []int64{99, 88, 99},
+		}},
+	}
+
+	require.Equal(t, []int64{1, 2}, promptAuditProfileExcludedUserIDs(active, nil))
+	require.Equal(t, []int64{88, 99}, promptAuditProfileExcludedUserIDs(active, &groupID))
+}
+
 func TestPromptServiceUnavailableAuditFallsBackToHardRiskRoute(t *testing.T) {
 	now := time.Unix(2_000, 0).UTC()
 	cfg := ActiveConfig{
