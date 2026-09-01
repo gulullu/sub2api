@@ -195,9 +195,9 @@
           <span class="text-xs text-gray-500 dark:text-dark-400">{{ selectedPolicy.group_id === null ? '—' : `#${selectedPolicy.group_id}` }}</span>
         </div>
 
-        <div class="border-b border-gray-200 dark:border-dark-700">
-          <div class="flex flex-wrap gap-1" role="tablist" :aria-label="t('admin.promptAudit.groups.editorTabsLabel')">
-            <button v-for="tab in editorTabs" :key="tab.id" type="button" role="tab" class="tab" :class="{ 'tab-active': editorTab === tab.id }" :aria-selected="editorTab === tab.id" :data-test="`prompt-audit-group-tab-${tab.id}`" @click="editorTab = tab.id">{{ tab.label }}</button>
+        <div class="border-b border-gray-200 pb-4 dark:border-dark-700">
+          <div class="tabs inline-flex w-full flex-wrap sm:w-auto" role="tablist" :aria-label="t('admin.promptAudit.groups.editorTabsLabel')" data-test="prompt-audit-group-editor-tabs">
+            <button v-for="tab in editorTabs" :key="tab.id" type="button" role="tab" class="tab flex-1 whitespace-nowrap sm:flex-none" :class="{ 'tab-active': editorTab === tab.id }" :aria-selected="editorTab === tab.id" :data-test="`prompt-audit-group-tab-${tab.id}`" @click="editorTab = tab.id">{{ tab.label }}</button>
           </div>
         </div>
 

@@ -207,6 +207,23 @@ describe('GroupPolicyWorkspace', () => {
 
     await wrapper.get('[data-test="prompt-audit-edit-group-2"]').trigger('click')
 
+    const editorTabs = wrapper.get('[data-test="prompt-audit-group-editor-tabs"]')
+    expect(editorTabs.classes()).toEqual(expect.arrayContaining(['tabs', 'inline-flex', 'w-full', 'flex-wrap', 'sm:w-auto']))
+    const policyTab = wrapper.get('[data-test="prompt-audit-group-tab-policy"]')
+    const riskTab = wrapper.get('[data-test="prompt-audit-group-tab-risk"]')
+    const groupEditorTabs = editorTabs.findAll('[role="tab"]')
+    expect(groupEditorTabs).toHaveLength(4)
+    groupEditorTabs.forEach((tab) => expect(tab.classes()).toEqual(expect.arrayContaining(['tab', 'flex-1', 'whitespace-nowrap', 'sm:flex-none'])))
+    expect(policyTab.classes()).toContain('tab-active')
+    expect(policyTab.attributes('aria-selected')).toBe('true')
+    expect(riskTab.attributes('aria-selected')).toBe('false')
+    await riskTab.trigger('click')
+    expect(riskTab.classes()).toContain('tab-active')
+    expect(riskTab.attributes('aria-selected')).toBe('true')
+    expect(policyTab.attributes('aria-selected')).toBe('false')
+    expect(groupEditorTabs.filter((tab) => tab.classes().includes('tab-active'))).toHaveLength(1)
+    await policyTab.trigger('click')
+
     expect(wrapper.find('select').exists()).toBe(false)
     const fallback = wrapper.get('[data-test="prompt-audit-group-no-route-fallback"]').getComponent(Select)
     const template = wrapper.get('[data-test="prompt-audit-group-template"]').getComponent(Select)
