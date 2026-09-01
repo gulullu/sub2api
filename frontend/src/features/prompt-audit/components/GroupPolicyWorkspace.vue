@@ -388,6 +388,36 @@
             <button type="button" class="btn btn-secondary whitespace-nowrap px-2 md:px-3" data-test="prompt-audit-profile-select-page" :disabled="profilesLoading || !profilePage.items.length" @click="selectProfilePage(true)">{{ t('admin.promptAudit.groups.selectPage') }}</button>
             <button type="button" class="btn btn-secondary whitespace-nowrap px-2 md:px-3" data-test="prompt-audit-profile-clear-page" :disabled="profilesLoading || !profilePage.items.length" @click="selectProfilePage(false)">{{ t('admin.promptAudit.groups.clearPage') }}</button>
           </div>
+          <div
+            v-if="selectedPolicy.excluded_user_ids.length"
+            class="rounded-xl border border-gray-200 bg-gray-50/70 p-3 dark:border-dark-700/60 dark:bg-dark-900/30"
+            data-test="prompt-audit-group-excluded-users"
+          >
+            <div class="flex items-center justify-between gap-3">
+              <h4 class="text-sm font-semibold text-gray-950 dark:text-white">{{ t('admin.promptAudit.groups.excludedUsersTitle') }}</h4>
+              <span class="rounded-full bg-primary-50 px-2.5 py-1 text-xs font-semibold text-primary-700 dark:bg-primary-950/40 dark:text-primary-300">
+                {{ selectedPolicy.excluded_user_ids.length }}
+              </span>
+            </div>
+            <div class="mt-3 flex max-h-32 flex-wrap gap-2 overflow-auto">
+              <button
+                v-for="item in selectedExcludedUsers"
+                :key="item.id"
+                type="button"
+                class="inline-flex max-w-full items-center gap-2 rounded-full bg-primary-50 px-3 py-1.5 text-left text-xs font-medium text-primary-800 dark:bg-primary-950/40 dark:text-primary-200"
+                :title="item.label"
+                :aria-label="t('admin.promptAudit.groups.removeExcludedUser', { identity: item.label })"
+                data-test="prompt-audit-group-excluded-user"
+                @click="removeExcludedUser(item.id)"
+              >
+                <span class="truncate">{{ item.label }}</span>
+                <span class="shrink-0 opacity-70" aria-hidden="true">×</span>
+              </button>
+            </div>
+            <p v-if="hiddenExcludedUsersCount" class="mt-2 text-xs text-gray-500 dark:text-dark-400">
+              {{ t('admin.promptAudit.groups.excludedPreviewMore', { count: hiddenExcludedUsersCount }) }}
+            </p>
+          </div>
           <div v-if="profileError" role="alert" class="rounded-lg bg-red-50 px-3 py-2 text-sm text-red-700 dark:bg-red-950/30 dark:text-red-200">{{ profileError }}</div>
           <div v-else-if="profilesLoading" class="rounded-lg border border-dashed border-gray-200 px-4 py-10 text-center text-sm text-gray-500 dark:border-dark-700 dark:text-dark-300" aria-busy="true">{{ t('admin.promptAudit.groups.loadingProfiles') }}</div>
           <DataTable
@@ -421,7 +451,6 @@
               <button type="button" class="btn btn-secondary btn-sm" :disabled="profilePage.page >= profilePage.pages || profilesLoading" @click="changeProfilePage(profilePage.page + 1)">{{ t('admin.promptAudit.groups.next') }}</button>
             </div>
           </div>
-          <p v-if="selectedPolicy.excluded_user_ids.length" class="text-xs text-amber-700 dark:text-amber-300">{{ t('admin.promptAudit.groups.excludedCount', { count: selectedPolicy.excluded_user_ids.length }) }}</p>
         </div>
       </div>
       <template #footer>
@@ -435,7 +464,7 @@
 </template>
 
 <script setup lang="ts">
-import { computed, defineComponent, h, onMounted, ref, watch } from 'vue'
+import { computed, defineComponent, h, onMounted, reactive, ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 import BaseDialog from '@/components/common/BaseDialog.vue'
 import DataTable from '@/components/common/DataTable.vue'
@@ -511,6 +540,9 @@ const profilePage = ref<PromptAuditUserProfilePage>({ items: [], total: 0, page:
 const profilesLoading = ref(false)
 const profileError = ref('')
 const profilePageSize = 20
+const profileSelectedPreviewLimit = 200
+const profileCache = reactive(new Map<number, PromptAuditUserProfile>())
+let profileRequestId = 0
 
 const editorTabs = computed(() => [
   { id: 'policy' as const, label: t('admin.promptAudit.groups.tabs.policy') },
@@ -567,6 +599,20 @@ const allProfileColumns = computed<Column[]>(() => [
 ])
 const profileConfigurableColumns = computed(() => allProfileColumns.value.filter((column) => column.key !== 'user'))
 const visibleProfileColumns = computed(() => allProfileColumns.value.filter((column) => !hiddenProfileColumns.value.includes(column.key) || column.key === 'user'))
+const selectedExcludedUsers = computed(() => {
+  const ids = [...new Set(selectedPolicy.value?.excluded_user_ids ?? [])].sort((left, right) => left - right)
+  return ids.slice(0, profileSelectedPreviewLimit).map((id) => {
+    const profile = profileCache.get(id)
+    const parts: string[] = []
+    const username = profile?.username?.trim()
+    const email = profile?.email?.trim()
+    if (username && username !== `#${id}`) parts.push(username)
+    if (email) parts.push(email)
+    parts.push(`#${id}`)
+    return { id, label: parts.join(' · ') }
+  })
+})
+const hiddenExcludedUsersCount = computed(() => Math.max(0, (selectedPolicy.value?.excluded_user_ids.length ?? 0) - profileSelectedPreviewLimit))
 
 function groupKey(groupID: number | null): string { return groupID === null ? 'default' : String(groupID) }
 function storedPolicyFor(groupID: number | null): PromptAuditGroupPolicy | undefined {
@@ -775,14 +821,18 @@ function toggleGroupScope(groupID: number) {
   patchDraft({ group_ids: [...ids].sort((left, right) => left - right) })
 }
 function openEditor(row: GroupRow) {
+  profileRequestId += 1
   selectedPolicy.value = cloneData(row.policy)
   editorTab.value = 'policy'
   accountSearch.value = ''
   profileSearch.value = ''
   profileError.value = ''
+  profileCache.clear()
   profilePage.value = { items: [], total: 0, page: 1, page_size: profilePageSize, pages: 0 }
 }
 function closeEditor() {
+  profileRequestId += 1
+  profilesLoading.value = false
   selectedPolicy.value = null
   editorTab.value = 'policy'
 }
@@ -845,6 +895,10 @@ function updateExcludedIDs(values: Array<string | number>) {
   const ids = Array.from(new Set(values.map((value) => Number(value)).filter((value) => Number.isSafeInteger(value) && value > 0))).sort((left, right) => left - right)
   patchPolicy({ excluded_user_ids: ids })
 }
+function removeExcludedUser(id: number) {
+  if (!selectedPolicy.value) return
+  updateExcludedIDs(selectedPolicy.value.excluded_user_ids.filter((userID) => userID !== id))
+}
 function selectProfilePage(selected: boolean) {
   if (!selectedPolicy.value) return
   const pageIDs = profilePage.value.items.map((profile) => profile.user_id)
@@ -854,10 +908,13 @@ function selectProfilePage(selected: boolean) {
 }
 async function loadProfiles() {
   if (!selectedPolicy.value || editorTab.value !== 'profiles') return
+  const requestId = ++profileRequestId
+  const requestedGroupKey = groupKey(selectedPolicy.value.group_id)
+  const requestedPage = profilePage.value.page
   profilesLoading.value = true
   profileError.value = ''
   try {
-    profilePage.value = await promptAuditAPI.listUserProfiles({
+    const result = await promptAuditAPI.listUserProfiles({
       days: boundedNumber(String(profileDays.value), 1, 180, 7),
       search: profileSearch.value.trim(),
       min_samples: 0,
@@ -865,10 +922,16 @@ async function loadProfiles() {
         // omitting group_id would query every group and make exclusions look
         // unrelated to the row currently being edited.
         group_id: selectedPolicy.value.group_id ?? 0,
-    }, profilePage.value.page, profilePageSize)
+    }, requestedPage, profilePageSize)
+    if (requestId !== profileRequestId || editorTab.value !== 'profiles' || groupKey(selectedPolicy.value?.group_id ?? null) !== requestedGroupKey) return
+    profilePage.value = result
+    for (const profile of result.items ?? []) profileCache.set(profile.user_id, profile)
   } catch (error) {
+    if (requestId !== profileRequestId || editorTab.value !== 'profiles' || groupKey(selectedPolicy.value?.group_id ?? null) !== requestedGroupKey) return
     profileError.value = error instanceof Error ? error.message : t('admin.promptAudit.groups.profileLoadError')
-  } finally { profilesLoading.value = false }
+  } finally {
+    if (requestId === profileRequestId) profilesLoading.value = false
+  }
 }
 function applyProfileFilters() {
   profilePage.value = { ...profilePage.value, page: 1 }
@@ -879,7 +942,13 @@ function changeProfilePage(page: number) {
   void loadProfiles()
 }
 
-watch(editorTab, () => { if (editorTab.value === 'profiles') void loadProfiles() })
+watch(editorTab, () => {
+  if (editorTab.value === 'profiles') void loadProfiles()
+  else {
+    profileRequestId += 1
+    profilesLoading.value = false
+  }
+})
 watch(() => selectedPolicy.value?.group_id, () => { if (editorTab.value === 'profiles') void loadProfiles() })
 onMounted(loadColumns)
 
