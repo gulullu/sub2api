@@ -570,11 +570,11 @@ func TestPassthroughLifecycle_ResponsesLiteFirstFramePinsParallelToolCalls(t *te
 	controlCtx, cancelControl := context.WithCancelCause(context.Background())
 	defer cancelControl(context.Canceled)
 	upstream := newStagedPassthroughConn()
-	upstream.Send(`{"type":"response.completed","response":{"id":"resp_lite","model":"gpt-5.1","usage":{"input_tokens":1,"output_tokens":1}}}`)
+	upstream.Send(`{"type":"response.completed","response":{"id":"resp_lite","model":"gpt-4.1","usage":{"input_tokens":1,"output_tokens":1}}}`)
 	server, serverErr := startPassthroughLifecycleServer(t, controlCtx, newPassthroughLifecycleService(passthroughLifecycleConfig(), upstream), passthroughLifecycleAccount())
 	defer server.Close()
 	clientConn := dialPassthroughLifecycleClientWithPayload(t, server, `{
-		"type":"response.create","model":"gpt-5.1","stream":false,
+		"type":"response.create","model":"gpt-4.1","stream":false,
 		"parallel_tool_calls":true,
 		"client_metadata":{"ws_request_header_x_openai_internal_codex_responses_lite":"true"}
 	}`)
@@ -582,6 +582,7 @@ func TestPassthroughLifecycle_ResponsesLiteFirstFramePinsParallelToolCalls(t *te
 
 	upstreamBody := requirePassthroughUpstreamWrite(t, upstream, 3*time.Second)
 	require.Equal(t, gjson.False, gjson.GetBytes(upstreamBody, "parallel_tool_calls").Type, string(upstreamBody))
+	require.Equal(t, "true", gjson.GetBytes(upstreamBody, "client_metadata."+responsesLiteWSMetadataKey).String(), string(upstreamBody))
 
 	event, err := readPassthroughLifecycleFrame(t, clientConn, 3*time.Second)
 	require.NoError(t, err)

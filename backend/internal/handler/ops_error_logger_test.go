@@ -1385,7 +1385,7 @@ func TestClassifyOpsClientBusinessLimitedMarkerExcludesCustomPolicyDenialFromSLA
 	require.Equal(t, "client_request", errorSource)
 }
 
-func TestClassifyOpsLocalModelUnsupportedMarkerExcludedFromSLAAsRequestError(t *testing.T) {
+func TestClassifyOpsLocalModelUnsupportedMarkerExcludedFromSLAAsRoutingError(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 	rec := httptest.NewRecorder()
 	c, _ := gin.CreateTestContext(rec)
@@ -1400,14 +1400,14 @@ func TestClassifyOpsLocalModelUnsupportedMarkerExcludedFromSLAAsRequestError(t *
 		http.StatusNotFound,
 	)
 
-	require.Equal(t, "api_error", errType)
-	require.Equal(t, "request", phase)
+	require.Equal(t, "model_not_found", errType)
+	require.Equal(t, "routing", phase)
 	require.True(t, isBusinessLimited)
-	require.Equal(t, "client", errorOwner)
-	require.Equal(t, "client_request", errorSource)
+	require.Equal(t, "platform", errorOwner)
+	require.Equal(t, "gateway", errorSource)
 }
 
-func TestClassifyOpsUpstreamContextOverridesLocalModelUnsupportedMarker(t *testing.T) {
+func TestClassifyOpsLocalModelUnsupportedMarkerOverridesStaleUpstreamContext(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 	rec := httptest.NewRecorder()
 	c, _ := gin.CreateTestContext(rec)
@@ -1423,10 +1423,10 @@ func TestClassifyOpsUpstreamContextOverridesLocalModelUnsupportedMarker(t *testi
 		http.StatusNotFound,
 	)
 
-	require.Equal(t, "upstream", phase)
-	require.False(t, isBusinessLimited, "a local marker must never hide an actual upstream failure from SLA")
-	require.Equal(t, "provider", errorOwner)
-	require.Equal(t, "upstream_http", errorSource)
+	require.Equal(t, "routing", phase)
+	require.True(t, isBusinessLimited, "a final local model diagnosis must suppress stale upstream-attempt failures")
+	require.Equal(t, "platform", errorOwner)
+	require.Equal(t, "gateway", errorSource)
 }
 
 func TestClassifyOpsOtherErrorsStillCountForSLA(t *testing.T) {

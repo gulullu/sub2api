@@ -751,7 +751,7 @@ func TestOpenAIGatewayService_ProxyResponsesWebSocketFromClient_ResponsesLiteSpa
 		"stream":false,
 		"previous_response_id":"resp_spark_lite_1",
 		"tools":[
-			{"type":"namespace","name":"collaboration","tools":[{"type":"function","name":"send_message"}]},
+			{"type":"namespace","name":"collaboration","tools":[{"type":"function","name":"spawn_agent"}]},
 			{"type":"tool_search","execution":"client"}
 		],
 		"tool_choice":"required",
@@ -961,7 +961,7 @@ func TestOpenAIGatewayService_ProxyResponsesWebSocketFromClient_CodexImageBridge
 	writeCtx, cancelWrite = context.WithTimeout(context.Background(), 3*time.Second)
 	err = clientConn.Write(writeCtx, coderws.MessageText, []byte(`{
 		"type":"response.create",
-		"model":"gpt-5.5",
+		"model":"gpt-5.6-terra",
 		"parallel_tool_calls":"false",
 		"client_metadata":{"ws_request_header_x_openai_internal_codex_responses_lite":"true"},
 		"tools":[{"type":"function","name":"shell"}]
