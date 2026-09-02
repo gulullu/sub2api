@@ -141,8 +141,8 @@ func promptAuditUserProfileIDListKey(ids []int64) string {
 	}
 	var builder strings.Builder
 	for _, id := range canonical {
-		builder.WriteString(strconv.FormatInt(id, 10))
-		builder.WriteByte(',')
+		_, _ = builder.WriteString(strconv.FormatInt(id, 10))
+		_ = builder.WriteByte(',')
 	}
 	return builder.String()
 }

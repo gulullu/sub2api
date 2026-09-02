@@ -631,8 +631,8 @@ type ForwardResult struct {
 	// UpstreamCompleted proves that the real upstream reached a successful
 	// protocol terminal (or that a complete non-stream response was parsed).
 	// Synthetic downstream finalization and a bare EOF must never set it.
-	UpstreamCompleted           bool
-	ReasoningEffort             *string
+	UpstreamCompleted bool
+	ReasoningEffort   *string
 	// RequestedReasoningEffort is the client-requested effort before mapping.
 	RequestedReasoningEffort *string
 	// ServiceTier records the tier requested by the client. OpenAI uses

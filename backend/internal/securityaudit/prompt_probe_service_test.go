@@ -58,11 +58,12 @@ func (s *probeMatrixScanner) Scan(context.Context, ActiveEndpoint, string, []str
 	decision := EventPass
 	risk := RiskLow
 	safety := "Safe"
-	if action == ActionWarn {
+	switch action {
+	case ActionWarn:
 		decision = EventFlag
 		risk = RiskMedium
 		safety = "Controversial"
-	} else if action == ActionBlock {
+	case ActionBlock:
 		decision = EventCritical
 		risk = RiskCritical
 		safety = "Unsafe"

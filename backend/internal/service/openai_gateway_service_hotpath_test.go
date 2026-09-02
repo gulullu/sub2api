@@ -87,11 +87,11 @@ func TestOpenAIRequestView_ApplyPatches(t *testing.T) {
 
 func TestOpenAIRequestView_ApplyPatchesDeletesEveryPreviousResponseID(t *testing.T) {
 	var bodyBuilder strings.Builder
-	bodyBuilder.WriteString(`{"previous_response_id":null,"model":"gpt-5","previous\u005fresponse\u005fid":"resp_escaped","metadata":{"previous_response_id":"keep_nested"}`)
+	_, _ = bodyBuilder.WriteString(`{"previous_response_id":null,"model":"gpt-5","previous\u005fresponse\u005fid":"resp_escaped","metadata":{"previous_response_id":"keep_nested"}`)
 	for range 128 {
-		bodyBuilder.WriteString(`,"previous_response_id":"resp_duplicate"`)
+		_, _ = bodyBuilder.WriteString(`,"previous_response_id":"resp_duplicate"`)
 	}
-	bodyBuilder.WriteByte('}')
+	_ = bodyBuilder.WriteByte('}')
 	body := []byte(bodyBuilder.String())
 	view := newOpenAIRequestView(body)
 	view.MarkPatchDelete("previous_response_id")

@@ -18,12 +18,6 @@ type scriptedScanner struct {
 	entered chan<- struct{}
 }
 
-func (s *scriptedScanner) callIDs() []string {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	return append([]string(nil), s.calls...)
-}
-
 func (s *scriptedScanner) Scan(ctx context.Context, endpoint ActiveEndpoint, _ string, _ []string) (*NormalizedResult, error) {
 	s.mu.Lock()
 	s.calls = append(s.calls, endpoint.ID)

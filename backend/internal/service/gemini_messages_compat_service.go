@@ -2392,10 +2392,6 @@ func (s *GeminiMessagesCompatService) handleStreamingResponse(c *gin.Context, re
 	}, nil
 }
 
-func writeSSE(w io.Writer, event string, data any) {
-	_ = writeSSEChecked(w, event, data)
-}
-
 func writeSSEChecked(w io.Writer, event string, data any) error {
 	if event != "" {
 		if _, err := fmt.Fprintf(w, "event: %s\n", event); err != nil {

@@ -52,7 +52,10 @@ func (c *promptDecisionCache) get(key string, now time.Time) (*NormalizedResult,
 	if !ok {
 		return nil, false
 	}
-	entry := element.Value.(*promptDecisionCacheEntry)
+	entry, ok := element.Value.(*promptDecisionCacheEntry)
+	if !ok {
+		panic("securityaudit: invalid prompt decision cache entry")
+	}
 	if !now.Before(entry.expiresAt) {
 		c.remove(element)
 		return nil, false
@@ -68,7 +71,10 @@ func (c *promptDecisionCache) put(key string, result *NormalizedResult, now time
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	if element, exists := c.entries[key]; exists {
-		entry := element.Value.(*promptDecisionCacheEntry)
+		entry, ok := element.Value.(*promptDecisionCacheEntry)
+		if !ok {
+			panic("securityaudit: invalid prompt decision cache entry")
+		}
 		entry.result = cloneNormalizedResult(result)
 		entry.expiresAt = now.Add(c.ttl)
 		c.lru.MoveToFront(element)

@@ -758,7 +758,7 @@ func normalizeProbeFamilyText(value string) string {
 	var b strings.Builder
 	for _, r := range strings.ToLower(strings.TrimSpace(value)) {
 		if unicode.IsLetter(r) || unicode.IsDigit(r) {
-			b.WriteRune(r)
+			_, _ = b.WriteRune(r)
 		}
 	}
 	return b.String()
@@ -1116,10 +1116,4 @@ func probeAdminError(err error) error {
 	default:
 		return err
 	}
-}
-func valueOrZero(value *int64) int64 {
-	if value == nil {
-		return 0
-	}
-	return *value
 }

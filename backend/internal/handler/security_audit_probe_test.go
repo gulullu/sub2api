@@ -104,7 +104,9 @@ func assertProbeResponsesSSELifecycle(t *testing.T, body string) {
 		require.NoError(t, json.Unmarshal([]byte(strings.TrimPrefix(lines[1], "data: ")), &event))
 		require.Equal(t, float64(index), event["sequence_number"])
 		if index == 0 {
-			created = event["response"].(map[string]any)
+			var ok bool
+			created, ok = event["response"].(map[string]any)
+			require.True(t, ok)
 		}
 		if want[index] == "response.content_part.added" || want[index] == "response.content_part.done" {
 			part, ok := event["part"].(map[string]any)
@@ -114,7 +116,9 @@ func assertProbeResponsesSSELifecycle(t *testing.T, body string) {
 			require.Contains(t, part, "logprobs")
 		}
 		if index == len(frames)-1 {
-			completed = event["response"].(map[string]any)
+			var ok bool
+			completed, ok = event["response"].(map[string]any)
+			require.True(t, ok)
 		}
 	}
 	require.Equal(t, "in_progress", created["status"])

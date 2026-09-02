@@ -979,20 +979,20 @@ func stripAllTopLevelOpenAIPreviousResponseIDs(body []byte) ([]byte, bool, error
 
 	var normalized bytes.Buffer
 	normalized.Grow(len(body))
-	normalized.WriteByte('{')
+	_ = normalized.WriteByte('{')
 	for index, member := range members {
 		if index > 0 {
-			normalized.WriteByte(',')
+			_ = normalized.WriteByte(',')
 		}
 		encodedKey, marshalErr := json.Marshal(member.key)
 		if marshalErr != nil {
 			return body, false, marshalErr
 		}
-		normalized.Write(encodedKey)
-		normalized.WriteByte(':')
-		normalized.Write(member.value)
+		_, _ = normalized.Write(encodedKey)
+		_ = normalized.WriteByte(':')
+		_, _ = normalized.Write(member.value)
 	}
-	normalized.WriteByte('}')
+	_ = normalized.WriteByte('}')
 	return normalized.Bytes(), true, nil
 }
 
