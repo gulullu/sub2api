@@ -174,8 +174,10 @@ func TestNormalizeOpenAIResponsesLiteWSPayloadForFinalModel(t *testing.T) {
 
 	apiKeyUnknown, changed, err := normalizeOpenAIResponsesLiteWSPayloadForModel(apiKey, basePayload, "custom-model")
 	require.NoError(t, err)
-	require.False(t, changed)
-	require.Equal(t, string(basePayload), string(apiKeyUnknown))
+	require.True(t, changed)
+	require.Equal(t, gjson.False, gjson.GetBytes(apiKeyUnknown, "parallel_tool_calls").Type)
+	require.Equal(t, "true", gjson.GetBytes(apiKeyUnknown, markerPath).String())
+	require.Equal(t, "collaboration", gjson.GetBytes(apiKeyUnknown, `tools.#(type=="namespace").name`).String())
 }
 
 func TestOpenAIHTTPBuildersNormalizeRequiredClientToolSearchAndStripKnownNonLiteAPIKeyHeader(t *testing.T) {

@@ -125,6 +125,8 @@ func TestOpenAIStreamingPassthroughFlushesAtCompleteEventBoundaries(t *testing.T
 	}, writer.flushBodyLengths)
 	require.Equal(t, 3, result.usage.InputTokens)
 	require.Equal(t, 2, result.usage.OutputTokens)
+	require.True(t, result.upstreamCompleted)
+	require.False(t, result.clientDisconnect)
 }
 
 func TestOpenAIStreamingPassthroughKeepsPreamblePendingUntilFirstOutputBoundary(t *testing.T) {
@@ -158,6 +160,8 @@ func TestOpenAIStreamingPassthroughFlushesTerminalEventAtEOFWithoutBlankLine(t *
 	require.Equal(t, []int{len(wantBody)}, writer.flushBodyLengths)
 	require.Equal(t, 5, result.usage.InputTokens)
 	require.Equal(t, 2, result.usage.OutputTokens)
+	require.True(t, result.upstreamCompleted)
+	require.False(t, result.clientDisconnect)
 }
 
 func TestOpenAIStreamingPassthroughFailedBeforeOutputCanStillFailOverWithoutFlush(t *testing.T) {
@@ -189,6 +193,8 @@ func TestOpenAIStreamingPassthroughNonRetryableFailedBeforeOutputFlushesAtBounda
 	require.Equal(t, []int{len(upstream)}, writer.flushBodyLengths)
 	require.Equal(t, 6, result.usage.InputTokens)
 	require.Zero(t, result.usage.OutputTokens)
+	require.False(t, result.upstreamCompleted)
+	require.False(t, result.clientDisconnect)
 }
 
 func TestOpenAIStreamingPassthroughBareErrorTerminatesBeforeDone(t *testing.T) {
@@ -210,6 +216,8 @@ func TestOpenAIStreamingPassthroughBareErrorTerminatesBeforeDone(t *testing.T) {
 	require.Equal(t, []int{len(body)}, writer.flushBodyLengths)
 	require.Equal(t, 6, result.usage.InputTokens)
 	require.Zero(t, result.usage.OutputTokens)
+	require.False(t, result.upstreamCompleted)
+	require.False(t, result.clientDisconnect)
 }
 
 func TestOpenAIStreamingPassthroughBareErrorDrainsAuthoritativeFailedUsage(t *testing.T) {
@@ -231,6 +239,8 @@ func TestOpenAIStreamingPassthroughBareErrorDrainsAuthoritativeFailedUsage(t *te
 	require.Equal(t, []int{len(body)}, writer.flushBodyLengths)
 	require.Equal(t, 9, result.usage.InputTokens)
 	require.Equal(t, 2, result.usage.OutputTokens)
+	require.False(t, result.upstreamCompleted)
+	require.False(t, result.clientDisconnect)
 }
 
 func TestOpenAIStreamingPassthroughFailedAfterOutputFlushesAtBoundaryAndKeepsUsage(t *testing.T) {
@@ -268,18 +278,23 @@ func TestOpenAIStreamingPassthroughClientDisconnectStillDrainsTerminalUsage(t *t
 	require.Equal(t, 1, writer.failedWrites)
 	require.Equal(t, 11, result.usage.InputTokens)
 	require.Equal(t, 4, result.usage.OutputTokens)
+	require.True(t, result.upstreamCompleted)
+	require.True(t, result.clientDisconnect)
 }
 
 func TestOpenAIStreamingPassthroughScannerErrorFlushesWrittenResidual(t *testing.T) {
 	upstream := []byte(`data: {"type":"response.output_text.delta","delta":"partial"}`)
 	readErr := errors.New("upstream read failed")
 
-	_, recorder, writer, err := runPassthroughFlushTest(t, &passthroughFlushTestErrorBody{
+	result, recorder, writer, err := runPassthroughFlushTest(t, &passthroughFlushTestErrorBody{
 		payload: upstream,
 		err:     readErr,
 	}, -1)
 
 	require.ErrorIs(t, err, readErr)
+	require.NotNil(t, result)
+	require.False(t, result.upstreamCompleted)
+	require.False(t, result.clientDisconnect)
 	wantBody := string(upstream) + "\n"
 	require.Equal(t, wantBody, recorder.Body.String())
 	require.Equal(t, []int{len(wantBody)}, writer.flushBodyLengths)

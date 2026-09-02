@@ -116,10 +116,7 @@ func normalizeOpenAIResponsesLiteWSPayloadForModel(account *Account, payload []b
 		}
 		return stripped, true, nil
 	}
-	if account.IsOpenAIOAuth() {
-		return normalizeOpenAIResponsesLiteToolsPayload(payload)
-	}
-	return payload, false, nil
+	return normalizeOpenAIResponsesLitePayloadForAccount(payload, account)
 }
 
 // normalizeOpenAIRequiredClientToolSearchChoice handles an upstream validation

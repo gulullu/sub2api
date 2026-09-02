@@ -190,6 +190,75 @@ func TestGatewayService_AnthropicAPIKeyPassthrough_ForwardStreamPreservesBodyAnd
 	require.Empty(t, rec.Header().Get("Set-Cookie"), "响应头应经过安全过滤")
 }
 
+func TestGatewayService_AnthropicAPIKeyPassthrough_AccountBetaOverrideKeepsWireBodyAndParsedInSync(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+
+	tests := []struct {
+		name        string
+		inboundBeta string
+		accountBeta string
+		wantFields  bool
+	}{
+		{
+			name:        "override strips capabilities present only in inbound beta",
+			inboundBeta: "context-management-2025-06-27,server-side-fallback-2026-07-01",
+			accountBeta: "interleaved-thinking-2025-05-14",
+			wantFields:  false,
+		},
+		{
+			name:        "override keeps capabilities absent from inbound beta",
+			inboundBeta: "interleaved-thinking-2025-05-14",
+			accountBeta: "context-management-2025-06-27,server-side-fallback-2026-07-01",
+			wantFields:  true,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			rec := httptest.NewRecorder()
+			c, _ := gin.CreateTestContext(rec)
+			c.Request = httptest.NewRequest(http.MethodPost, "/v1/messages", nil)
+			c.Request.Header.Set("Anthropic-Beta", tt.inboundBeta)
+
+			body := []byte(`{"model":"claude-fable-5-1","max_tokens":32,"context_management":{"edits":[{"type":"clear_thinking_20251015"}]},"fallbacks":"default","fallback_credit_token":"tok_123","messages":[{"role":"user","content":"hello"}]}`)
+			parsed, err := ParseGatewayRequest(NewRequestBodyRef(body), PlatformAnthropic)
+			require.NoError(t, err)
+
+			upstreamJSON := `{"id":"msg_beta_override","type":"message","role":"assistant","model":"claude-fable-5-1","content":[{"type":"text","text":"ok"}],"stop_reason":"end_turn","usage":{"input_tokens":1,"output_tokens":1}}`
+			upstream := &anthropicHTTPUpstreamRecorder{resp: &http.Response{
+				StatusCode: http.StatusOK,
+				Header:     http.Header{"Content-Type": []string{"application/json"}},
+				Body:       io.NopCloser(strings.NewReader(upstreamJSON)),
+			}}
+			svc := &GatewayService{
+				cfg:              &config.Config{},
+				httpUpstream:     upstream,
+				rateLimitService: &RateLimitService{},
+			}
+			account := newAnthropicAPIKeyAccountForTest()
+			account.Credentials[credKeyHeaderOverrideEnabled] = true
+			account.Credentials[credKeyHeaderOverrides] = map[string]any{
+				"anthropic-beta": tt.accountBeta,
+			}
+
+			result, err := svc.Forward(context.Background(), c, account, parsed)
+			require.NoError(t, err)
+			require.NotNil(t, result)
+			require.Equal(t, tt.accountBeta, getHeaderRaw(upstream.lastReq.Header, "anthropic-beta"),
+				"账号覆写值必须成为最终上游 beta header")
+			require.Equal(t, upstream.lastBody, parsed.Body.Bytes(),
+				"实际发送的 wire body 与 ParsedRequest 当前视图必须逐字节一致")
+			require.JSONEq(t, `[{"role":"user","content":"hello"}]`, string(parsed.MessagesRaw()),
+				"账号 beta 覆写导致 body 改写后，ParsedRequest 的字段范围也必须同步刷新")
+
+			for _, path := range []string{"context_management", "fallbacks", "fallback_credit_token"} {
+				require.Equalf(t, tt.wantFields, gjson.GetBytes(upstream.lastBody, path).Exists(),
+					"字段 %s 的 strip/keep 必须由账号覆写后的最终 beta 决定", path)
+			}
+		})
+	}
+}
+
 func TestGatewayService_AnthropicAPIKeyPassthrough_ForwardCountTokensPreservesBody(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 
@@ -1342,8 +1411,13 @@ func TestGatewayService_AnthropicAPIKeyPassthrough_ForwardDirect_UpstreamRequest
 	require.Nil(t, result)
 	require.Error(t, err)
 	require.True(t, GatewayUpstreamDispatchAttempted(c), "transport errors occur after a real dispatch attempt")
-	require.Contains(t, err.Error(), "upstream request failed")
-	require.Equal(t, http.StatusBadGateway, rec.Code)
+	var failoverErr *UpstreamFailoverError
+	require.ErrorAs(t, err, &failoverErr)
+	require.Equal(t, http.StatusBadGateway, failoverErr.StatusCode)
+	require.JSONEq(t, string(gatewayTransportFailoverBody), string(failoverErr.ResponseBody))
+	require.True(t, failoverErr.ShouldRetryNextAccount())
+	// 传输层错误交给 handler failover，service 不得写响应。
+	require.False(t, c.Writer.Written())
 }
 
 func TestGatewayService_AnthropicAPIKeyGenericForward_DispatchMarkerIsExact(t *testing.T) {

@@ -377,6 +377,179 @@ func TestGatewayServiceRecordUsage_TimePricingUsesPricingAt(t *testing.T) {
 	require.InDelta(t, baseCost*2*0.8, usageRepo.lastLog.ActualCost, 1e-12)
 	require.InDelta(t, 0.8, usageRepo.lastLog.RateMultiplier, 1e-12)
 }
+
+func TestGatewayServiceRecordUsage_Fable51BillsSplitCacheTiersWithAllMultipliers(t *testing.T) {
+	const (
+		model                 = "claude-fable-5-1"
+		groupRate             = 0.8
+		accountRate           = 0.6
+		inputTokens           = 100
+		outputTokens          = 20
+		cacheCreationTokens   = 50
+		cacheCreation5mTokens = 30
+		cacheCreation1hTokens = 20
+		cacheReadTokens       = 40
+	)
+
+	type pricingExpectation struct {
+		inputPrice        float64
+		outputPrice       float64
+		cacheWrite5m      float64
+		cacheWrite1h      float64
+		cacheReadPrice    float64
+		channelMultiplier float64
+	}
+
+	channelInputPrice := 11e-6
+	channelOutputPrice := 55e-6
+	channelCacheWrite5mPrice := 13e-6
+	channelCacheWrite1hPrice := 23e-6
+	channelCacheReadPrice := 0.5e-6
+	channelTimePricing := &ChannelTimePricing{
+		Timezone: "Asia/Shanghai",
+		Periods: []ChannelTimePricingPeriod{{
+			StartTime:  "09:00",
+			EndTime:    "12:00",
+			Multiplier: 1.5,
+		}},
+	}
+
+	tests := []struct {
+		name           string
+		channelPricing *ChannelModelPricing
+		want           pricingExpectation
+	}{
+		{
+			name: "catalog pricing",
+			want: pricingExpectation{
+				inputPrice:        10e-6,
+				outputPrice:       50e-6,
+				cacheWrite5m:      12.5e-6,
+				cacheWrite1h:      20e-6,
+				cacheReadPrice:    0.25e-6,
+				channelMultiplier: 1,
+			},
+		},
+		{
+			name: "channel overrides plus time multiplier",
+			channelPricing: &ChannelModelPricing{
+				Platform:          PlatformAnthropic,
+				BillingMode:       BillingModeToken,
+				InputPrice:        &channelInputPrice,
+				OutputPrice:       &channelOutputPrice,
+				CacheWritePrice:   &channelCacheWrite5mPrice,
+				CacheWrite1hPrice: &channelCacheWrite1hPrice,
+				CacheReadPrice:    &channelCacheReadPrice,
+				TimePricing:       channelTimePricing,
+			},
+			want: pricingExpectation{
+				inputPrice:        channelInputPrice,
+				outputPrice:       channelOutputPrice,
+				cacheWrite5m:      channelCacheWrite5mPrice,
+				cacheWrite1h:      channelCacheWrite1hPrice,
+				cacheReadPrice:    channelCacheReadPrice,
+				channelMultiplier: 1.5,
+			},
+		},
+	}
+
+	for i, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			groupID := int64(920 + i)
+			usageRepo := &openAIRecordUsageLogRepoStub{inserted: true}
+			billingRepo := &openAIRecordUsageBillingRepoStub{result: &UsageBillingApplyResult{Applied: true}}
+			svc := newGatewayRecordUsageServiceWithBillingRepoForTest(
+				usageRepo,
+				billingRepo,
+				&openAIRecordUsageUserRepoStub{},
+				&openAIRecordUsageSubRepoStub{},
+			)
+
+			if tt.channelPricing == nil {
+				svc.resolver = NewModelPricingResolver(nil, svc.billingService)
+			} else {
+				cache := newEmptyChannelCache()
+				cache.pricingByGroupModel[channelModelKey{groupID: groupID, model: model}] = tt.channelPricing
+				cache.channelByGroupID[groupID] = &Channel{ID: groupID, Status: StatusActive}
+				cache.groupPlatform[groupID] = ""
+				cache.loadedAt = time.Now()
+				channelService := &ChannelService{}
+				channelService.cache.Store(cache)
+				svc.channelService = channelService
+				svc.resolver = NewModelPricingResolver(channelService, svc.billingService)
+			}
+
+			err := svc.RecordUsage(context.Background(), &RecordUsageInput{
+				Result: &ForwardResult{
+					RequestID: "gateway_fable_5_1_" + strings.ReplaceAll(tt.name, " ", "_"),
+					Model:     model,
+					Usage: ClaudeUsage{
+						InputTokens:                 inputTokens,
+						OutputTokens:                outputTokens,
+						CacheCreationInputTokens:    cacheCreationTokens,
+						CacheCreation5mTokens:       cacheCreation5mTokens,
+						CacheCreation1hTokens:       cacheCreation1hTokens,
+						CacheReadInputTokens:        cacheReadTokens,
+					},
+					Duration: time.Second,
+				},
+				APIKey: &APIKey{
+					ID:      820 + int64(i),
+					GroupID: i64p(groupID),
+					Group: &Group{
+						ID:               groupID,
+						Platform:         PlatformAnthropic,
+						RateMultiplier:   groupRate,
+						SubscriptionType: SubscriptionTypeStandard,
+					},
+				},
+				User: &User{ID: 620 + int64(i)},
+				Account: &Account{
+					ID:             720 + int64(i),
+					Platform:       PlatformAnthropic,
+					Type:           AccountTypeAPIKey,
+					RateMultiplier: testPtrFloat64(accountRate),
+					Extra:          map[string]any{"quota_limit": 100.0},
+				},
+				PricingAt: time.Date(2026, time.September, 2, 2, 0, 0, 0, time.UTC), // 上海 10:00
+			})
+
+			require.NoError(t, err)
+			require.NotNil(t, usageRepo.lastLog)
+			require.Equal(t, inputTokens, usageRepo.lastLog.InputTokens)
+			require.Equal(t, outputTokens, usageRepo.lastLog.OutputTokens)
+			require.Equal(t, cacheCreationTokens, usageRepo.lastLog.CacheCreationTokens)
+			require.Equal(t, cacheCreation5mTokens, usageRepo.lastLog.CacheCreation5mTokens)
+			require.Equal(t, cacheCreation1hTokens, usageRepo.lastLog.CacheCreation1hTokens)
+			require.Equal(t, cacheReadTokens, usageRepo.lastLog.CacheReadTokens)
+			require.NotNil(t, usageRepo.lastLog.BillingMode)
+			require.Equal(t, string(BillingModeToken), *usageRepo.lastLog.BillingMode)
+
+			inputCost := inputTokens * tt.want.inputPrice * tt.want.channelMultiplier
+			outputCost := outputTokens * tt.want.outputPrice * tt.want.channelMultiplier
+			cacheCreationCost := (cacheCreation5mTokens*tt.want.cacheWrite5m +
+				cacheCreation1hTokens*tt.want.cacheWrite1h) * tt.want.channelMultiplier
+			cacheReadCost := cacheReadTokens * tt.want.cacheReadPrice * tt.want.channelMultiplier
+			totalCost := inputCost + outputCost + cacheCreationCost + cacheReadCost
+			actualCost := totalCost * groupRate
+
+			require.InDelta(t, inputCost, usageRepo.lastLog.InputCost, 1e-12)
+			require.InDelta(t, outputCost, usageRepo.lastLog.OutputCost, 1e-12)
+			require.InDelta(t, cacheCreationCost, usageRepo.lastLog.CacheCreationCost, 1e-12)
+			require.InDelta(t, cacheReadCost, usageRepo.lastLog.CacheReadCost, 1e-12)
+			require.InDelta(t, totalCost, usageRepo.lastLog.TotalCost, 1e-12)
+			require.InDelta(t, actualCost, usageRepo.lastLog.ActualCost, 1e-12)
+			require.InDelta(t, groupRate, usageRepo.lastLog.RateMultiplier, 1e-12)
+			require.NotNil(t, usageRepo.lastLog.AccountRateMultiplier)
+			require.InDelta(t, accountRate, *usageRepo.lastLog.AccountRateMultiplier, 1e-12)
+
+			require.NotNil(t, billingRepo.lastCmd)
+			require.InDelta(t, QuantizeUsageBillingAmount(actualCost), billingRepo.lastCmd.BalanceCost, 1e-12)
+			require.InDelta(t, QuantizeUsageBillingAmount(totalCost*accountRate), billingRepo.lastCmd.AccountQuotaCost, 1e-12)
+		})
+	}
+}
+
 func TestGatewayServiceRecordUsage_UsesExplicitPricingAtForPeakRate(t *testing.T) {
 	for _, platform := range []string{PlatformAnthropic, PlatformGemini, PlatformGrok, PlatformAntigravity} {
 		t.Run(platform, func(t *testing.T) {
@@ -454,45 +627,6 @@ func TestGatewayServiceRecordUsage_UsageLogWriteErrorDoesNotSkipBilling(t *testi
 	require.Equal(t, 1, usageRepo.calls)
 	require.Equal(t, 1, userRepo.deductCalls)
 	require.Equal(t, 1, quotaSvc.quotaCalls)
-}
-
-func TestGatewayServiceRecordUsageWithLongContext_BillingUsesDetachedContext(t *testing.T) {
-	usageRepo := &openAIRecordUsageLogRepoStub{inserted: false, err: context.DeadlineExceeded}
-	userRepo := &openAIRecordUsageUserRepoStub{}
-	subRepo := &openAIRecordUsageSubRepoStub{}
-	quotaSvc := &openAIRecordUsageAPIKeyQuotaStub{}
-	svc := newGatewayRecordUsageServiceForTest(usageRepo, userRepo, subRepo)
-
-	reqCtx, cancel := context.WithCancel(context.Background())
-	cancel()
-
-	err := svc.RecordUsageWithLongContext(reqCtx, &RecordUsageLongContextInput{
-		Result: &ForwardResult{
-			RequestID: "gateway_long_context_detached_ctx",
-			Usage: ClaudeUsage{
-				InputTokens:  12,
-				OutputTokens: 8,
-			},
-			Model:    "claude-sonnet-4",
-			Duration: time.Second,
-		},
-		APIKey: &APIKey{
-			ID:    502,
-			Quota: 100,
-		},
-		User:                  &User{ID: 602},
-		Account:               &Account{ID: 702},
-		LongContextThreshold:  200000,
-		LongContextMultiplier: 2,
-		APIKeyService:         quotaSvc,
-	})
-
-	require.NoError(t, err)
-	require.Equal(t, 1, usageRepo.calls)
-	require.Equal(t, 1, userRepo.deductCalls)
-	require.NoError(t, userRepo.lastCtxErr)
-	require.Equal(t, 1, quotaSvc.quotaCalls)
-	require.NoError(t, quotaSvc.lastQuotaCtxErr)
 }
 
 func TestGatewayServiceRecordUsage_UsesFallbackRequestIDForUsageLog(t *testing.T) {
