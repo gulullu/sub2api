@@ -286,6 +286,10 @@ export async function listGroups(): Promise<PromptAuditGroup[]> {
 
 export async function listRiskRouteAccounts(): Promise<PromptAuditAccount[]> {
   const accounts = new Map<number, PromptAuditAccount>()
+  const groupNames = new Map<number, string>()
+  for (const group of await listGroups()) {
+    groupNames.set(group.id, group.name)
+  }
   let page = 1
   let pageCount = 1
   let expectedTotal = 0
@@ -299,11 +303,7 @@ export async function listRiskRouteAccounts(): Promise<PromptAuditAccount[]> {
     expectedTotal = Math.max(expectedTotal, result.total)
     pageCount = Math.max(pageCount, result.pages || Math.ceil(result.total / accountPageSize))
     for (const account of result.items) {
-      const groupNames = new Map((account.groups ?? []).map((group) => [group.id, group.name]))
-      const groupIDs = new Set([
-        ...(account.group_ids ?? []),
-        ...(account.groups ?? []).map((group) => group.id),
-      ])
+      const groupIDs = new Set(account.group_ids ?? [])
       accounts.set(account.id, {
         id: account.id,
         name: account.name,
