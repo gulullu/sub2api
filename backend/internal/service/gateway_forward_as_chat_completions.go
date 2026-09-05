@@ -432,7 +432,6 @@ func (s *GatewayService) handleCCStreamingFromAnthropic(
 			UpstreamCompleted: sawTerminalEvent && !sawFailureEvent && !clientDisconnected,
 			Duration:          time.Since(startTime),
 			FirstTokenMs:      firstTokenMs,
-			FirstTokenMs:    firstTokenMs,
 		}
 	}
 
